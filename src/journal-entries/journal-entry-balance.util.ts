@@ -29,3 +29,8 @@ export function formatUnbalancedPostError(
 export function isJournalBalancePostRejection(message: string): boolean {
   return /unbalanced/i.test(message) && /post/i.test(message);
 }
+
+/** Entry materiality total for approval threshold — sum of debit lines. */
+export function computeEntryTotal(lines: JournalLine[]): number {
+  return sumAmount(lines, 'debit');
+}

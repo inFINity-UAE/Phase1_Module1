@@ -2,6 +2,7 @@ import { CreateJournalEntryDto } from './dto/create-journal-entry.dto';
 import { CreateOpeningBalanceDto } from './dto/create-opening-balance.dto';
 import { UpdateJournalLineDto } from './dto/update-journal-line.dto';
 import { AccountingPeriod } from '../accounting-periods/entities/accounting-period.entity';
+import { CompanySettings } from '../company-settings/entities/company-settings.entity';
 import { AccountTrialBalance } from './entities/account-trial-balance.entity';
 import { JournalEntryWithDetails } from './entities/journal-entry-with-details.entity';
 import { JournalAttachment } from './entities/journal-attachment.entity';
@@ -39,6 +40,10 @@ export interface JournalEntriesRepository {
     companyId: string,
     accountId: string,
   ): Promise<AccountTrialBalance | null>;
+  getCompanySettings(companyId: string): Promise<CompanySettings | null>;
+  submitForApproval(id: string): Promise<JournalEntry>;
+  approveAndPostEntry(id: string, approvedBy: string): Promise<JournalEntry>;
+  rejectEntry(id: string, rejectedBy: string, reason: string): Promise<JournalEntry>;
   postEntry(id: string): Promise<JournalEntry>;
   reverseEntry(originalId: string, createdBy: string): Promise<JournalEntryReversalResult>;
   updateLine(id: string, dto: UpdateJournalLineDto): Promise<JournalLine>;

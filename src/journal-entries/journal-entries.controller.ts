@@ -4,6 +4,11 @@ import { CreateJournalEntryDto } from './dto/create-journal-entry.dto';
 import { CreateOpeningBalanceDto } from './dto/create-opening-balance.dto';
 import { UpdateJournalEntryDto } from './dto/update-journal-entry.dto';
 import { ReverseJournalEntryDto } from './dto/reverse-journal-entry.dto';
+import {
+  ApproveJournalEntryDto,
+  PostJournalEntryDto,
+  RejectJournalEntryDto,
+} from './dto/journal-entry-approval.dto';
 
 @Controller('journal-entries')
 export class JournalEntriesController {
@@ -35,8 +40,24 @@ export class JournalEntriesController {
   }
 
   @Post(':id/post')
-  post(@Param('id', ParseUUIDPipe) id: string) {
-    return this.journalEntriesService.post(id);
+  post(@Param('id', ParseUUIDPipe) id: string, @Body() dto: PostJournalEntryDto) {
+    return this.journalEntriesService.post(id, dto);
+  }
+
+  @Post(':id/approve')
+  approve(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: ApproveJournalEntryDto,
+  ) {
+    return this.journalEntriesService.approve(id, dto);
+  }
+
+  @Post(':id/reject')
+  reject(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: RejectJournalEntryDto,
+  ) {
+    return this.journalEntriesService.reject(id, dto);
   }
 
   @Post(':id/reverse')

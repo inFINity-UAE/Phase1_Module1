@@ -182,6 +182,10 @@ describe('RecurringJournalTemplatesService', () => {
       deleteLine: jest.fn(),
       getTrialBalanceTotals: jest.fn(),
       insertGeneratedFromTemplate: jest.fn(),
+      getCompanySettings: jest.fn(),
+      submitForApproval: jest.fn(),
+      approveAndPostEntry: jest.fn(),
+      rejectEntry: jest.fn(),
     };
 
     const module: TestingModule = await Test.createTestingModule({

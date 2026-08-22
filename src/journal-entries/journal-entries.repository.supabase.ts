@@ -4,6 +4,7 @@ import { JournalEntryType } from '../common/enums/journal-entry-type.enum';
 import { JournalEntryStatus } from '../common/enums/journal-entry-status.enum';
 import { SupabaseService } from '../database/supabase.service';
 import { AccountingPeriod } from '../accounting-periods/entities/accounting-period.entity';
+import { CompanySettings } from '../company-settings/entities/company-settings.entity';
 import { CreateJournalEntryDto } from './dto/create-journal-entry.dto';
 import { CreateOpeningBalanceDto } from './dto/create-opening-balance.dto';
 import { UpdateJournalLineDto } from './dto/update-journal-line.dto';
@@ -360,6 +361,89 @@ export class SupabaseJournalEntriesRepository implements JournalEntriesRepositor
       total_credit: Number(data.total_credit),
       balance: Number(data.balance),
     };
+  }
+
+  async getCompanySettings(companyId: string): Promise<CompanySettings | null> {
+    const { data, error } = await this.supabase.client
+      .from('company_settings')
+      .select('*')
+      .eq('company_id', companyId)
+      .maybeSingle();
+
+    if (error) {
+      throw error;
+    }
+
+    return data as CompanySettings | null;
+  }
+
+  async submitForApproval(id: string): Promise<JournalEntry> {
+    const { data, error } = await this.supabase.client
+      .from('journal_entries')
+      .update({
+        status: JournalEntryStatus.PendingApproval,
+        requires_approval: true,
+      })
+      .eq('id', id)
+      .eq('status', JournalEntryStatus.Draft)
+      .select()
+      .single();
+
+    if (error) {
+      throw error;
+    }
+
+    return data as JournalEntry;
+  }
+
+  async approveAndPostEntry(id: string, approvedBy: string): Promise<JournalEntry> {
+    const now = new Date().toISOString();
+
+    const { data, error } = await this.supabase.client
+      .from('journal_entries')
+      .update({
+        status: JournalEntryStatus.Posted,
+        posted_at: now,
+        approved_by: approvedBy,
+        approved_at: now,
+      })
+      .eq('id', id)
+      .eq('status', JournalEntryStatus.PendingApproval)
+      .select()
+      .single();
+
+    if (error) {
+      throw error;
+    }
+
+    return data as JournalEntry;
+  }
+
+  async rejectEntry(
+    id: string,
+    rejectedBy: string,
+    reason: string,
+  ): Promise<JournalEntry> {
+    const now = new Date().toISOString();
+
+    const { data, error } = await this.supabase.client
+      .from('journal_entries')
+      .update({
+        status: JournalEntryStatus.Rejected,
+        rejected_by: rejectedBy,
+        rejected_at: now,
+        rejection_reason: reason,
+      })
+      .eq('id', id)
+      .eq('status', JournalEntryStatus.PendingApproval)
+      .select()
+      .single();
+
+    if (error) {
+      throw error;
+    }
+
+    return data as JournalEntry;
   }
 
   /**

@@ -1,6 +1,7 @@
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { PostgrestError } from '@supabase/supabase-js';
+import { CompanyRole } from '../common/enums/company-role.enum';
 import { JournalEntryType } from '../common/enums/journal-entry-type.enum';
 import { JournalEntryStatus } from '../common/enums/journal-entry-status.enum';
 import { PeriodStatus } from '../common/enums/period-status.enum';
@@ -24,6 +25,10 @@ const LINE_ID = '77777777-7777-7777-7777-777777777777';
 const NEXT_PERIOD_ID = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
 const REVERSAL_ENTRY_ID = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb';
 const FISCAL_YEAR = 2026;
+const OWNER_ID = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+
+const ownerActor = { actor_id: OWNER_ID, actor_role: CompanyRole.Owner };
+const accountantActor = { actor_id: USER_ID, actor_role: CompanyRole.Accountant };
 
 function pgError(code: string, message: string): PostgrestError {
   return { code, message, details: '', hint: '', name: 'PostgrestError' } as PostgrestError;
@@ -129,6 +134,10 @@ describe('JournalEntriesService', () => {
       insertOpeningBalanceDraft: jest.fn(),
       deleteEntry: jest.fn(),
       getAccountTrialBalance: jest.fn(),
+      getCompanySettings: jest.fn(),
+      submitForApproval: jest.fn(),
+      approveAndPostEntry: jest.fn(),
+      rejectEntry: jest.fn(),
       insertGeneratedFromTemplate: jest.fn(),
       postEntry: jest.fn(),
       reverseEntry: jest.fn(),
@@ -269,7 +278,7 @@ describe('JournalEntriesService', () => {
       .mockResolvedValueOnce(posted);
     repository.postEntry.mockResolvedValue(posted.entry);
 
-    const result = await service.post(ENTRY_ID);
+    const result = await service.post(ENTRY_ID, ownerActor);
 
     expect(repository.postEntry).toHaveBeenCalledWith(ENTRY_ID);
     expect(result.entry.status).toBe(JournalEntryStatus.Posted);
@@ -317,8 +326,8 @@ describe('JournalEntriesService', () => {
       unbalanced.lines,
     );
 
-    await expect(service.post(ENTRY_ID)).rejects.toThrow(BadRequestException);
-    await expect(service.post(ENTRY_ID)).rejects.toThrow(expectedMessage);
+    await expect(service.post(ENTRY_ID, ownerActor)).rejects.toThrow(BadRequestException);
+    await expect(service.post(ENTRY_ID, ownerActor)).rejects.toThrow(expectedMessage);
   });
 
   it('after posting, attempting to edit a line fails with a DB trigger error', async () => {
@@ -529,6 +538,256 @@ describe('JournalEntriesService', () => {
       /No open accounting period exists after 2026-01-31/,
     );
     expect(repository.reverseEntry).not.toHaveBeenCalled();
+  });
+
+  describe('approval workflow', () => {
+    const companySettings = (threshold: number | null) => ({
+      company_id: COMPANY_ID,
+      journal_approval_threshold: threshold,
+      approval_threshold_currency: 'AED',
+      default_period_length: 'monthly',
+      allow_period_reopen: true,
+      updated_at: '2026-08-22T00:00:00.000Z',
+    });
+
+    it('an entry below threshold posts directly without needing approval', async () => {
+      const draft = draftDetails();
+      const posted = draftDetails({
+        entry: {
+          ...draft.entry,
+          status: JournalEntryStatus.Posted,
+          posted_at: '2026-08-22T12:00:00.000Z',
+        },
+      });
+
+      repository.findByIdWithDetails
+        .mockResolvedValueOnce(draft)
+        .mockResolvedValueOnce(posted);
+      repository.getCompanySettings.mockResolvedValue(companySettings(5000));
+      repository.postEntry.mockResolvedValue(posted.entry);
+
+      const result = await service.post(ENTRY_ID, accountantActor);
+
+      expect(repository.submitForApproval).not.toHaveBeenCalled();
+      expect(repository.postEntry).toHaveBeenCalledWith(ENTRY_ID);
+      expect(result.entry.status).toBe(JournalEntryStatus.Posted);
+    });
+
+    it('an entry at/above threshold goes to pending_approval, not posted', async () => {
+      const draft = draftDetails();
+      const pending = draftDetails({
+        entry: {
+          ...draft.entry,
+          status: JournalEntryStatus.PendingApproval,
+          requires_approval: true,
+        },
+      });
+
+      repository.findByIdWithDetails
+        .mockResolvedValueOnce(draft)
+        .mockResolvedValueOnce(pending);
+      repository.getCompanySettings.mockResolvedValue(companySettings(100));
+      repository.submitForApproval.mockResolvedValue(pending.entry);
+
+      const result = await service.post(ENTRY_ID, accountantActor);
+
+      expect(repository.submitForApproval).toHaveBeenCalledWith(ENTRY_ID);
+      expect(repository.postEntry).not.toHaveBeenCalled();
+      expect(result.entry.status).toBe(JournalEntryStatus.PendingApproval);
+      expect(result.entry.posted_at).toBeNull();
+    });
+
+    it('a non-Owner attempting to approve is rejected', async () => {
+      const pending = draftDetails({
+        entry: {
+          ...draftDetails().entry,
+          status: JournalEntryStatus.PendingApproval,
+          requires_approval: true,
+        },
+      });
+
+      repository.findByIdWithDetails.mockResolvedValue(pending);
+
+      await expect(
+        service.approve(ENTRY_ID, accountantActor),
+      ).rejects.toThrow(ForbiddenException);
+      await expect(
+        service.approve(ENTRY_ID, accountantActor),
+      ).rejects.toThrow(/Only an Owner can approve/);
+      expect(repository.approveAndPostEntry).not.toHaveBeenCalled();
+    });
+
+    it('approval of a pending entry posts it and applies balance validation', async () => {
+      const pending = draftDetails({
+        entry: {
+          ...draftDetails().entry,
+          status: JournalEntryStatus.PendingApproval,
+          requires_approval: true,
+        },
+      });
+      const posted = draftDetails({
+        entry: {
+          ...pending.entry,
+          status: JournalEntryStatus.Posted,
+          posted_at: '2026-08-22T12:00:00.000Z',
+          approved_by: OWNER_ID,
+          approved_at: '2026-08-22T12:00:00.000Z',
+        },
+      });
+
+      repository.findByIdWithDetails
+        .mockResolvedValueOnce(pending)
+        .mockResolvedValueOnce(posted);
+      repository.approveAndPostEntry.mockResolvedValue(posted.entry);
+
+      const result = await service.approve(ENTRY_ID, ownerActor);
+
+      expect(repository.approveAndPostEntry).toHaveBeenCalledWith(ENTRY_ID, OWNER_ID);
+      expect(result.entry.status).toBe(JournalEntryStatus.Posted);
+      expect(result.entry.approved_by).toBe(OWNER_ID);
+    });
+
+    it('approval of an unbalanced pending entry fails balance validation', async () => {
+      const pending = draftDetails({
+        entry: {
+          ...draftDetails().entry,
+          status: JournalEntryStatus.PendingApproval,
+          requires_approval: true,
+        },
+        lines: [
+          {
+            id: LINE_ID,
+            journal_entry_id: ENTRY_ID,
+            line_number: 1,
+            account_id: ACCOUNT_A,
+            debit: 1000,
+            credit: 0,
+            description: null,
+            cost_center: null,
+            created_at: '2026-08-22T00:00:00.000Z',
+          },
+          {
+            id: '88888888-8888-8888-8888-888888888888',
+            journal_entry_id: ENTRY_ID,
+            line_number: 2,
+            account_id: ACCOUNT_B,
+            debit: 0,
+            credit: 500,
+            description: null,
+            cost_center: null,
+            created_at: '2026-08-22T00:00:00.000Z',
+          },
+        ],
+      });
+
+      repository.findByIdWithDetails.mockResolvedValue(pending);
+      repository.approveAndPostEntry.mockRejectedValue(
+        pgError(
+          'P0001',
+          'Journal entry 1 is unbalanced: debit 1000.00 <> credit 500.00 — posting rejected',
+        ),
+      );
+
+      const expectedMessage = formatUnbalancedPostError(
+        pending.entry.entry_number,
+        pending.lines,
+      );
+
+      await expect(service.approve(ENTRY_ID, ownerActor)).rejects.toThrow(
+        BadRequestException,
+      );
+      await expect(service.approve(ENTRY_ID, ownerActor)).rejects.toThrow(
+        expectedMessage,
+      );
+    });
+
+    it('rejection leaves the entry unposted with a reason recorded', async () => {
+      const pending = draftDetails({
+        entry: {
+          ...draftDetails().entry,
+          status: JournalEntryStatus.PendingApproval,
+          requires_approval: true,
+        },
+      });
+      const rejected = draftDetails({
+        entry: {
+          ...pending.entry,
+          status: JournalEntryStatus.Rejected,
+          rejected_by: OWNER_ID,
+          rejected_at: '2026-08-22T12:00:00.000Z',
+          rejection_reason: 'Incorrect accrual amount',
+        },
+      });
+
+      repository.findByIdWithDetails
+        .mockResolvedValueOnce(pending)
+        .mockResolvedValueOnce(rejected);
+      repository.rejectEntry.mockResolvedValue(rejected.entry);
+
+      const result = await service.reject(ENTRY_ID, {
+        ...ownerActor,
+        rejection_reason: 'Incorrect accrual amount',
+      });
+
+      expect(repository.rejectEntry).toHaveBeenCalledWith(
+        ENTRY_ID,
+        OWNER_ID,
+        'Incorrect accrual amount',
+      );
+      expect(repository.approveAndPostEntry).not.toHaveBeenCalled();
+      expect(result.entry.status).toBe(JournalEntryStatus.Rejected);
+      expect(result.entry.posted_at).toBeNull();
+      expect(result.entry.rejection_reason).toBe('Incorrect accrual amount');
+    });
+
+    it('Owner bypasses threshold and posts directly regardless of amount', async () => {
+      const draft = draftDetails({
+        lines: [
+          {
+            id: LINE_ID,
+            journal_entry_id: ENTRY_ID,
+            line_number: 1,
+            account_id: ACCOUNT_A,
+            debit: 10000,
+            credit: 0,
+            description: null,
+            cost_center: null,
+            created_at: '2026-08-22T00:00:00.000Z',
+          },
+          {
+            id: '88888888-8888-8888-8888-888888888888',
+            journal_entry_id: ENTRY_ID,
+            line_number: 2,
+            account_id: ACCOUNT_B,
+            debit: 0,
+            credit: 10000,
+            description: null,
+            cost_center: null,
+            created_at: '2026-08-22T00:00:00.000Z',
+          },
+        ],
+      });
+      const posted = draftDetails({
+        entry: {
+          ...draft.entry,
+          status: JournalEntryStatus.Posted,
+          posted_at: '2026-08-22T12:00:00.000Z',
+        },
+        lines: draft.lines,
+      });
+
+      repository.findByIdWithDetails
+        .mockResolvedValueOnce(draft)
+        .mockResolvedValueOnce(posted);
+      repository.postEntry.mockResolvedValue(posted.entry);
+
+      const result = await service.post(ENTRY_ID, ownerActor);
+
+      expect(repository.getCompanySettings).not.toHaveBeenCalled();
+      expect(repository.submitForApproval).not.toHaveBeenCalled();
+      expect(repository.postEntry).toHaveBeenCalledWith(ENTRY_ID);
+      expect(result.entry.status).toBe(JournalEntryStatus.Posted);
+    });
   });
 
   describe('opening balance', () => {

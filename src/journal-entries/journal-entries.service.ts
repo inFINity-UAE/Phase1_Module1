@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Inject,
   Injectable,
   InternalServerErrorException,
@@ -10,12 +11,18 @@ import {
   handleDatabaseError,
   isPostgrestError,
 } from '../common/errors/database-error.mapper';
+import { CompanyRole } from '../common/enums/company-role.enum';
 import { JournalEntryStatus } from '../common/enums/journal-entry-status.enum';
 import { JournalEntryType } from '../common/enums/journal-entry-type.enum';
 import { CreateJournalEntryDto } from './dto/create-journal-entry.dto';
 import { CreateOpeningBalanceDto } from './dto/create-opening-balance.dto';
 import { UpdateJournalEntryDto } from './dto/update-journal-entry.dto';
 import { ReverseJournalEntryDto } from './dto/reverse-journal-entry.dto';
+import {
+  ApproveJournalEntryDto,
+  PostJournalEntryDto,
+  RejectJournalEntryDto,
+} from './dto/journal-entry-approval.dto';
 import { CreateJournalLineDto } from './dto/create-journal-line.dto';
 import { UpdateJournalLineDto } from './dto/update-journal-line.dto';
 import { AccountTrialBalance } from './entities/account-trial-balance.entity';
@@ -24,6 +31,7 @@ import { JournalEntryReversalResult } from './entities/journal-entry-reversal-re
 import { JournalAttachment } from './entities/journal-attachment.entity';
 import { JournalLine } from './entities/journal-line.entity';
 import {
+  computeEntryTotal,
   formatUnbalancedPostError,
   isJournalBalancePostRejection,
 } from './journal-entry-balance.util';
@@ -142,9 +150,10 @@ export class JournalEntriesService {
 
   /**
    * Post a draft journal entry. [Rules §1.1] debits must equal credits.
-   * DB trigger enforce_journal_balance_on_post rejects imbalance at post time.
+   * [Rules §1.24] Entries at/above threshold require Owner approval unless poster is Owner.
+   * [Product decision 2026-08-21] Owner bypasses approval workflow on draft → post.
    */
-  async post(id: string): Promise<JournalEntryWithDetails> {
+  async post(id: string, dto: PostJournalEntryDto): Promise<JournalEntryWithDetails> {
     const existing = await this.findOne(id);
 
     if (existing.entry.status !== JournalEntryStatus.Draft) {
@@ -153,6 +162,93 @@ export class JournalEntriesService {
       );
     }
 
+    const isOwner = dto.actor_role === CompanyRole.Owner;
+
+    if (!isOwner) {
+      const settings = await this.journalEntriesRepository.getCompanySettings(
+        existing.entry.company_id,
+      );
+      const threshold = settings?.journal_approval_threshold;
+
+      if (threshold != null) {
+        const entryTotal = computeEntryTotal(existing.lines);
+
+        if (entryTotal >= Number(threshold)) {
+          try {
+            await this.journalEntriesRepository.submitForApproval(id);
+            return this.findOne(id);
+          } catch (error) {
+            handleDatabaseError(error);
+          }
+        }
+      }
+    }
+
+    return this.executeDirectPost(id, existing);
+  }
+
+  /**
+   * [feature-spec] Owner approves a pending entry — still subject to balance validation.
+   */
+  async approve(id: string, dto: ApproveJournalEntryDto): Promise<JournalEntryWithDetails> {
+    this.assertOwnerActor(dto.actor_role, 'approve');
+
+    const existing = await this.findOne(id);
+
+    if (existing.entry.status !== JournalEntryStatus.PendingApproval) {
+      throw new BadRequestException(
+        `Journal entry ${existing.entry.entry_number} is not pending approval`,
+      );
+    }
+
+    try {
+      const posted = await this.journalEntriesRepository.approveAndPostEntry(
+        id,
+        dto.actor_id,
+      );
+
+      if (!posted.posted_at) {
+        throw new InternalServerErrorException(
+          `Journal entry ${posted.entry_number} was approved but posted_at was not set`,
+        );
+      }
+
+      return this.findOne(id);
+    } catch (error) {
+      this.handlePostError(error, existing);
+    }
+  }
+
+  /**
+   * [feature-spec] Owner rejects a pending entry — entry remains unposted.
+   */
+  async reject(id: string, dto: RejectJournalEntryDto): Promise<JournalEntryWithDetails> {
+    this.assertOwnerActor(dto.actor_role, 'reject');
+
+    const existing = await this.findOne(id);
+
+    if (existing.entry.status !== JournalEntryStatus.PendingApproval) {
+      throw new BadRequestException(
+        `Journal entry ${existing.entry.entry_number} is not pending approval`,
+      );
+    }
+
+    try {
+      await this.journalEntriesRepository.rejectEntry(
+        id,
+        dto.actor_id,
+        dto.rejection_reason,
+      );
+      return this.findOne(id);
+    } catch (error) {
+      handleDatabaseError(error);
+    }
+  }
+
+  private async executeDirectPost(
+    id: string,
+    existing: JournalEntryWithDetails,
+  ): Promise<JournalEntryWithDetails> {
     try {
       const posted = await this.journalEntriesRepository.postEntry(id);
 
@@ -165,6 +261,14 @@ export class JournalEntriesService {
       return this.findOne(id);
     } catch (error) {
       this.handlePostError(error, existing);
+    }
+  }
+
+  private assertOwnerActor(role: CompanyRole, action: 'approve' | 'reject'): void {
+    if (role !== CompanyRole.Owner) {
+      throw new ForbiddenException(
+        `Only an Owner can ${action} journal entries pending approval`,
+      );
     }
   }
 
