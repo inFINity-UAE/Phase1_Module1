@@ -173,7 +173,6 @@ describe('RecurringJournalTemplatesService', () => {
       findEarliestOpenPeriod: jest.fn(),
       hasOpeningBalanceForFiscalYear: jest.fn(),
       hasYearEndClosingForFiscalYear: jest.fn(),
-      hasReversalForEntry: jest.fn().mockResolvedValue(false),
       findLatestPeriodForFiscalYear: jest.fn(),
       findRetainedEarningsAccount: jest.fn(),
       getProfitAndLossBalancesForFiscalYear: jest.fn(),

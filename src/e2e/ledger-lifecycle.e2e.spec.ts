@@ -112,6 +112,29 @@ const hasSupabase = Boolean(
       return count ?? 0;
     }
 
+    async function assertStatusChangeAudit(
+      recordId: string,
+      fromStatus: JournalEntryStatus,
+      toStatus: JournalEntryStatus,
+      step: string,
+    ): Promise<void> {
+      const audit = await auditLogService.find({
+        company_id: E2E_COMPANY_ID,
+        record_id: recordId,
+        table_name: 'journal_entries',
+      });
+
+      expect(audit.some((row) => row.action === AuditAction.Insert)).toBe(true);
+
+      const statusChange = audit.find((row) => row.action === AuditAction.StatusChange);
+      expect(statusChange).toBeDefined();
+      expect(statusChange?.old_data?.status).toBe(fromStatus);
+      expect(statusChange?.new_data?.status).toBe(toStatus);
+
+      // eslint-disable-next-line no-console
+      console.log(`[AUDIT OK] ${step}: ${fromStatus} → ${toStatus} status_change logged`);
+    }
+
     it('runs the full accounting engine lifecycle with trial balance integrity at every step', async () => {
       // Stage 1 — COA seed
       const accountCount = await countAccounts();
@@ -154,6 +177,12 @@ const hasSupabase = Boolean(
         actor_role: CompanyRole.Accountant,
       });
       expect(belowThresholdPosted.entry.status).toBe(JournalEntryStatus.Posted);
+      await assertStatusChangeAudit(
+        belowThresholdDraft.entry.id,
+        JournalEntryStatus.Draft,
+        JournalEntryStatus.Posted,
+        'Stage 5 — below-threshold post audit',
+      );
       await assertTrialBalanced('Stage 5 — below-threshold manual entry posted');
 
       // Stage 4/5/9 — Manual entry above approval threshold
@@ -213,6 +242,27 @@ const hasSupabase = Boolean(
       expect(reversal.reversal.entry.entry_type).toBe(JournalEntryType.Reversal);
       expect(reversal.reversal.entry.status).toBe(JournalEntryStatus.Posted);
       expect(reversal.reversal.entry.reverses_entry_id).toBe(belowThresholdDraft.entry.id);
+
+      const originalAfterReversal = await journalEntriesService.findOne(
+        belowThresholdDraft.entry.id,
+      );
+      expect(originalAfterReversal.entry.status).toBe(JournalEntryStatus.Reversed);
+      expect(originalAfterReversal.entry.reversed_by_entry_id).toBe(reversal.reversal.entry.id);
+
+      const originalReversalAudit = await auditLogService.find({
+        company_id: E2E_COMPANY_ID,
+        record_id: belowThresholdDraft.entry.id,
+        table_name: 'journal_entries',
+      });
+      const reversalAuditRow = originalReversalAudit.find(
+        (row) => row.action === AuditAction.Reversal,
+      );
+      expect(reversalAuditRow).toBeDefined();
+      expect(reversalAuditRow?.old_data?.status).toBe(JournalEntryStatus.Posted);
+      expect(reversalAuditRow?.new_data?.status).toBe(JournalEntryStatus.Reversed);
+      // eslint-disable-next-line no-console
+      console.log('[AUDIT OK] Stage 6 — reversal row logged on original entry');
+
       await assertTrialBalanced('Stage 6 — reversal posted in next open period');
 
       await expect(
@@ -286,6 +336,12 @@ const hasSupabase = Boolean(
       await assertTrialBalanced('Stage 10 — soft-closed override post succeeded');
 
       // Stage 11 — Year-end closing
+      const plBeforeClose = await journalRepository.getProfitAndLossBalancesForFiscalYear(
+        E2E_COMPANY_ID,
+        fiscalYear,
+      );
+      expect(plBeforeClose.length).toBeGreaterThan(0);
+
       const yearEndClose = await journalEntriesService.runYearEndClosing({
         company_id: E2E_COMPANY_ID,
         fiscal_year: fiscalYear,
@@ -296,16 +352,15 @@ const hasSupabase = Boolean(
       expect(yearEndClose.entry.entry_type).toBe(JournalEntryType.YearEndClosing);
       expect(yearEndClose.entry.status).toBe(JournalEntryStatus.Posted);
 
-      const incomeBalance = await journalRepository.getAccountTrialBalance(
+      const plAfterClose = await journalRepository.getProfitAndLossBalancesForFiscalYear(
         E2E_COMPANY_ID,
-        incomeAccountId,
+        fiscalYear,
       );
-      const expenseBalance = await journalRepository.getAccountTrialBalance(
-        E2E_COMPANY_ID,
-        expenseAccountId,
-      );
-      expect(incomeBalance?.balance ?? 0).toBeCloseTo(0, 2);
-      expect(expenseBalance?.balance ?? 0).toBeCloseTo(0, 2);
+      expect(plAfterClose).toHaveLength(0);
+
+      const closingDebits = yearEndClose.lines.reduce((sum, line) => sum + Number(line.debit), 0);
+      const closingCredits = yearEndClose.lines.reduce((sum, line) => sum + Number(line.credit), 0);
+      expect(closingDebits).toBeCloseTo(closingCredits, 2);
       await assertTrialBalanced('Stage 11 — year-end closing posted');
 
       // Stage 12 — Audit trail covers the lifecycle
@@ -322,6 +377,8 @@ const hasSupabase = Boolean(
         table_name: 'journal_entries',
       });
       expect(belowAudit.some((row) => row.action === AuditAction.Insert)).toBe(true);
+      expect(belowAudit.some((row) => row.action === AuditAction.StatusChange)).toBe(true);
+      expect(belowAudit.some((row) => row.action === AuditAction.Reversal)).toBe(true);
 
       const reversalAudit = await auditLogService.find({
         company_id: E2E_COMPANY_ID,

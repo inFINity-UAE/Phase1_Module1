@@ -20,7 +20,6 @@ import { AccountTrialBalance } from './entities/account-trial-balance.entity';
 import { TrialBalanceTotals } from './entities/trial-balance-totals.entity';
 import { ProfitAndLossAccountBalance } from './entities/profit-and-loss-account-balance.entity';
 import { computeAccountBalance, YearEndClosingLineInput } from './year-end-closing.util';
-import { assertBalancedLines } from './journal-entry-balance.util';
 import {
   InsertGeneratedJournalEntryParams,
   JournalEntriesRepository,
@@ -622,125 +621,46 @@ export class SupabaseJournalEntriesRepository implements JournalEntriesRepositor
     return data as CompanySettings | null;
   }
 
-  async hasReversalForEntry(entryId: string): Promise<boolean> {
+  async submitForApproval(id: string): Promise<JournalEntry> {
     const { data, error } = await this.supabase.client
       .from('journal_entries')
-      .select('id')
-      .eq('reverses_entry_id', entryId)
-      .eq('status', JournalEntryStatus.Posted)
-      .limit(1);
+      .update({
+        status: JournalEntryStatus.PendingApproval,
+        requires_approval: true,
+      })
+      .eq('id', id)
+      .eq('status', JournalEntryStatus.Draft)
+      .select()
+      .single();
 
     if (error) {
       throw error;
     }
 
-    return (data?.length ?? 0) > 0;
-  }
-
-  /**
-   * Replace a non-posted journal entry without PATCH — works around journal_entries
-   * audit trigger cast bug (42804) on UPDATE while preserving record_id for audit_log.
-   */
-  private async replaceJournalEntry(
-    id: string,
-    allowedStatuses: JournalEntryStatus[],
-    patch: Partial<JournalEntry>,
-  ): Promise<JournalEntry> {
-    const details = await this.findByIdWithDetails(id);
-    if (!details) {
-      throw new Error(`Journal entry ${id} not found`);
-    }
-
-    if (!allowedStatuses.includes(details.entry.status)) {
-      throw new Error(
-        `Journal entry ${details.entry.entry_number} is ${details.entry.status} and cannot transition`,
-      );
-    }
-
-    if (patch.status === JournalEntryStatus.Posted) {
-      assertBalancedLines(details.lines);
-    }
-
-    const merged: JournalEntry = {
-      ...details.entry,
-      ...patch,
-    };
-
-    await this.deleteEntry(id);
-
-    const { data: entry, error: entryError } = await this.supabase.client
-      .from('journal_entries')
-      .insert({
-        id: merged.id,
-        company_id: merged.company_id,
-        entry_number: merged.entry_number,
-        period_id: merged.period_id,
-        entry_date: merged.entry_date,
-        entry_type: merged.entry_type,
-        status: merged.status,
-        narration: merged.narration,
-        reference_number: merged.reference_number,
-        reverses_entry_id: merged.reverses_entry_id,
-        reversed_by_entry_id: merged.reversed_by_entry_id,
-        recurring_template_id: merged.recurring_template_id,
-        requires_approval: merged.requires_approval,
-        approved_by: merged.approved_by,
-        approved_at: merged.approved_at,
-        rejected_by: merged.rejected_by,
-        rejected_at: merged.rejected_at,
-        rejection_reason: merged.rejection_reason,
-        created_by: merged.created_by,
-        posted_at: merged.posted_at,
-      })
-      .select()
-      .single();
-
-    if (entryError) {
-      throw entryError;
-    }
-
-    try {
-      const lineRows = details.lines.map((line) => ({
-        journal_entry_id: merged.id,
-        line_number: line.line_number,
-        account_id: line.account_id,
-        debit: line.debit,
-        credit: line.credit,
-        description: line.description,
-        cost_center: line.cost_center,
-      }));
-
-      const { error: linesError } = await this.supabase.client
-        .from('journal_lines')
-        .insert(lineRows);
-
-      if (linesError) {
-        throw linesError;
-      }
-
-      return entry as JournalEntry;
-    } catch (error) {
-      await this.deleteEntry(merged.id);
-      throw error;
-    }
-  }
-
-  async submitForApproval(id: string): Promise<JournalEntry> {
-    return this.replaceJournalEntry(id, [JournalEntryStatus.Draft], {
-      status: JournalEntryStatus.PendingApproval,
-      requires_approval: true,
-    });
+    return data as JournalEntry;
   }
 
   async approveAndPostEntry(id: string, approvedBy: string): Promise<JournalEntry> {
     const now = new Date().toISOString();
 
-    return this.replaceJournalEntry(id, [JournalEntryStatus.PendingApproval], {
-      status: JournalEntryStatus.Posted,
-      posted_at: now,
-      approved_by: approvedBy,
-      approved_at: now,
-    });
+    const { data, error } = await this.supabase.client
+      .from('journal_entries')
+      .update({
+        status: JournalEntryStatus.Posted,
+        posted_at: now,
+        approved_by: approvedBy,
+        approved_at: now,
+      })
+      .eq('id', id)
+      .eq('status', JournalEntryStatus.PendingApproval)
+      .select()
+      .single();
+
+    if (error) {
+      throw error;
+    }
+
+    return data as JournalEntry;
   }
 
   async rejectEntry(
@@ -750,23 +670,49 @@ export class SupabaseJournalEntriesRepository implements JournalEntriesRepositor
   ): Promise<JournalEntry> {
     const now = new Date().toISOString();
 
-    return this.replaceJournalEntry(id, [JournalEntryStatus.PendingApproval], {
-      status: JournalEntryStatus.Rejected,
-      rejected_by: rejectedBy,
-      rejected_at: now,
-      rejection_reason: reason,
-    });
+    const { data, error } = await this.supabase.client
+      .from('journal_entries')
+      .update({
+        status: JournalEntryStatus.Rejected,
+        rejected_by: rejectedBy,
+        rejected_at: now,
+        rejection_reason: reason,
+      })
+      .eq('id', id)
+      .eq('status', JournalEntryStatus.PendingApproval)
+      .select()
+      .single();
+
+    if (error) {
+      throw error;
+    }
+
+    return data as JournalEntry;
   }
 
   /**
-   * Transition draft → posted. Balance enforced in application layer [Rules §1.1].
-   * Uses delete+reinsert to avoid journal_entries audit UPDATE trigger (42804).
+   * Transition draft → posted. Balance enforced by enforce_journal_balance_on_post.
+   * posted_at set by application layer on successful transition.
    */
   async postEntry(id: string): Promise<JournalEntry> {
-    return this.replaceJournalEntry(id, [JournalEntryStatus.Draft], {
-      status: JournalEntryStatus.Posted,
-      posted_at: new Date().toISOString(),
-    });
+    const postedAt = new Date().toISOString();
+
+    const { data, error } = await this.supabase.client
+      .from('journal_entries')
+      .update({
+        status: JournalEntryStatus.Posted,
+        posted_at: postedAt,
+      })
+      .eq('id', id)
+      .eq('status', JournalEntryStatus.Draft)
+      .select()
+      .single();
+
+    if (error) {
+      throw error;
+    }
+
+    return data as JournalEntry;
   }
 
   /**
@@ -843,15 +789,25 @@ export class SupabaseJournalEntriesRepository implements JournalEntriesRepositor
         throw linesError;
       }
 
-      // Posted originals cannot be PATCHed while audit UPDATE trigger is broken (42804).
-      // Reversal linkage is tracked on the reversal entry's reverses_entry_id.
+      const { data: updatedOriginal, error: updateError } = await this.supabase.client
+        .from('journal_entries')
+        .update({
+          status: JournalEntryStatus.Reversed,
+          reversed_by_entry_id: reversalRow.id,
+        })
+        .eq('id', originalId)
+        .eq('status', JournalEntryStatus.Posted)
+        .is('reversed_by_entry_id', null)
+        .select()
+        .single();
+
+      if (updateError) {
+        throw updateError;
+      }
+
       return {
         original: {
-          entry: {
-            ...originalDetails.entry,
-            status: JournalEntryStatus.Reversed,
-            reversed_by_entry_id: reversalRow.id,
-          },
+          entry: updatedOriginal as JournalEntry,
           lines: originalDetails.lines,
           attachments: originalDetails.attachments,
         },
