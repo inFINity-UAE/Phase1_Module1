@@ -177,7 +177,7 @@ describe('RecurringJournalTemplatesService', () => {
       findRetainedEarningsAccount: jest.fn(),
       getProfitAndLossBalancesForFiscalYear: jest.fn(),
       insertOpeningBalanceDraft: jest.fn(),
-      insertYearEndClosingPosted: jest.fn(),
+      insertYearEndClosingDraft: jest.fn(),
       deleteEntry: jest.fn(),
       getAccountTrialBalance: jest.fn(),
       findNextOpenPeriod: jest.fn(),

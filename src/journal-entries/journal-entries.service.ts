@@ -41,7 +41,7 @@ import {
   formatUnbalancedPostError,
   isJournalBalancePostRejection,
 } from './journal-entry-balance.util';
-import { buildYearEndClosingLines, YearEndClosingLineInput } from './year-end-closing.util';
+import * as yearEndClosingUtil from './year-end-closing.util';
 import {
   JOURNAL_ENTRIES_REPOSITORY,
   JournalEntriesRepository,
@@ -193,7 +193,7 @@ export class JournalEntriesService {
       );
     }
 
-    const lines = buildYearEndClosingLines(plBalances, retainedEarnings.id);
+    const lines = yearEndClosingUtil.buildYearEndClosingLines(plBalances, retainedEarnings.id);
     if (!lines.length) {
       throw new BadRequestException(
         `No closing lines could be generated for fiscal year ${dto.fiscal_year}`,
@@ -202,36 +202,42 @@ export class JournalEntriesService {
 
     const entryDate = dto.entry_date ?? closingPeriod.period_end;
 
-    this.assertYearEndClosingLinesBalanced(lines);
+    let draft: JournalEntryWithDetails | undefined;
 
     try {
-      const posted = await this.journalEntriesRepository.insertYearEndClosingPosted(
+      draft = await this.journalEntriesRepository.insertYearEndClosingDraft(
         dto,
         closingPeriod.id,
         entryDate,
         lines,
       );
 
-      if (!posted.entry.posted_at) {
+      const posted = await this.journalEntriesRepository.postEntry(draft.entry.id);
+
+      if (!posted.posted_at) {
         throw new InternalServerErrorException(
-          `Year-end closing entry ${posted.entry.entry_number} was posted but posted_at was not set`,
+          `Year-end closing entry ${posted.entry_number} was posted but posted_at was not set`,
         );
       }
 
-      return posted;
+      return this.findOne(draft.entry.id);
     } catch (error) {
+      if (draft) {
+        await this.journalEntriesRepository.deleteEntry(draft.entry.id);
+      }
+
+      if (
+        draft &&
+        isPostgrestError(error) &&
+        error.code === 'P0001' &&
+        isJournalBalancePostRejection(error.message)
+      ) {
+        throw new BadRequestException(
+          formatUnbalancedPostError(draft.entry.entry_number, draft.lines),
+        );
+      }
+
       handleDatabaseError(error);
-    }
-  }
-
-  private assertYearEndClosingLinesBalanced(lines: YearEndClosingLineInput[]): void {
-    const totalDebit = lines.reduce((sum, line) => sum + (line.debit ?? 0), 0);
-    const totalCredit = lines.reduce((sum, line) => sum + (line.credit ?? 0), 0);
-
-    if (Math.round(totalDebit * 100) !== Math.round(totalCredit * 100)) {
-      throw new InternalServerErrorException(
-        `Year-end closing lines are unbalanced: debits ${totalDebit.toFixed(2)} vs credits ${totalCredit.toFixed(2)}`,
-      );
     }
   }
 

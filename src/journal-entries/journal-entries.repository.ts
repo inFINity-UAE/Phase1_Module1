@@ -51,7 +51,7 @@ export interface JournalEntriesRepository {
     dto: CreateOpeningBalanceDto,
     periodId: string,
   ): Promise<JournalEntryWithDetails>;
-  insertYearEndClosingPosted(
+  insertYearEndClosingDraft(
     dto: CreateYearEndClosingDto,
     periodId: string,
     entryDate: string,

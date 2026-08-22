@@ -502,14 +502,13 @@ export class SupabaseJournalEntriesRepository implements JournalEntriesRepositor
     }
   }
 
-  async insertYearEndClosingPosted(
+  async insertYearEndClosingDraft(
     dto: CreateYearEndClosingDto,
     periodId: string,
     entryDate: string,
     lines: YearEndClosingLineInput[],
   ): Promise<JournalEntryWithDetails> {
     const entryNumber = await this.getNextEntryNumber(dto.company_id);
-    const postedAt = new Date().toISOString();
     const narration =
       dto.narration?.trim() ||
       `Year-end closing for fiscal year ${dto.fiscal_year}`;
@@ -522,10 +521,9 @@ export class SupabaseJournalEntriesRepository implements JournalEntriesRepositor
         period_id: periodId,
         entry_date: entryDate,
         entry_type: JournalEntryType.YearEndClosing,
-        status: JournalEntryStatus.Posted,
+        status: JournalEntryStatus.Draft,
         narration,
         created_by: dto.created_by,
-        posted_at: postedAt,
       })
       .select()
       .single();

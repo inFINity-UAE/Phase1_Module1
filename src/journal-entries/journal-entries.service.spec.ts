@@ -176,7 +176,7 @@ describe('JournalEntriesService', () => {
       findRetainedEarningsAccount: jest.fn(),
       getProfitAndLossBalancesForFiscalYear: jest.fn(),
       insertOpeningBalanceDraft: jest.fn(),
-      insertYearEndClosingPosted: jest.fn(),
+      insertYearEndClosingDraft: jest.fn(),
       deleteEntry: jest.fn(),
       getAccountTrialBalance: jest.fn(),
       getCompanySettings: jest.fn(),
@@ -1241,7 +1241,9 @@ describe('JournalEntriesService', () => {
         id: RETAINED_EARNINGS_ID,
       });
       repository.getProfitAndLossBalancesForFiscalYear.mockResolvedValue(plBalances);
-      repository.insertYearEndClosingPosted.mockResolvedValue(posted);
+      repository.insertYearEndClosingDraft.mockResolvedValue(draft);
+      repository.postEntry.mockResolvedValue(posted.entry);
+      repository.findByIdWithDetails.mockResolvedValue(posted);
 
       const result = await service.runYearEndClosing(yearEndDto);
 
@@ -1249,7 +1251,7 @@ describe('JournalEntriesService', () => {
         COMPANY_ID,
         FISCAL_YEAR,
       );
-      expect(repository.insertYearEndClosingPosted).toHaveBeenCalledWith(
+      expect(repository.insertYearEndClosingDraft).toHaveBeenCalledWith(
         yearEndDto,
         PERIOD_ID,
         '2026-02-28',
@@ -1271,9 +1273,9 @@ describe('JournalEntriesService', () => {
           }),
         ]),
       );
+      expect(repository.postEntry).toHaveBeenCalledWith(ENTRY_ID);
       expect(result.entry.entry_type).toBe(JournalEntryType.YearEndClosing);
       expect(result.entry.status).toBe(JournalEntryStatus.Posted);
-      expect(repository.postEntry).not.toHaveBeenCalled();
       const totalDebit = result.lines.reduce((sum, line) => sum + line.debit, 0);
       const totalCredit = result.lines.reduce((sum, line) => sum + line.credit, 0);
       expect(totalDebit).toBe(totalCredit);
@@ -1288,7 +1290,7 @@ describe('JournalEntriesService', () => {
       await expect(service.runYearEndClosing(yearEndDto)).rejects.toThrow(
         `A year-end closing entry already exists for fiscal year ${FISCAL_YEAR}`,
       );
-      expect(repository.insertYearEndClosingPosted).not.toHaveBeenCalled();
+      expect(repository.insertYearEndClosingDraft).not.toHaveBeenCalled();
       expect(repository.postEntry).not.toHaveBeenCalled();
     });
   });

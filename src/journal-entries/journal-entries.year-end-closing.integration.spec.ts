@@ -3,10 +3,10 @@ import { resolve } from 'path';
 
 config({ path: resolve(__dirname, '../../.env.local') });
 
-import { BadRequestException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { JournalEntryStatus } from '../common/enums/journal-entry-status.enum';
 import { JournalEntryType } from '../common/enums/journal-entry-type.enum';
+import { PeriodStatus } from '../common/enums/period-status.enum';
 import { DatabaseModule } from '../database/database.module';
 import { AccountingPeriodsModule } from '../accounting-periods/accounting-periods.module';
 import { SupabaseService } from '../database/supabase.service';
@@ -14,6 +14,7 @@ import { JOURNAL_ENTRIES_REPOSITORY } from './journal-entries.repository';
 import { SupabaseJournalEntriesRepository } from './journal-entries.repository.supabase';
 import { JournalEntriesService } from './journal-entries.service';
 import { CreateYearEndClosingDto } from './dto/create-year-end-closing.dto';
+import * as yearEndClosingUtil from './year-end-closing.util';
 
 const hasSupabase = Boolean(
   process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.SUPABASE_SECRET_KEY,
@@ -22,6 +23,20 @@ const hasSupabase = Boolean(
 const COMPANY_ID = '00000000-0000-0000-0000-000000000001';
 const USER_ID = '00000000-0000-0000-0000-000000000002';
 const FISCAL_YEAR = 2026;
+
+async function resolveImbalanceProbeFiscalYear(
+  repository: SupabaseJournalEntriesRepository,
+  companyId: string,
+): Promise<number> {
+  for (let year = 2027; year <= 2035; year += 1) {
+    const hasClosing = await repository.hasYearEndClosingForFiscalYear(companyId, year);
+    if (!hasClosing) {
+      return year;
+    }
+  }
+
+  throw new Error(`No unused fiscal year found for imbalance probe on company ${companyId}`);
+}
 
 (hasSupabase ? describe : describe.skip)(
   'JournalEntriesService year-end closing (Supabase integration)',
@@ -101,13 +116,53 @@ const FISCAL_YEAR = 2026;
     });
 
     async function nextEntryNumber(): Promise<number> {
-      return (await repository.getNextEntryNumber(COMPANY_ID)) + createdEntryIds.length;
+      return repository.getNextEntryNumber(COMPANY_ID);
+    }
+
+    async function ensureDecemberPeriod(fiscalYear: number): Promise<string> {
+      const periodStart = `${fiscalYear}-12-01`;
+      const periodEnd = `${fiscalYear}-12-31`;
+
+      const { data: existing, error: existingError } = await supabase.client
+        .from('accounting_periods')
+        .select('id')
+        .eq('company_id', COMPANY_ID)
+        .eq('period_start', periodStart)
+        .maybeSingle();
+
+      if (existingError) {
+        throw existingError;
+      }
+
+      if (existing) {
+        return existing.id as string;
+      }
+
+      const { data: inserted, error: insertError } = await supabase.client
+        .from('accounting_periods')
+        .insert({
+          company_id: COMPANY_ID,
+          period_start: periodStart,
+          period_end: periodEnd,
+          fiscal_year: fiscalYear,
+          status: PeriodStatus.Open,
+        })
+        .select('id')
+        .single();
+
+      if (insertError || !inserted) {
+        throw insertError ?? new Error(`Failed to create period ${periodStart}`);
+      }
+
+      return inserted.id as string;
     }
 
     async function insertPostedPlEntry(
+      periodId: string,
       incomeAmount: number,
       expenseAmount: number,
       narration: string,
+      entryDate: string,
     ): Promise<string> {
       const entryNumber = await nextEntryNumber();
       const postedAt = new Date().toISOString();
@@ -117,8 +172,8 @@ const FISCAL_YEAR = 2026;
         .insert({
           company_id: COMPANY_ID,
           entry_number: entryNumber,
-          period_id: closingPeriodId,
-          entry_date: '2026-02-15',
+          period_id: periodId,
+          entry_date: entryDate,
           entry_type: JournalEntryType.Manual,
           status: JournalEntryStatus.Posted,
           narration,
@@ -176,23 +231,99 @@ const FISCAL_YEAR = 2026;
         if (yearEndAlreadyClosed) {
           return;
         }
-      const incomeBefore = await getAccountBalance(incomeAccountId);
-      const expenseBefore = await getAccountBalance(expenseAccountId);
-      const cashBefore = await getAccountBalance(cashAccountId);
-      const reBefore = await getAccountBalance(retainedEarningsId);
+        const incomeBefore = await getAccountBalance(incomeAccountId);
+        const expenseBefore = await getAccountBalance(expenseAccountId);
+        const cashBefore = await getAccountBalance(cashAccountId);
+        const reBefore = await getAccountBalance(retainedEarningsId);
 
-      await insertPostedPlEntry(1000, 600, 'Integration P&L activity for year-end close');
+        await insertPostedPlEntry(
+          closingPeriodId,
+          1000,
+          600,
+          'Integration P&L activity for year-end close',
+          '2026-02-15',
+        );
 
-      const incomeAfterPl = await getAccountBalance(incomeAccountId);
-      const expenseAfterPl = await getAccountBalance(expenseAccountId);
-      expect(incomeAfterPl).toBe(incomeBefore + 1000);
-      expect(expenseAfterPl).toBe(expenseBefore + 600);
+        const incomeAfterPl = await getAccountBalance(incomeAccountId);
+        const expenseAfterPl = await getAccountBalance(expenseAccountId);
+        expect(incomeAfterPl).toBe(incomeBefore + 1000);
+        expect(expenseAfterPl).toBe(expenseBefore + 600);
+
+        const dto: CreateYearEndClosingDto = {
+          company_id: COMPANY_ID,
+          fiscal_year: FISCAL_YEAR,
+          created_by: USER_ID,
+        };
+
+        const result = await service.runYearEndClosing(dto);
+        createdEntryIds.push(result.entry.id);
+        yearEndAlreadyClosed = true;
+
+        expect(result.entry.entry_type).toBe(JournalEntryType.YearEndClosing);
+        expect(result.entry.status).toBe(JournalEntryStatus.Posted);
+        expect(result.entry.posted_at).toBeTruthy();
+
+        const totalDebit = result.lines.reduce((sum, line) => sum + Number(line.debit), 0);
+        const totalCredit = result.lines.reduce((sum, line) => sum + Number(line.credit), 0);
+        expect(totalDebit).toBeCloseTo(totalCredit, 2);
+
+        expect(await getAccountBalance(incomeAccountId)).toBeCloseTo(0, 2);
+        expect(await getAccountBalance(expenseAccountId)).toBeCloseTo(0, 2);
+        expect(await getAccountBalance(cashAccountId)).toBeCloseTo(cashBefore + 400, 2);
+        expect(await getAccountBalance(retainedEarningsId)).toBeCloseTo(reBefore + 400, 2);
+      },
+    );
+
+    it(
+      'rejects UPDATE-to-posted when closing lines are deliberately imbalanced, then posts cleanly after revert',
+      async () => {
+      const imbalanceProbeFiscalYear = await resolveImbalanceProbeFiscalYear(
+        repository,
+        COMPANY_ID,
+      );
+
+      const probePeriodId = await ensureDecemberPeriod(imbalanceProbeFiscalYear);
+      await insertPostedPlEntry(
+        probePeriodId,
+        800,
+        500,
+        'Integration P&L for year-end imbalance probe',
+        `${imbalanceProbeFiscalYear}-12-15`,
+      );
 
       const dto: CreateYearEndClosingDto = {
         company_id: COMPANY_ID,
-        fiscal_year: FISCAL_YEAR,
+        fiscal_year: imbalanceProbeFiscalYear,
         created_by: USER_ID,
       };
+
+      const originalBuild = yearEndClosingUtil.buildYearEndClosingLines;
+      const buildSpy = jest
+        .spyOn(yearEndClosingUtil, 'buildYearEndClosingLines')
+        .mockImplementationOnce((plBalances, retainedEarningsAccountId) => {
+          const built = originalBuild(plBalances, retainedEarningsAccountId);
+          const retainedEarningsLine = built.find(
+            (line) => line.account_id === retainedEarningsAccountId,
+          );
+          if (retainedEarningsLine) {
+            if (retainedEarningsLine.credit) {
+              retainedEarningsLine.credit += 1;
+            } else {
+              retainedEarningsLine.debit = (retainedEarningsLine.debit ?? 0) + 1;
+            }
+          }
+          return built;
+        });
+
+      await expect(service.runYearEndClosing(dto)).rejects.toThrow(
+        /Cannot post journal entry .* total debits .* must equal total credits/i,
+      );
+
+      buildSpy.mockRestore();
+
+      expect(
+        await repository.hasYearEndClosingForFiscalYear(COMPANY_ID, imbalanceProbeFiscalYear),
+      ).toBe(false);
 
       const result = await service.runYearEndClosing(dto);
       createdEntryIds.push(result.entry.id);
@@ -200,19 +331,21 @@ const FISCAL_YEAR = 2026;
       expect(result.entry.entry_type).toBe(JournalEntryType.YearEndClosing);
       expect(result.entry.status).toBe(JournalEntryStatus.Posted);
 
-      const totalDebit = result.lines.reduce((sum, line) => sum + Number(line.debit), 0);
-      const totalCredit = result.lines.reduce((sum, line) => sum + Number(line.credit), 0);
-      expect(totalDebit).toBeCloseTo(totalCredit, 2);
-
-      expect(await getAccountBalance(incomeAccountId)).toBeCloseTo(0, 2);
-      expect(await getAccountBalance(expenseAccountId)).toBeCloseTo(0, 2);
-      expect(await getAccountBalance(cashAccountId)).toBeCloseTo(cashBefore + 400, 2);
-      expect(await getAccountBalance(retainedEarningsId)).toBeCloseTo(reBefore + 400, 2);
+      const plAfterClose = await repository.getProfitAndLossBalancesForFiscalYear(
+        COMPANY_ID,
+        imbalanceProbeFiscalYear,
+      );
+      expect(plAfterClose).toHaveLength(0);
       },
+      30000,
     );
 
     it('attempting year-end close a second time is rejected with no new entry', async () => {
-      if (!yearEndAlreadyClosed) {
+      const alreadyClosed = await repository.hasYearEndClosingForFiscalYear(
+        COMPANY_ID,
+        FISCAL_YEAR,
+      );
+      if (!alreadyClosed) {
         const dto: CreateYearEndClosingDto = {
           company_id: COMPANY_ID,
           fiscal_year: FISCAL_YEAR,
@@ -236,9 +369,9 @@ const FISCAL_YEAR = 2026;
           .select('id', { count: 'exact', head: true })
           .eq('company_id', COMPANY_ID)
           .eq('entry_type', JournalEntryType.YearEndClosing)
+          .eq('period_id', closingPeriodId)
       ).count;
 
-      await expect(service.runYearEndClosing(dto)).rejects.toThrow(BadRequestException);
       await expect(service.runYearEndClosing(dto)).rejects.toThrow(
         `A year-end closing entry already exists for fiscal year ${FISCAL_YEAR}`,
       );
@@ -249,6 +382,7 @@ const FISCAL_YEAR = 2026;
           .select('id', { count: 'exact', head: true })
           .eq('company_id', COMPANY_ID)
           .eq('entry_type', JournalEntryType.YearEndClosing)
+          .eq('period_id', closingPeriodId)
       ).count;
 
       expect(entryCountAfter).toBe(entryCountBefore);
