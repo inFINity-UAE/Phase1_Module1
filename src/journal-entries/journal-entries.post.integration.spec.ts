@@ -15,13 +15,18 @@ import {
 } from './journal-entries.repository';
 import { SupabaseJournalEntriesRepository } from './journal-entries.repository.supabase';
 import { JournalEntriesService } from './journal-entries.service';
+import {
+  ensurePostIntegrationCompanyReady,
+  INTEGRATION_USER_ID,
+  POST_INTEGRATION_COMPANY_ID,
+} from '../test/integration-company.setup';
 
 const hasSupabase = Boolean(
   process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.SUPABASE_SECRET_KEY,
 );
 
-const COMPANY_ID = '00000000-0000-0000-0000-000000000001';
-const USER_ID = '00000000-0000-0000-0000-000000000002';
+const COMPANY_ID = POST_INTEGRATION_COMPANY_ID;
+const USER_ID = INTEGRATION_USER_ID;
 
 (hasSupabase ? describe : describe.skip)(
   'JournalEntriesService posting (Supabase integration)',
@@ -46,7 +51,9 @@ const USER_ID = '00000000-0000-0000-0000-000000000002';
       service = module.get(JournalEntriesService);
       repository = module.get(JOURNAL_ENTRIES_REPOSITORY);
       supabase = module.get(SupabaseService);
-    });
+
+      await ensurePostIntegrationCompanyReady(supabase);
+    }, 120000);
 
     afterAll(async () => {
       for (const entryId of createdEntryIds.reverse()) {
@@ -56,7 +63,7 @@ const USER_ID = '00000000-0000-0000-0000-000000000002';
     });
 
     async function nextEntryNumber(): Promise<number> {
-      return (await repository.getNextEntryNumber(COMPANY_ID)) + createdEntryIds.length;
+      return repository.getNextEntryNumber(COMPANY_ID);
     }
 
     async function getPeriodId(): Promise<string> {

@@ -15,13 +15,18 @@ import { SupabaseJournalEntriesRepository } from './journal-entries.repository.s
 import { JournalEntriesService } from './journal-entries.service';
 import { CreateYearEndClosingDto } from './dto/create-year-end-closing.dto';
 import * as yearEndClosingUtil from './year-end-closing.util';
+import {
+  ensureYearEndIntegrationCompanyReady,
+  INTEGRATION_USER_ID,
+  YEAR_END_INTEGRATION_COMPANY_ID,
+} from '../test/integration-company.setup';
 
 const hasSupabase = Boolean(
   process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.SUPABASE_SECRET_KEY,
 );
 
-const COMPANY_ID = '00000000-0000-0000-0000-000000000001';
-const USER_ID = '00000000-0000-0000-0000-000000000002';
+const COMPANY_ID = YEAR_END_INTEGRATION_COMPANY_ID;
+const USER_ID = INTEGRATION_USER_ID;
 const FISCAL_YEAR = 2026;
 
 async function resolveImbalanceProbeFiscalYear(
@@ -68,6 +73,8 @@ async function resolveImbalanceProbeFiscalYear(
       repository = module.get(JOURNAL_ENTRIES_REPOSITORY);
       supabase = module.get(SupabaseService);
 
+      await ensureYearEndIntegrationCompanyReady(supabase);
+
       const { data: accounts, error: accountsError } = await supabase.client
         .from('accounts')
         .select('id, account_number, category')
@@ -106,7 +113,7 @@ async function resolveImbalanceProbeFiscalYear(
         COMPANY_ID,
         FISCAL_YEAR,
       );
-    });
+    }, 120000);
 
     afterAll(async () => {
       for (const entryId of createdEntryIds.reverse()) {
@@ -272,6 +279,7 @@ async function resolveImbalanceProbeFiscalYear(
         expect(await getAccountBalance(cashAccountId)).toBeCloseTo(cashBefore + 400, 2);
         expect(await getAccountBalance(retainedEarningsId)).toBeCloseTo(reBefore + 400, 2);
       },
+      30000,
     );
 
     it(
@@ -388,6 +396,6 @@ async function resolveImbalanceProbeFiscalYear(
       expect(entryCountAfter).toBe(entryCountBefore);
       expect(await getAccountBalance(incomeAccountId)).toBeCloseTo(incomeBefore, 2);
       expect(await getAccountBalance(retainedEarningsId)).toBeCloseTo(reBefore, 2);
-    });
+    }, 30000);
   },
 );

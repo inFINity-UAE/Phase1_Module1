@@ -11,13 +11,18 @@ import { AuditLogModule } from './audit-log.module';
 import { AuditLogService } from './audit-log.service';
 import { DatabaseModule } from '../database/database.module';
 import { SupabaseService } from '../database/supabase.service';
+import {
+  AUDIT_LOG_INTEGRATION_COMPANY_ID,
+  ensureAuditLogIntegrationCompanyReady,
+  INTEGRATION_USER_ID,
+} from '../test/integration-company.setup';
 
 const hasSupabase = Boolean(
   process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.SUPABASE_SECRET_KEY,
 );
 
-const COMPANY_ID = '00000000-0000-0000-0000-000000000001';
-const USER_ID = '00000000-0000-0000-0000-000000000002';
+const COMPANY_ID = AUDIT_LOG_INTEGRATION_COMPANY_ID;
+const USER_ID = INTEGRATION_USER_ID;
 
 (hasSupabase ? describe : describe.skip)(
   'AuditLogService (Supabase integration)',
@@ -33,7 +38,9 @@ const USER_ID = '00000000-0000-0000-0000-000000000002';
 
       service = module.get(AuditLogService);
       supabase = module.get(SupabaseService);
-    });
+
+      await ensureAuditLogIntegrationCompanyReady(supabase);
+    }, 120000);
 
     afterAll(async () => {
       for (const entryId of createdEntryIds.reverse()) {
@@ -48,14 +55,14 @@ const USER_ID = '00000000-0000-0000-0000-000000000002';
         .select('entry_number')
         .eq('company_id', COMPANY_ID)
         .order('entry_number', { ascending: false })
-        .limit(1)
-        .single();
+        .limit(1);
 
-      if (error || !data) {
-        throw error ?? new Error('Failed to resolve next entry number');
+      if (error) {
+        throw error;
       }
 
-      return data.entry_number + createdEntryIds.length + 1;
+      const max = data?.[0]?.entry_number;
+      return typeof max === 'number' ? max + 1 : 1;
     }
 
     async function getPeriodId(): Promise<string> {

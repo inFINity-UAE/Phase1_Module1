@@ -88,7 +88,7 @@ const hasSupabase = Boolean(
       openingEquityAccountId = await getAccountIdByNumber(supabase, E2E_COMPANY_ID, '3210');
       expenseAccountId = await getAccountIdByNumber(supabase, E2E_COMPANY_ID, '5010');
       incomeAccountId = await getAccountIdByNumber(supabase, E2E_COMPANY_ID, '4010');
-    });
+    }, 120000);
 
     async function assertTrialBalanced(step: string): Promise<void> {
       const totals = await journalRepository.getTrialBalanceTotals(E2E_COMPANY_ID);

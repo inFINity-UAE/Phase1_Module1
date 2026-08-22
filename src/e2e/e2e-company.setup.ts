@@ -27,7 +27,7 @@ export async function resolveCleanFiscalYear(
   repository: JournalEntriesRepository,
   companyId: string,
 ): Promise<number> {
-  for (let year = 2105; year <= 2115; year += 1) {
+  for (let year = 2105; year <= 2200; year += 1) {
     const hasOpening = await repository.hasOpeningBalanceForFiscalYear(companyId, year);
     const hasYearEnd = await repository.hasYearEndClosingForFiscalYear(companyId, year);
     if (!hasOpening && !hasYearEnd) {
@@ -38,17 +38,21 @@ export async function resolveCleanFiscalYear(
   throw new Error(`No unused fiscal year found for E2E company ${companyId}`);
 }
 
-export async function ensureE2eCompanyReady(supabase: SupabaseService): Promise<void> {
+export async function ensureCompanyWithCoa(
+  supabase: SupabaseService,
+  companyId: string,
+  legalName: string,
+): Promise<void> {
   await supabase.client.from('companies').upsert({
-    id: E2E_COMPANY_ID,
-    legal_name: 'E2E Lifecycle Test Company',
+    id: companyId,
+    legal_name: legalName,
     base_currency: 'AED',
     is_free_zone_entity: false,
     fiscal_year_start_month: 1,
   });
 
   await supabase.client.from('company_settings').upsert({
-    company_id: E2E_COMPANY_ID,
+    company_id: companyId,
     journal_approval_threshold: APPROVAL_THRESHOLD,
     approval_threshold_currency: 'AED',
     default_period_length: 'monthly',
@@ -58,7 +62,7 @@ export async function ensureE2eCompanyReady(supabase: SupabaseService): Promise<
   const { count, error: countError } = await supabase.client
     .from('accounts')
     .select('id', { count: 'exact', head: true })
-    .eq('company_id', E2E_COMPANY_ID);
+    .eq('company_id', companyId);
 
   if (countError) {
     throw countError;
@@ -93,18 +97,34 @@ export async function ensureE2eCompanyReady(supabase: SupabaseService): Promise<
   const demoIdToNumber = new Map(
     demoWithParents.map((row) => [row.id as string, row.account_number as string]),
   );
-  const numberToE2eId = new Map<string, string>();
+  const numberToCompanyId = new Map<string, string>();
 
   for (const account of demoAccounts) {
+    const { data: existingAccount, error: existingError } = await supabase.client
+      .from('accounts')
+      .select('id')
+      .eq('company_id', companyId)
+      .eq('account_number', account.account_number)
+      .maybeSingle();
+
+    if (existingError) {
+      throw existingError;
+    }
+
+    if (existingAccount) {
+      numberToCompanyId.set(account.account_number as string, existingAccount.id as string);
+      continue;
+    }
+
     const parentNumber = account.parent_account_id
       ? demoIdToNumber.get(account.parent_account_id as string)
       : null;
-    const parentId = parentNumber ? numberToE2eId.get(parentNumber) ?? null : null;
+    const parentId = parentNumber ? numberToCompanyId.get(parentNumber) ?? null : null;
 
     const { data: inserted, error: insertError } = await supabase.client
       .from('accounts')
       .insert({
-        company_id: E2E_COMPANY_ID,
+        company_id: companyId,
         account_number: account.account_number,
         account_name: account.account_name,
         category: account.category,
@@ -119,12 +139,40 @@ export async function ensureE2eCompanyReady(supabase: SupabaseService): Promise<
       .select('id, account_number')
       .single();
 
-    if (insertError || !inserted) {
-      throw insertError ?? new Error(`Failed to seed account ${account.account_number}`);
+    if (insertError) {
+      if (insertError.code === '23505') {
+        const { data: racedAccount, error: racedError } = await supabase.client
+          .from('accounts')
+          .select('id, account_number')
+          .eq('company_id', companyId)
+          .eq('account_number', account.account_number)
+          .single();
+
+        if (racedError || !racedAccount) {
+          throw racedError ?? insertError;
+        }
+
+        numberToCompanyId.set(racedAccount.account_number as string, racedAccount.id as string);
+        continue;
+      }
+
+      throw insertError;
     }
 
-    numberToE2eId.set(inserted.account_number as string, inserted.id as string);
+    if (!inserted) {
+      throw new Error(`Failed to seed account ${account.account_number}`);
+    }
+
+    numberToCompanyId.set(inserted.account_number as string, inserted.id as string);
   }
+}
+
+export async function ensureE2eCompanyReady(supabase: SupabaseService): Promise<void> {
+  await ensureCompanyWithCoa(
+    supabase,
+    E2E_COMPANY_ID,
+    'E2E Lifecycle Test Company',
+  );
 }
 
 export async function ensureFiscalYearPeriods(
