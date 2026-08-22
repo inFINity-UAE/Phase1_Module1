@@ -3,7 +3,9 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { PostgrestError } from '@supabase/supabase-js';
 import { JournalEntryType } from '../common/enums/journal-entry-type.enum';
 import { JournalEntryStatus } from '../common/enums/journal-entry-status.enum';
+import { PeriodStatus } from '../common/enums/period-status.enum';
 import { CreateJournalEntryDto } from './dto/create-journal-entry.dto';
+import { CreateOpeningBalanceDto } from './dto/create-opening-balance.dto';
 import { JournalEntryWithDetails } from './entities/journal-entry-with-details.entity';
 import { formatUnbalancedPostError } from './journal-entry-balance.util';
 import {
@@ -19,6 +21,9 @@ const ACCOUNT_A = '44444444-4444-4444-4444-444444444444';
 const ACCOUNT_B = '55555555-5555-5555-5555-555555555555';
 const ENTRY_ID = '66666666-6666-6666-6666-666666666666';
 const LINE_ID = '77777777-7777-7777-7777-777777777777';
+const NEXT_PERIOD_ID = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+const REVERSAL_ENTRY_ID = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb';
+const FISCAL_YEAR = 2026;
 
 function pgError(code: string, message: string): PostgrestError {
   return { code, message, details: '', hint: '', name: 'PostgrestError' } as PostgrestError;
@@ -81,6 +86,19 @@ function draftDetails(
   };
 }
 
+function postedDetails(
+  overrides: Partial<JournalEntryWithDetails> = {},
+): JournalEntryWithDetails {
+  return draftDetails({
+    entry: {
+      ...draftDetails().entry,
+      status: JournalEntryStatus.Posted,
+      posted_at: '2026-01-15T12:00:00.000Z',
+    },
+    ...overrides,
+  });
+}
+
 describe('JournalEntriesService', () => {
   let service: JournalEntriesService;
   let repository: jest.Mocked<JournalEntriesRepository>;
@@ -104,7 +122,16 @@ describe('JournalEntriesService', () => {
       insertDraft: jest.fn(),
       findByIdWithDetails: jest.fn(),
       findAttachmentsByEntryId: jest.fn(),
+      findPeriodById: jest.fn(),
+      findNextOpenPeriod: jest.fn(),
+      findEarliestOpenPeriod: jest.fn(),
+      hasOpeningBalanceForFiscalYear: jest.fn(),
+      insertOpeningBalanceDraft: jest.fn(),
+      deleteEntry: jest.fn(),
+      getAccountTrialBalance: jest.fn(),
+      insertGeneratedFromTemplate: jest.fn(),
       postEntry: jest.fn(),
+      reverseEntry: jest.fn(),
       updateLine: jest.fn(),
       deleteLine: jest.fn(),
       getTrialBalanceTotals: jest.fn(),
@@ -336,5 +363,367 @@ describe('JournalEntriesService', () => {
     expect(after.total_debit).toBe(after.total_credit);
     expect(after.total_debit - before.total_debit).toBe(600);
     expect(after.total_credit - before.total_credit).toBe(600);
+  });
+
+  it('reversing a posted entry creates a correctly mirrored entry and sets the original status to reversed', async () => {
+    const original = postedDetails();
+    const reversal = postedDetails({
+      entry: {
+        ...original.entry,
+        id: REVERSAL_ENTRY_ID,
+        entry_number: 2,
+        period_id: NEXT_PERIOD_ID,
+        entry_date: '2026-02-01',
+        entry_type: JournalEntryType.Reversal,
+        status: JournalEntryStatus.Posted,
+        narration: 'Reversal of journal entry 1',
+        reverses_entry_id: ENTRY_ID,
+        reversed_by_entry_id: null,
+        posted_at: '2026-02-01T12:00:00.000Z',
+      },
+      lines: [
+        {
+          id: 'cccccccc-cccc-cccc-cccc-cccccccccccc',
+          journal_entry_id: REVERSAL_ENTRY_ID,
+          line_number: 1,
+          account_id: ACCOUNT_A,
+          debit: 0,
+          credit: 100,
+          description: null,
+          cost_center: null,
+          created_at: '2026-08-22T00:00:00.000Z',
+        },
+        {
+          id: 'dddddddd-dddd-dddd-dddd-dddddddddddd',
+          journal_entry_id: REVERSAL_ENTRY_ID,
+          line_number: 2,
+          account_id: ACCOUNT_B,
+          debit: 100,
+          credit: 0,
+          description: null,
+          cost_center: null,
+          created_at: '2026-08-22T00:00:00.000Z',
+        },
+      ],
+    });
+    const reversedOriginal = postedDetails({
+      entry: {
+        ...original.entry,
+        status: JournalEntryStatus.Reversed,
+        reversed_by_entry_id: REVERSAL_ENTRY_ID,
+      },
+    });
+
+    repository.findByIdWithDetails.mockResolvedValue(original);
+    repository.findPeriodById.mockResolvedValue({
+      id: PERIOD_ID,
+      company_id: COMPANY_ID,
+      period_start: '2026-01-01',
+      period_end: '2026-01-31',
+      fiscal_year: 2026,
+      status: PeriodStatus.Open,
+      soft_closed_by: null,
+      soft_closed_at: null,
+      closed_by: null,
+      closed_at: null,
+      reopened_by: null,
+      reopened_at: null,
+      reopen_reason: null,
+      created_at: '2026-08-22T00:00:00.000Z',
+    });
+    repository.findNextOpenPeriod.mockResolvedValue({
+      id: NEXT_PERIOD_ID,
+      company_id: COMPANY_ID,
+      period_start: '2026-02-01',
+      period_end: '2026-02-28',
+      fiscal_year: 2026,
+      status: PeriodStatus.Open,
+      soft_closed_by: null,
+      soft_closed_at: null,
+      closed_by: null,
+      closed_at: null,
+      reopened_by: null,
+      reopened_at: null,
+      reopen_reason: null,
+      created_at: '2026-08-22T00:00:00.000Z',
+    });
+    repository.reverseEntry.mockResolvedValue({
+      original: reversedOriginal,
+      reversal,
+    });
+
+    const result = await service.reverse(ENTRY_ID, { created_by: USER_ID });
+
+    expect(repository.reverseEntry).toHaveBeenCalledWith(ENTRY_ID, USER_ID);
+    expect(result.original.entry.status).toBe(JournalEntryStatus.Reversed);
+    expect(result.original.entry.reversed_by_entry_id).toBe(REVERSAL_ENTRY_ID);
+    expect(result.reversal.entry.entry_type).toBe(JournalEntryType.Reversal);
+    expect(result.reversal.entry.reverses_entry_id).toBe(ENTRY_ID);
+    expect(result.reversal.entry.period_id).toBe(NEXT_PERIOD_ID);
+    expect(result.reversal.lines[0].debit).toBe(original.lines[0].credit);
+    expect(result.reversal.lines[0].credit).toBe(original.lines[0].debit);
+    expect(result.reversal.lines[1].debit).toBe(original.lines[1].credit);
+    expect(result.reversal.lines[1].credit).toBe(original.lines[1].debit);
+  });
+
+  it('the original entry remains queryable with reversed_by_entry_id set', async () => {
+    const reversedOriginal = postedDetails({
+      entry: {
+        ...postedDetails().entry,
+        status: JournalEntryStatus.Reversed,
+        reversed_by_entry_id: REVERSAL_ENTRY_ID,
+      },
+    });
+
+    repository.findByIdWithDetails.mockResolvedValue(reversedOriginal);
+
+    const fetched = await service.findOne(ENTRY_ID);
+
+    expect(fetched.entry.status).toBe(JournalEntryStatus.Reversed);
+    expect(fetched.entry.reversed_by_entry_id).toBe(REVERSAL_ENTRY_ID);
+    expect(fetched.lines).toHaveLength(2);
+  });
+
+  it('attempting to reverse an entry that is already status = reversed fails cleanly, with no new entry created', async () => {
+    const alreadyReversed = postedDetails({
+      entry: {
+        ...postedDetails().entry,
+        status: JournalEntryStatus.Reversed,
+        reversed_by_entry_id: REVERSAL_ENTRY_ID,
+      },
+    });
+
+    repository.findByIdWithDetails.mockResolvedValue(alreadyReversed);
+
+    await expect(service.reverse(ENTRY_ID, { created_by: USER_ID })).rejects.toThrow(
+      BadRequestException,
+    );
+    await expect(service.reverse(ENTRY_ID, { created_by: USER_ID })).rejects.toThrow(
+      'Journal entry 1 has already been reversed and cannot be reversed again',
+    );
+    expect(repository.reverseEntry).not.toHaveBeenCalled();
+  });
+
+  it('fails when no open period exists after the original entry period', async () => {
+    const original = postedDetails();
+    repository.findByIdWithDetails.mockResolvedValue(original);
+    repository.findPeriodById.mockResolvedValue({
+      id: PERIOD_ID,
+      company_id: COMPANY_ID,
+      period_start: '2026-01-01',
+      period_end: '2026-01-31',
+      fiscal_year: 2026,
+      status: PeriodStatus.Open,
+      soft_closed_by: null,
+      soft_closed_at: null,
+      closed_by: null,
+      closed_at: null,
+      reopened_by: null,
+      reopened_at: null,
+      reopen_reason: null,
+      created_at: '2026-08-22T00:00:00.000Z',
+    });
+    repository.findNextOpenPeriod.mockResolvedValue(null);
+
+    await expect(service.reverse(ENTRY_ID, { created_by: USER_ID })).rejects.toThrow(
+      /No open accounting period exists after 2026-01-31/,
+    );
+    expect(repository.reverseEntry).not.toHaveBeenCalled();
+  });
+
+  describe('opening balance', () => {
+    const openingBalanceDto: CreateOpeningBalanceDto = {
+      company_id: COMPANY_ID,
+      fiscal_year: FISCAL_YEAR,
+      entry_date: '2026-01-01',
+      narration: 'Opening balances FY2026',
+      created_by: USER_ID,
+      lines: [
+        { line_number: 1, account_id: ACCOUNT_A, debit: 500, credit: 0 },
+        { line_number: 2, account_id: ACCOUNT_B, debit: 0, credit: 500 },
+      ],
+    };
+
+    const earliestOpenPeriod = {
+      id: PERIOD_ID,
+      company_id: COMPANY_ID,
+      period_start: '2026-01-01',
+      period_end: '2026-01-31',
+      fiscal_year: FISCAL_YEAR,
+      status: PeriodStatus.Open,
+      soft_closed_by: null,
+      soft_closed_at: null,
+      closed_by: null,
+      closed_at: null,
+      reopened_by: null,
+      reopened_at: null,
+      reopen_reason: null,
+      created_at: '2026-08-22T00:00:00.000Z',
+    };
+
+    it('a balanced opening balance entry posts successfully and account balances reflect it correctly', async () => {
+      const draft = draftDetails({
+        entry: {
+          ...draftDetails().entry,
+          entry_type: JournalEntryType.OpeningBalance,
+          period_id: PERIOD_ID,
+          entry_date: '2026-01-01',
+          narration: 'Opening balances FY2026',
+        },
+        lines: [
+          {
+            id: LINE_ID,
+            journal_entry_id: ENTRY_ID,
+            line_number: 1,
+            account_id: ACCOUNT_A,
+            debit: 500,
+            credit: 0,
+            description: null,
+            cost_center: null,
+            created_at: '2026-08-22T00:00:00.000Z',
+          },
+          {
+            id: '88888888-8888-8888-8888-888888888888',
+            journal_entry_id: ENTRY_ID,
+            line_number: 2,
+            account_id: ACCOUNT_B,
+            debit: 0,
+            credit: 500,
+            description: null,
+            cost_center: null,
+            created_at: '2026-08-22T00:00:00.000Z',
+          },
+        ],
+      });
+      const posted = postedDetails({
+        entry: {
+          ...draft.entry,
+          entry_type: JournalEntryType.OpeningBalance,
+          status: JournalEntryStatus.Posted,
+          posted_at: '2026-01-01T12:00:00.000Z',
+        },
+        lines: draft.lines,
+      });
+
+      repository.hasOpeningBalanceForFiscalYear.mockResolvedValue(false);
+      repository.findEarliestOpenPeriod.mockResolvedValue(earliestOpenPeriod);
+      repository.insertOpeningBalanceDraft.mockResolvedValue(draft);
+      repository.postEntry.mockResolvedValue(posted.entry);
+      repository.findByIdWithDetails.mockResolvedValue(posted);
+      repository.getAccountTrialBalance
+        .mockResolvedValueOnce({
+          account_id: ACCOUNT_A,
+          total_debit: 500,
+          total_credit: 0,
+          balance: 500,
+        })
+        .mockResolvedValueOnce({
+          account_id: ACCOUNT_B,
+          total_debit: 0,
+          total_credit: 500,
+          balance: -500,
+        });
+
+      const result = await service.createOpeningBalance(openingBalanceDto);
+
+      expect(repository.hasOpeningBalanceForFiscalYear).toHaveBeenCalledWith(
+        COMPANY_ID,
+        FISCAL_YEAR,
+      );
+      expect(repository.findEarliestOpenPeriod).toHaveBeenCalledWith(
+        COMPANY_ID,
+        FISCAL_YEAR,
+      );
+      expect(repository.insertOpeningBalanceDraft).toHaveBeenCalledWith(
+        openingBalanceDto,
+        PERIOD_ID,
+      );
+      expect(repository.postEntry).toHaveBeenCalledWith(ENTRY_ID);
+      expect(result.entry.entry_type).toBe(JournalEntryType.OpeningBalance);
+      expect(result.entry.status).toBe(JournalEntryStatus.Posted);
+      expect(result.entry.period_id).toBe(PERIOD_ID);
+
+      const balanceA = await service.getAccountTrialBalance(COMPANY_ID, ACCOUNT_A);
+      const balanceB = await service.getAccountTrialBalance(COMPANY_ID, ACCOUNT_B);
+      expect(balanceA?.total_debit).toBe(500);
+      expect(balanceB?.total_credit).toBe(500);
+    });
+
+    it('an unbalanced opening balance entry is rejected the same way any other entry would be', async () => {
+      const unbalancedDto: CreateOpeningBalanceDto = {
+        ...openingBalanceDto,
+        lines: [
+          { line_number: 1, account_id: ACCOUNT_A, debit: 500, credit: 0 },
+          { line_number: 2, account_id: ACCOUNT_B, debit: 0, credit: 300 },
+        ],
+      };
+      const draft = draftDetails({
+        entry: {
+          ...draftDetails().entry,
+          entry_type: JournalEntryType.OpeningBalance,
+        },
+        lines: [
+          {
+            id: LINE_ID,
+            journal_entry_id: ENTRY_ID,
+            line_number: 1,
+            account_id: ACCOUNT_A,
+            debit: 500,
+            credit: 0,
+            description: null,
+            cost_center: null,
+            created_at: '2026-08-22T00:00:00.000Z',
+          },
+          {
+            id: '88888888-8888-8888-8888-888888888888',
+            journal_entry_id: ENTRY_ID,
+            line_number: 2,
+            account_id: ACCOUNT_B,
+            debit: 0,
+            credit: 300,
+            description: null,
+            cost_center: null,
+            created_at: '2026-08-22T00:00:00.000Z',
+          },
+        ],
+      });
+
+      repository.hasOpeningBalanceForFiscalYear.mockResolvedValue(false);
+      repository.findEarliestOpenPeriod.mockResolvedValue(earliestOpenPeriod);
+      repository.insertOpeningBalanceDraft.mockResolvedValue(draft);
+      repository.postEntry.mockRejectedValue(
+        pgError(
+          'P0001',
+          'Journal entry 1 is unbalanced: debit 500.00 <> credit 300.00 — posting rejected',
+        ),
+      );
+      repository.deleteEntry.mockResolvedValue(undefined);
+
+      const expectedMessage = formatUnbalancedPostError(
+        draft.entry.entry_number,
+        draft.lines,
+      );
+
+      await expect(service.createOpeningBalance(unbalancedDto)).rejects.toThrow(
+        BadRequestException,
+      );
+      await expect(service.createOpeningBalance(unbalancedDto)).rejects.toThrow(
+        expectedMessage,
+      );
+      expect(repository.deleteEntry).toHaveBeenCalledWith(ENTRY_ID);
+    });
+
+    it('attempting to post a second opening_balance entry for the same company and fiscal year is rejected cleanly, with no new entry created', async () => {
+      repository.hasOpeningBalanceForFiscalYear.mockResolvedValue(true);
+
+      await expect(service.createOpeningBalance(openingBalanceDto)).rejects.toThrow(
+        BadRequestException,
+      );
+      await expect(service.createOpeningBalance(openingBalanceDto)).rejects.toThrow(
+        `An opening balance entry already exists for fiscal year ${FISCAL_YEAR}`,
+      );
+      expect(repository.insertOpeningBalanceDraft).not.toHaveBeenCalled();
+      expect(repository.postEntry).not.toHaveBeenCalled();
+    });
   });
 });

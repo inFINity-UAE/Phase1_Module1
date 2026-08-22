@@ -1,7 +1,9 @@
 import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post } from '@nestjs/common';
 import { JournalEntriesService } from './journal-entries.service';
 import { CreateJournalEntryDto } from './dto/create-journal-entry.dto';
+import { CreateOpeningBalanceDto } from './dto/create-opening-balance.dto';
 import { UpdateJournalEntryDto } from './dto/update-journal-entry.dto';
+import { ReverseJournalEntryDto } from './dto/reverse-journal-entry.dto';
 
 @Controller('journal-entries')
 export class JournalEntriesController {
@@ -10,6 +12,11 @@ export class JournalEntriesController {
   @Post()
   create(@Body() dto: CreateJournalEntryDto) {
     return this.journalEntriesService.create(dto);
+  }
+
+  @Post('opening-balance')
+  createOpeningBalance(@Body() dto: CreateOpeningBalanceDto) {
+    return this.journalEntriesService.createOpeningBalance(dto);
   }
 
   @Get()
@@ -30,6 +37,14 @@ export class JournalEntriesController {
   @Post(':id/post')
   post(@Param('id', ParseUUIDPipe) id: string) {
     return this.journalEntriesService.post(id);
+  }
+
+  @Post(':id/reverse')
+  reverse(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: ReverseJournalEntryDto,
+  ) {
+    return this.journalEntriesService.reverse(id, dto);
   }
 
   @Patch(':id')
