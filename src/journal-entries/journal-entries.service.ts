@@ -12,7 +12,12 @@ import {
   isPostgrestError,
 } from '../common/errors/database-error.mapper';
 import { CompanyRole } from '../common/enums/company-role.enum';
+import { PeriodStatus } from '../common/enums/period-status.enum';
 import { JournalEntryStatus } from '../common/enums/journal-entry-status.enum';
+import {
+  ACCOUNTING_PERIODS_REPOSITORY,
+  AccountingPeriodsRepository,
+} from '../accounting-periods/accounting-periods.repository';
 import { JournalEntryType } from '../common/enums/journal-entry-type.enum';
 import { CreateJournalEntryDto } from './dto/create-journal-entry.dto';
 import { CreateOpeningBalanceDto } from './dto/create-opening-balance.dto';
@@ -45,6 +50,8 @@ export class JournalEntriesService {
   constructor(
     @Inject(JOURNAL_ENTRIES_REPOSITORY)
     private readonly journalEntriesRepository: JournalEntriesRepository,
+    @Inject(ACCOUNTING_PERIODS_REPOSITORY)
+    private readonly accountingPeriodsRepository: AccountingPeriodsRepository,
   ) {}
 
   /**
@@ -162,6 +169,14 @@ export class JournalEntriesService {
       );
     }
 
+    await this.assertPeriodAllowsPosting(
+      existing.entry.period_id,
+      existing.entry.company_id,
+      dto.actor_id,
+      dto.actor_role,
+      dto.soft_closed_override_reason,
+    );
+
     const isOwner = dto.actor_role === CompanyRole.Owner;
 
     if (!isOwner) {
@@ -200,6 +215,14 @@ export class JournalEntriesService {
         `Journal entry ${existing.entry.entry_number} is not pending approval`,
       );
     }
+
+    await this.assertPeriodAllowsPosting(
+      existing.entry.period_id,
+      existing.entry.company_id,
+      dto.actor_id,
+      dto.actor_role,
+      dto.soft_closed_override_reason,
+    );
 
     try {
       const posted = await this.journalEntriesRepository.approveAndPostEntry(
@@ -270,6 +293,70 @@ export class JournalEntriesService {
         `Only an Owner can ${action} journal entries pending approval`,
       );
     }
+  }
+
+  /**
+   * [feature-spec] Soft-closed periods block posting unless Owner override with reason.
+   * [Rules §1.3] Prior-period adjustment logged on accounting_periods.reopen_* columns.
+   */
+  private async assertPeriodAllowsPosting(
+    periodId: string,
+    companyId: string,
+    actorId: string,
+    actorRole: CompanyRole,
+    overrideReason?: string,
+  ): Promise<void> {
+    const period = await this.accountingPeriodsRepository.findById(periodId);
+
+    if (!period) {
+      throw new BadRequestException(`Accounting period ${periodId} not found`);
+    }
+
+    if (period.status === PeriodStatus.Open) {
+      return;
+    }
+
+    if (
+      period.status === PeriodStatus.SoftClosed ||
+      period.status === PeriodStatus.Closed
+    ) {
+      if (!overrideReason?.trim()) {
+        throw new BadRequestException(
+          `Accounting period ${period.period_start} to ${period.period_end} is ${period.status} — ` +
+            'provide soft_closed_override_reason to post a correction',
+        );
+      }
+
+      if (actorRole !== CompanyRole.Owner) {
+        throw new ForbiddenException(
+          'Only an Owner may post into a soft-closed period with override',
+        );
+      }
+
+      const settings = await this.journalEntriesRepository.getCompanySettings(companyId);
+
+      if (settings && !settings.allow_period_reopen) {
+        throw new ForbiddenException(
+          'Period posting override is disabled for this company',
+        );
+      }
+
+      try {
+        await this.accountingPeriodsRepository.logSoftClosedPostingOverride(
+          periodId,
+          actorId,
+          overrideReason.trim(),
+        );
+      } catch (error) {
+        handleDatabaseError(error);
+      }
+
+      return;
+    }
+
+    throw new BadRequestException(
+      `Accounting period ${period.period_start} to ${period.period_end} does not allow postings`,
+    );
   }
 
   /**

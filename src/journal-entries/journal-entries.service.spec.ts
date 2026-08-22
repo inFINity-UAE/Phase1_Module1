@@ -13,6 +13,11 @@ import {
   JOURNAL_ENTRIES_REPOSITORY,
   JournalEntriesRepository,
 } from './journal-entries.repository';
+import {
+  ACCOUNTING_PERIODS_REPOSITORY,
+  AccountingPeriodsRepository,
+} from '../accounting-periods/accounting-periods.repository';
+import { AccountingPeriod } from '../accounting-periods/entities/accounting-period.entity';
 import { JournalEntriesService } from './journal-entries.service';
 
 const COMPANY_ID = '00000000-0000-0000-0000-000000000001';
@@ -25,7 +30,7 @@ const LINE_ID = '77777777-7777-7777-7777-777777777777';
 const NEXT_PERIOD_ID = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
 const REVERSAL_ENTRY_ID = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb';
 const FISCAL_YEAR = 2026;
-const OWNER_ID = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+const OWNER_ID = 'cccccccc-cccc-cccc-cccc-cccccccccccc';
 
 const ownerActor = { actor_id: OWNER_ID, actor_role: CompanyRole.Owner };
 const accountantActor = { actor_id: USER_ID, actor_role: CompanyRole.Accountant };
@@ -91,6 +96,25 @@ function draftDetails(
   };
 }
 
+function samplePeriod(status: PeriodStatus = PeriodStatus.Open): AccountingPeriod {
+  return {
+    id: PERIOD_ID,
+    company_id: COMPANY_ID,
+    period_start: '2026-01-01',
+    period_end: '2026-01-31',
+    fiscal_year: FISCAL_YEAR,
+    status,
+    soft_closed_by: status === PeriodStatus.SoftClosed ? USER_ID : null,
+    soft_closed_at: status === PeriodStatus.SoftClosed ? '2026-08-22T00:00:00.000Z' : null,
+    closed_by: null,
+    closed_at: null,
+    reopened_by: null,
+    reopened_at: null,
+    reopen_reason: null,
+    created_at: '2026-08-22T00:00:00.000Z',
+  };
+}
+
 function postedDetails(
   overrides: Partial<JournalEntryWithDetails> = {},
 ): JournalEntryWithDetails {
@@ -107,6 +131,16 @@ function postedDetails(
 describe('JournalEntriesService', () => {
   let service: JournalEntriesService;
   let repository: jest.Mocked<JournalEntriesRepository>;
+  let periodsRepository: jest.Mocked<AccountingPeriodsRepository>;
+
+  const companySettingsOpen = {
+    company_id: COMPANY_ID,
+    journal_approval_threshold: null,
+    approval_threshold_currency: 'AED',
+    default_period_length: 'monthly',
+    allow_period_reopen: true,
+    updated_at: '2026-08-22T00:00:00.000Z',
+  };
 
   const baseDto: CreateJournalEntryDto = {
     company_id: COMPANY_ID,
@@ -146,10 +180,18 @@ describe('JournalEntriesService', () => {
       getTrialBalanceTotals: jest.fn(),
     };
 
+    periodsRepository = {
+      findById: jest.fn(),
+      softClose: jest.fn(),
+      logSoftClosedPostingOverride: jest.fn(),
+    };
+    periodsRepository.findById.mockResolvedValue(samplePeriod());
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         JournalEntriesService,
         { provide: JOURNAL_ENTRIES_REPOSITORY, useValue: repository },
+        { provide: ACCOUNTING_PERIODS_REPOSITORY, useValue: periodsRepository },
       ],
     }).compile();
 
@@ -538,6 +580,106 @@ describe('JournalEntriesService', () => {
       /No open accounting period exists after 2026-01-31/,
     );
     expect(repository.reverseEntry).not.toHaveBeenCalled();
+  });
+
+  describe('period soft-close posting', () => {
+    it('posting into an open period succeeds', async () => {
+      const draft = draftDetails();
+      const posted = draftDetails({
+        entry: {
+          ...draft.entry,
+          status: JournalEntryStatus.Posted,
+          posted_at: '2026-08-22T12:00:00.000Z',
+        },
+      });
+
+      periodsRepository.findById.mockResolvedValue(samplePeriod(PeriodStatus.Open));
+      repository.findByIdWithDetails
+        .mockResolvedValueOnce(draft)
+        .mockResolvedValueOnce(posted);
+      repository.getCompanySettings.mockResolvedValue(companySettingsOpen);
+      repository.postEntry.mockResolvedValue(posted.entry);
+
+      const result = await service.post(ENTRY_ID, ownerActor);
+
+      expect(result.entry.status).toBe(JournalEntryStatus.Posted);
+      expect(periodsRepository.logSoftClosedPostingOverride).not.toHaveBeenCalled();
+    });
+
+    it('posting into a soft-closed period fails without override', async () => {
+      const draft = draftDetails();
+
+      periodsRepository.findById.mockResolvedValue(samplePeriod(PeriodStatus.SoftClosed));
+      repository.findByIdWithDetails.mockResolvedValue(draft);
+
+      await expect(service.post(ENTRY_ID, ownerActor)).rejects.toThrow(BadRequestException);
+      await expect(service.post(ENTRY_ID, ownerActor)).rejects.toThrow(
+        /provide soft_closed_override_reason/,
+      );
+      expect(repository.postEntry).not.toHaveBeenCalled();
+    });
+
+    it('posting into a soft-closed period succeeds WITH override, and the override is recorded with a reason', async () => {
+      const draft = draftDetails();
+      const posted = draftDetails({
+        entry: {
+          ...draft.entry,
+          status: JournalEntryStatus.Posted,
+          posted_at: '2026-08-22T12:00:00.000Z',
+        },
+      });
+      const softClosed = samplePeriod(PeriodStatus.SoftClosed);
+      const loggedPeriod = {
+        ...softClosed,
+        reopened_by: OWNER_ID,
+        reopened_at: '2026-08-22T12:00:00.000Z',
+        reopen_reason: 'Correcting missed accrual',
+      };
+
+      periodsRepository.findById.mockResolvedValue(softClosed);
+      repository.findByIdWithDetails
+        .mockResolvedValueOnce(draft)
+        .mockResolvedValueOnce(posted);
+      repository.getCompanySettings.mockResolvedValue(companySettingsOpen);
+      repository.postEntry.mockResolvedValue(posted.entry);
+      periodsRepository.logSoftClosedPostingOverride.mockResolvedValue(loggedPeriod);
+
+      const result = await service.post(ENTRY_ID, {
+        ...ownerActor,
+        soft_closed_override_reason: 'Correcting missed accrual',
+      });
+
+      expect(periodsRepository.logSoftClosedPostingOverride).toHaveBeenCalledWith(
+        PERIOD_ID,
+        OWNER_ID,
+        'Correcting missed accrual',
+      );
+      expect(repository.postEntry).toHaveBeenCalledWith(ENTRY_ID);
+      expect(result.entry.status).toBe(JournalEntryStatus.Posted);
+    });
+
+    it('a non-authorized user cannot use the override', async () => {
+      const draft = draftDetails();
+
+      periodsRepository.findById.mockResolvedValue(samplePeriod(PeriodStatus.SoftClosed));
+      repository.findByIdWithDetails.mockResolvedValue(draft);
+      repository.getCompanySettings.mockResolvedValue(companySettingsOpen);
+
+      await expect(
+        service.post(ENTRY_ID, {
+          ...accountantActor,
+          soft_closed_override_reason: 'Should not be allowed',
+        }),
+      ).rejects.toThrow(ForbiddenException);
+      await expect(
+        service.post(ENTRY_ID, {
+          ...accountantActor,
+          soft_closed_override_reason: 'Should not be allowed',
+        }),
+      ).rejects.toThrow(/Only an Owner may post into a soft-closed period/);
+      expect(periodsRepository.logSoftClosedPostingOverride).not.toHaveBeenCalled();
+      expect(repository.postEntry).not.toHaveBeenCalled();
+    });
   });
 
   describe('approval workflow', () => {

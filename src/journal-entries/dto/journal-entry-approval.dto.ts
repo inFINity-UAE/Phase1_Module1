@@ -1,4 +1,4 @@
-import { IsEnum, IsString, MinLength } from 'class-validator';
+import { IsEnum, IsOptional, IsString, MinLength } from 'class-validator';
 import { CompanyRole } from '../../common/enums/company-role.enum';
 import { IsPostgresUuid } from '../../common/validators/is-postgres-uuid';
 
@@ -9,6 +9,12 @@ export class PostJournalEntryDto {
 
   @IsEnum(CompanyRole)
   actor_role!: CompanyRole;
+
+  /** Required when posting into a soft-closed period — [Rules §1.3] prior period adjustment. */
+  @IsOptional()
+  @IsString()
+  @MinLength(1)
+  soft_closed_override_reason?: string;
 }
 
 /** Owner approval of a pending journal entry. */
@@ -18,6 +24,11 @@ export class ApproveJournalEntryDto {
 
   @IsEnum(CompanyRole)
   actor_role!: CompanyRole;
+
+  @IsOptional()
+  @IsString()
+  @MinLength(1)
+  soft_closed_override_reason?: string;
 }
 
 /** Owner rejection of a pending journal entry. */

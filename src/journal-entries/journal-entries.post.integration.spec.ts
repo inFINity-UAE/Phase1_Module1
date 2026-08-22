@@ -8,6 +8,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { JournalEntryStatus } from '../common/enums/journal-entry-status.enum';
 import { JournalEntryType } from '../common/enums/journal-entry-type.enum';
 import { DatabaseModule } from '../database/database.module';
+import { AccountingPeriodsModule } from '../accounting-periods/accounting-periods.module';
 import { SupabaseService } from '../database/supabase.service';
 import {
   JOURNAL_ENTRIES_REPOSITORY,
@@ -32,7 +33,7 @@ const USER_ID = '00000000-0000-0000-0000-000000000002';
 
     beforeAll(async () => {
       const module: TestingModule = await Test.createTestingModule({
-        imports: [DatabaseModule],
+        imports: [DatabaseModule, AccountingPeriodsModule],
         providers: [
           JournalEntriesService,
           {
