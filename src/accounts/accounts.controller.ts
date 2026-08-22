@@ -1,4 +1,16 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Param,
+  ParseUUIDPipe,
+  Patch,
+  Post,
+  Query,
+} from '@nestjs/common';
 import { AccountsService } from './accounts.service';
 import { CreateAccountDto } from './dto/create-account.dto';
 import { UpdateAccountDto } from './dto/update-account.dto';
@@ -13,8 +25,8 @@ export class AccountsController {
   }
 
   @Get()
-  findAll() {
-    return this.accountsService.findAll();
+  findAll(@Query('company_id') companyId?: string) {
+    return this.accountsService.findAll(companyId);
   }
 
   @Get(':id')
@@ -22,8 +34,19 @@ export class AccountsController {
     return this.accountsService.findOne(id);
   }
 
+  @Patch(':id/deactivate')
+  deactivate(@Param('id', ParseUUIDPipe) id: string) {
+    return this.accountsService.deactivate(id);
+  }
+
   @Patch(':id')
   update(@Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateAccountDto) {
     return this.accountsService.update(id, dto);
+  }
+
+  @Delete(':id')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  remove(@Param('id', ParseUUIDPipe) id: string) {
+    return this.accountsService.remove(id);
   }
 }
