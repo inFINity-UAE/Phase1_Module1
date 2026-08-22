@@ -71,6 +71,7 @@ export interface JournalEntriesRepository {
   updateLine(id: string, dto: UpdateJournalLineDto): Promise<JournalLine>;
   deleteLine(id: string): Promise<void>;
   getTrialBalanceTotals(companyId: string): Promise<TrialBalanceTotals>;
+  hasReversalForEntry(entryId: string): Promise<boolean>;
   insertGeneratedFromTemplate(
     params: InsertGeneratedJournalEntryParams,
   ): Promise<JournalEntryWithDetails>;

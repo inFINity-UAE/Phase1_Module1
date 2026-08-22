@@ -16,6 +16,6 @@ import { SupabaseJournalEntriesRepository } from './journal-entries.repository.s
       useClass: SupabaseJournalEntriesRepository,
     },
   ],
-  exports: [JOURNAL_ENTRIES_REPOSITORY],
+  exports: [JOURNAL_ENTRIES_REPOSITORY, JournalEntriesService],
 })
 export class JournalEntriesModule {}

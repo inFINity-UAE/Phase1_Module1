@@ -460,7 +460,7 @@ export class JournalEntriesService {
    */
   async reverse(id: string, dto: ReverseJournalEntryDto): Promise<JournalEntryReversalResult> {
     const existing = await this.findOne(id);
-    this.assertReversible(existing);
+    await this.assertReversible(existing);
 
     const originalPeriod = await this.journalEntriesRepository.findPeriodById(
       existing.entry.period_id,
@@ -563,11 +563,18 @@ export class JournalEntriesService {
     handleDatabaseError(error);
   }
 
-  private assertReversible(existing: JournalEntryWithDetails): void {
+  private async assertReversible(existing: JournalEntryWithDetails): Promise<void> {
     const { entry_number, status, reversed_by_entry_id, reverses_entry_id, entry_type } =
       existing.entry;
 
     if (status === JournalEntryStatus.Reversed || reversed_by_entry_id) {
+      throw new BadRequestException(
+        `Journal entry ${entry_number} has already been reversed and cannot be reversed again`,
+      );
+    }
+
+    const hasReversal = await this.journalEntriesRepository.hasReversalForEntry(existing.entry.id);
+    if (hasReversal) {
       throw new BadRequestException(
         `Journal entry ${entry_number} has already been reversed and cannot be reversed again`,
       );

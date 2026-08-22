@@ -34,3 +34,12 @@ export function isJournalBalancePostRejection(message: string): boolean {
 export function computeEntryTotal(lines: JournalLine[]): number {
   return sumAmount(lines, 'debit');
 }
+
+/** [Rules §1.1] Application-layer balance check before posting. */
+export function assertBalancedLines(lines: JournalLine[]): void {
+  const totalDebit = sumAmount(lines, 'debit');
+  const totalCredit = sumAmount(lines, 'credit');
+  if (Math.round(totalDebit * 100) !== Math.round(totalCredit * 100)) {
+    throw new Error(formatUnbalancedPostError(0, lines));
+  }
+}
