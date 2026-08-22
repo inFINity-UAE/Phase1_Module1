@@ -33,7 +33,7 @@ async function resolveImbalanceProbeFiscalYear(
   repository: SupabaseJournalEntriesRepository,
   companyId: string,
 ): Promise<number> {
-  for (let year = 2027; year <= 2035; year += 1) {
+  for (let year = 2027; year <= 2100; year += 1) {
     const hasClosing = await repository.hasYearEndClosingForFiscalYear(companyId, year);
     if (!hasClosing) {
       return year;

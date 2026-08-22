@@ -5,12 +5,16 @@ config({ path: resolve(__dirname, '../../.env.local') });
 
 import { Test, TestingModule } from '@nestjs/testing';
 import { AuditAction } from '../common/enums/audit-action.enum';
+import { CompanyRole } from '../common/enums/company-role.enum';
 import { JournalEntryStatus } from '../common/enums/journal-entry-status.enum';
 import { JournalEntryType } from '../common/enums/journal-entry-type.enum';
+import { AccountingPeriodsModule } from '../accounting-periods/accounting-periods.module';
 import { AuditLogModule } from './audit-log.module';
 import { AuditLogService } from './audit-log.service';
 import { DatabaseModule } from '../database/database.module';
 import { SupabaseService } from '../database/supabase.service';
+import { JournalEntriesModule } from '../journal-entries/journal-entries.module';
+import { JournalEntriesService } from '../journal-entries/journal-entries.service';
 import {
   AUDIT_LOG_INTEGRATION_COMPANY_ID,
   ensureAuditLogIntegrationCompanyReady,
@@ -27,19 +31,59 @@ const USER_ID = INTEGRATION_USER_ID;
 (hasSupabase ? describe : describe.skip)(
   'AuditLogService (Supabase integration)',
   () => {
-    let service: AuditLogService;
+    let auditLogService: AuditLogService;
+    let journalEntriesService: JournalEntriesService;
     let supabase: SupabaseService;
     const createdEntryIds: string[] = [];
+    let periodId = '';
+    let cashAccountId = '';
+    let bankAccountId = '';
 
     beforeAll(async () => {
       const module: TestingModule = await Test.createTestingModule({
-        imports: [DatabaseModule, AuditLogModule],
+        imports: [
+          DatabaseModule,
+          AccountingPeriodsModule,
+          AuditLogModule,
+          JournalEntriesModule,
+        ],
       }).compile();
 
-      service = module.get(AuditLogService);
+      auditLogService = module.get(AuditLogService);
+      journalEntriesService = module.get(JournalEntriesService);
       supabase = module.get(SupabaseService);
 
       await ensureAuditLogIntegrationCompanyReady(supabase);
+
+      const { data: period, error: periodError } = await supabase.client
+        .from('accounting_periods')
+        .select('id')
+        .eq('company_id', COMPANY_ID)
+        .eq('period_start', '2026-01-01')
+        .single();
+
+      if (periodError || !period) {
+        throw periodError ?? new Error('January 2026 period not found');
+      }
+      periodId = period.id as string;
+
+      const { data: accounts, error: accountsError } = await supabase.client
+        .from('accounts')
+        .select('id, account_number')
+        .eq('company_id', COMPANY_ID)
+        .in('account_number', ['1011', '1020']);
+
+      if (accountsError || !accounts || accounts.length < 2) {
+        throw accountsError ?? new Error('Need cash and bank accounts for audit probes');
+      }
+
+      for (const account of accounts) {
+        if (account.account_number === '1011') {
+          cashAccountId = account.id as string;
+        } else if (account.account_number === '1020') {
+          bankAccountId = account.id as string;
+        }
+      }
     }, 120000);
 
     afterAll(async () => {
@@ -49,262 +93,127 @@ const USER_ID = INTEGRATION_USER_ID;
       }
     });
 
-    async function nextEntryNumber(): Promise<number> {
-      const { data, error } = await supabase.client
-        .from('journal_entries')
-        .select('entry_number')
-        .eq('company_id', COMPANY_ID)
-        .order('entry_number', { ascending: false })
-        .limit(1);
-
-      if (error) {
-        throw error;
-      }
-
-      const max = data?.[0]?.entry_number;
-      return typeof max === 'number' ? max + 1 : 1;
-    }
-
-    async function getPeriodId(): Promise<string> {
-      const { data, error } = await supabase.client
-        .from('accounting_periods')
-        .select('id, period_end')
-        .eq('company_id', COMPANY_ID)
-        .order('period_start', { ascending: true })
-        .limit(1)
-        .single();
-
-      if (error || !data) {
-        throw error ?? new Error('No accounting period found');
-      }
-
-      return data.id;
-    }
-
-    async function getNextOpenPeriod(afterPeriodEnd: string): Promise<{ id: string; period_start: string }> {
-      const { data, error } = await supabase.client
-        .from('accounting_periods')
-        .select('id, period_start')
-        .eq('company_id', COMPANY_ID)
-        .eq('status', 'open')
-        .gt('period_start', afterPeriodEnd)
-        .order('period_start', { ascending: true })
-        .limit(1)
-        .single();
-
-      if (error || !data) {
-        throw error ?? new Error('No next open period found');
-      }
-
-      return data;
-    }
-
-    async function getTwoAssetAccounts(): Promise<[string, string]> {
-      const { data, error } = await supabase.client
-        .from('accounts')
-        .select('id')
-        .eq('company_id', COMPANY_ID)
-        .eq('category', 'asset')
-        .limit(2);
-
-      if (error || !data || data.length < 2) {
-        throw error ?? new Error('Need at least two asset accounts');
-      }
-
-      return [data[0].id, data[1].id];
-    }
-
-    async function insertDraftJournalEntry(narration: string): Promise<string> {
-      const periodId = await getPeriodId();
-      const entryNumber = await nextEntryNumber();
-
-      const { data: entry, error: entryError } = await supabase.client
-        .from('journal_entries')
-        .insert({
+    it(
+      'service-layer post and reverse produce insert, status_change, and reversal audit rows',
+      async () => {
+        // Draft create → insert audit only
+        const draft = await journalEntriesService.create({
           company_id: COMPANY_ID,
-          entry_number: entryNumber,
           period_id: periodId,
           entry_date: '2026-01-15',
-          entry_type: JournalEntryType.Manual,
-          status: JournalEntryStatus.Draft,
-          narration,
+          narration: 'audit-log service-layer draft probe',
           created_by: USER_ID,
-        })
-        .select('id')
-        .single();
+          lines: [
+            { line_number: 1, account_id: cashAccountId, debit: 125, credit: 0 },
+            { line_number: 2, account_id: bankAccountId, debit: 0, credit: 125 },
+          ],
+        });
+        createdEntryIds.push(draft.entry.id);
 
-      if (entryError || !entry) {
-        throw entryError ?? new Error('Failed to insert draft entry');
-      }
-
-      createdEntryIds.push(entry.id);
-      return entry.id;
-    }
-
-    async function insertPostedJournalEntry(
-      narration: string,
-    ): Promise<{ id: string; lines: Array<{ line_number: number; account_id: string; debit: number; credit: number }> }> {
-      const { data: period, error: periodError } = await supabase.client
-        .from('accounting_periods')
-        .select('id, period_end')
-        .eq('company_id', COMPANY_ID)
-        .order('period_start', { ascending: true })
-        .limit(1)
-        .single();
-
-      if (periodError || !period) {
-        throw periodError ?? new Error('No accounting period found');
-      }
-
-      const [accA, accB] = await getTwoAssetAccounts();
-      const entryNumber = await nextEntryNumber();
-      const postedAt = new Date().toISOString();
-      const lines = [
-        { line_number: 1, account_id: accA, debit: 125, credit: 0 },
-        { line_number: 2, account_id: accB, debit: 0, credit: 125 },
-      ];
-
-      const { data: entry, error: entryError } = await supabase.client
-        .from('journal_entries')
-        .insert({
+        const draftHistory = await auditLogService.find({
           company_id: COMPANY_ID,
-          entry_number: entryNumber,
-          period_id: period.id,
-          entry_date: '2026-01-15',
-          entry_type: JournalEntryType.Manual,
-          status: JournalEntryStatus.Posted,
-          narration,
-          created_by: USER_ID,
-          posted_at: postedAt,
-        })
-        .select('id')
-        .single();
+          record_id: draft.entry.id,
+          table_name: 'journal_entries',
+        });
 
-      if (entryError || !entry) {
-        throw entryError ?? new Error('Failed to insert posted entry');
-      }
+        expect(draftHistory).toHaveLength(1);
+        expect(draftHistory[0].action).toBe(AuditAction.Insert);
+        expect(draftHistory[0].old_data).toBeNull();
+        expect(draftHistory[0].new_data?.status).toBe(JournalEntryStatus.Draft);
+        expect(draftHistory[0].actor_id).toBe(USER_ID);
 
-      createdEntryIds.push(entry.id);
+        // Real postEntry() path → status_change (draft → posted)
+        const posted = await journalEntriesService.post(draft.entry.id, {
+          actor_id: USER_ID,
+          actor_role: CompanyRole.Owner,
+        });
+        expect(posted.entry.status).toBe(JournalEntryStatus.Posted);
 
-      const { error: linesError } = await supabase.client.from('journal_lines').insert(
-        lines.map((line) => ({
-          journal_entry_id: entry.id,
-          ...line,
-        })),
-      );
-
-      if (linesError) {
-        throw linesError;
-      }
-
-      return { id: entry.id, lines };
-    }
-
-    it('returns a journal entry audit lifecycle including insert and reversal records', async () => {
-      const draftId = await insertDraftJournalEntry('audit-log lifecycle draft probe');
-      const posted = await insertPostedJournalEntry('audit-log lifecycle posted probe');
-
-      const { data: originalPeriod, error: periodError } = await supabase.client
-        .from('accounting_periods')
-        .select('period_end')
-        .eq('company_id', COMPANY_ID)
-        .order('period_start', { ascending: true })
-        .limit(1)
-        .single();
-
-      if (periodError || !originalPeriod) {
-        throw periodError ?? new Error('Period not found');
-      }
-
-      const nextPeriod = await getNextOpenPeriod(originalPeriod.period_end);
-      const reversalNumber = await nextEntryNumber();
-      const postedAt = new Date().toISOString();
-
-      const { data: reversalEntry, error: reversalError } = await supabase.client
-        .from('journal_entries')
-        .insert({
+        const postedHistory = await auditLogService.find({
           company_id: COMPANY_ID,
-          entry_number: reversalNumber,
-          period_id: nextPeriod.id,
-          entry_date: nextPeriod.period_start,
-          entry_type: JournalEntryType.Reversal,
-          status: JournalEntryStatus.Posted,
-          narration: `Reversal of audit lifecycle probe ${posted.id}`,
-          reverses_entry_id: posted.id,
+          record_id: draft.entry.id,
+          table_name: 'journal_entries',
+        });
+
+        expect(postedHistory.some((row) => row.action === AuditAction.Insert)).toBe(true);
+
+        const statusChange = postedHistory.find(
+          (row) => row.action === AuditAction.StatusChange,
+        );
+        expect(statusChange).toBeDefined();
+        expect(statusChange?.old_data?.status).toBe(JournalEntryStatus.Draft);
+        expect(statusChange?.new_data?.status).toBe(JournalEntryStatus.Posted);
+        expect(statusChange?.actor_id).toBe(USER_ID);
+
+        // Real reverseEntry() path — schema.log_journal_entry_change:
+        //   • reversing entry INSERT → action = insert (distinct record_id)
+        //   • original UPDATE to reversed → action = reversal (distinct row on original)
+        const reversal = await journalEntriesService.reverse(draft.entry.id, {
           created_by: USER_ID,
-          posted_at: postedAt,
-        })
-        .select('id')
-        .single();
+        });
+        createdEntryIds.push(reversal.reversal.entry.id);
 
-      if (reversalError || !reversalEntry) {
-        throw reversalError ?? new Error('Failed to insert reversal entry');
-      }
+        expect(reversal.original.entry.status).toBe(JournalEntryStatus.Reversed);
+        expect(reversal.original.entry.reversed_by_entry_id).toBe(reversal.reversal.entry.id);
+        expect(reversal.reversal.entry.entry_type).toBe(JournalEntryType.Reversal);
+        expect(reversal.reversal.entry.reverses_entry_id).toBe(draft.entry.id);
 
-      createdEntryIds.push(reversalEntry.id);
+        const reversalEntryHistory = await auditLogService.find({
+          company_id: COMPANY_ID,
+          record_id: reversal.reversal.entry.id,
+          table_name: 'journal_entries',
+        });
 
-      const { error: reversalLinesError } = await supabase.client.from('journal_lines').insert(
-        posted.lines.map((line) => ({
-          journal_entry_id: reversalEntry.id,
-          line_number: line.line_number,
-          account_id: line.account_id,
-          debit: line.credit,
-          credit: line.debit,
-        })),
-      );
+        expect(reversalEntryHistory).toHaveLength(1);
+        expect(reversalEntryHistory[0].action).toBe(AuditAction.Insert);
+        expect(reversalEntryHistory[0].new_data?.entry_type).toBe(JournalEntryType.Reversal);
+        expect(reversalEntryHistory[0].new_data?.status).toBe(JournalEntryStatus.Posted);
+        expect(reversalEntryHistory[0].new_data?.reverses_entry_id).toBe(draft.entry.id);
 
-      if (reversalLinesError) {
-        throw reversalLinesError;
-      }
+        const originalHistory = await auditLogService.find({
+          company_id: COMPANY_ID,
+          record_id: draft.entry.id,
+          table_name: 'journal_entries',
+        });
 
-      const draftHistory = await service.find({
-        company_id: COMPANY_ID,
-        record_id: draftId,
-        table_name: 'journal_entries',
-      });
+        const reversalAudit = originalHistory.find(
+          (row) => row.action === AuditAction.Reversal,
+        );
+        expect(reversalAudit).toBeDefined();
+        expect(reversalAudit?.old_data?.status).toBe(JournalEntryStatus.Posted);
+        expect(reversalAudit?.new_data?.status).toBe(JournalEntryStatus.Reversed);
+        expect(reversalAudit?.new_data?.reversed_by_entry_id).toBe(
+          reversal.reversal.entry.id,
+        );
 
-      expect(draftHistory.length).toBeGreaterThanOrEqual(1);
-      expect(draftHistory[0].action).toBe(AuditAction.Insert);
-      expect(draftHistory[0].old_data).toBeNull();
-      expect(draftHistory[0].new_data?.status).toBe(JournalEntryStatus.Draft);
-      expect(draftHistory[0].actor_id).toBe(USER_ID);
+        // Two distinct rows: insert on the reversing entry, reversal on the original
+        expect(reversalEntryHistory[0].id).not.toBe(reversalAudit?.id);
+        expect(reversalEntryHistory[0].record_id).toBe(reversal.reversal.entry.id);
+        expect(reversalAudit?.record_id).toBe(draft.entry.id);
 
-      const postedHistory = await service.find({
-        company_id: COMPANY_ID,
-        record_id: posted.id,
-        table_name: 'journal_entries',
-      });
+        // Lifecycle on original: insert + status_change + reversal (three distinct actions)
+        expect(originalHistory.some((row) => row.action === AuditAction.Insert)).toBe(true);
+        expect(originalHistory.some((row) => row.action === AuditAction.StatusChange)).toBe(
+          true,
+        );
+        expect(originalHistory.some((row) => row.action === AuditAction.Reversal)).toBe(true);
 
-      expect(postedHistory.length).toBeGreaterThanOrEqual(1);
-      expect(postedHistory[0].action).toBe(AuditAction.Insert);
-      expect(postedHistory[0].new_data?.status).toBe(JournalEntryStatus.Posted);
+        const actorFiltered = await auditLogService.find({
+          company_id: COMPANY_ID,
+          actor_id: USER_ID,
+          table_name: 'journal_entries',
+        });
 
-      const reversalHistory = await service.find({
-        company_id: COMPANY_ID,
-        record_id: reversalEntry.id,
-        table_name: 'journal_entries',
-      });
-
-      expect(reversalHistory).toHaveLength(1);
-      expect(reversalHistory[0].action).toBe(AuditAction.Insert);
-      expect(reversalHistory[0].new_data?.entry_type).toBe(JournalEntryType.Reversal);
-      expect(reversalHistory[0].new_data?.reverses_entry_id).toBe(posted.id);
-
-      const actorFiltered = await service.find({
-        company_id: COMPANY_ID,
-        actor_id: USER_ID,
-        table_name: 'journal_entries',
-        from: '2026-08-22',
-        to: '2026-08-22',
-      });
-
-      expect(actorFiltered.some((row) => row.record_id === draftId)).toBe(true);
-      expect(actorFiltered.some((row) => row.record_id === posted.id)).toBe(true);
-      expect(actorFiltered.some((row) => row.record_id === reversalEntry.id)).toBe(true);
-    });
+        expect(actorFiltered.some((row) => row.record_id === draft.entry.id)).toBe(true);
+        expect(
+          actorFiltered.some((row) => row.record_id === reversal.reversal.entry.id),
+        ).toBe(true);
+      },
+      30000,
+    );
 
     it('blocks UPDATE and DELETE against audit_log via block_audit_log_mutation', async () => {
-      const rows = await service.find({
+      const rows = await auditLogService.find({
         company_id: COMPANY_ID,
         table_name: 'journal_entries',
       });
@@ -332,7 +241,7 @@ const USER_ID = INTEGRATION_USER_ID;
       expect(deleteError?.message).toMatch(/immutable/i);
       expect(deleteError?.message).toMatch(/DELETE/i);
 
-      const stillThere = await service.find({
+      const stillThere = await auditLogService.find({
         company_id: COMPANY_ID,
         record_id: target.record_id,
         table_name: target.table_name,

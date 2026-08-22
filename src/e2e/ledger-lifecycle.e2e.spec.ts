@@ -117,6 +117,10 @@ const hasSupabase = Boolean(
       fromStatus: JournalEntryStatus,
       toStatus: JournalEntryStatus,
       step: string,
+      extra?: (row: {
+        old_data: Record<string, unknown> | null;
+        new_data: Record<string, unknown> | null;
+      }) => void,
     ): Promise<void> {
       const audit = await auditLogService.find({
         company_id: E2E_COMPANY_ID,
@@ -126,10 +130,19 @@ const hasSupabase = Boolean(
 
       expect(audit.some((row) => row.action === AuditAction.Insert)).toBe(true);
 
-      const statusChange = audit.find((row) => row.action === AuditAction.StatusChange);
+      const statusChange = audit.find(
+        (row) =>
+          row.action === AuditAction.StatusChange &&
+          row.old_data?.status === fromStatus &&
+          row.new_data?.status === toStatus,
+      );
       expect(statusChange).toBeDefined();
       expect(statusChange?.old_data?.status).toBe(fromStatus);
       expect(statusChange?.new_data?.status).toBe(toStatus);
+
+      if (extra && statusChange) {
+        extra(statusChange);
+      }
 
       // eslint-disable-next-line no-console
       console.log(`[AUDIT OK] ${step}: ${fromStatus} → ${toStatus} status_change logged`);
@@ -204,6 +217,12 @@ const hasSupabase = Boolean(
         actor_role: CompanyRole.Accountant,
       });
       expect(pending.entry.status).toBe(JournalEntryStatus.PendingApproval);
+      await assertStatusChangeAudit(
+        aboveThresholdDraft.entry.id,
+        JournalEntryStatus.Draft,
+        JournalEntryStatus.PendingApproval,
+        'Stage 9 — submit for approval audit',
+      );
       await assertTrialBalanced('Stage 9 — above-threshold entry pending approval (still unposted)');
 
       const approved = await journalEntriesService.approve(pending.entry.id, {
@@ -212,7 +231,58 @@ const hasSupabase = Boolean(
       });
       expect(approved.entry.status).toBe(JournalEntryStatus.Posted);
       expect(approved.entry.approved_by).toBe(E2E_OWNER_ID);
+      await assertStatusChangeAudit(
+        aboveThresholdDraft.entry.id,
+        JournalEntryStatus.PendingApproval,
+        JournalEntryStatus.Posted,
+        'Stage 9 — Owner approve audit',
+        (row) => {
+          expect(row.new_data?.approved_by).toBe(E2E_OWNER_ID);
+          expect(row.new_data?.approved_at).toBeTruthy();
+        },
+      );
       await assertTrialBalanced('Stage 9 — above-threshold entry approved and posted');
+
+      // Stage 9 rejection path — separate above-threshold entry (does not affect ledger)
+      const rejectDraft = await journalEntriesService.create({
+        company_id: E2E_COMPANY_ID,
+        period_id: janPeriodId,
+        entry_date: `${fiscalYear}-01-13`,
+        narration: 'E2E above-threshold rejection probe',
+        created_by: E2E_ACCOUNTANT_ID,
+        lines: [
+          { line_number: 1, account_id: expenseAccountId, debit: APPROVAL_THRESHOLD, credit: 0 },
+          { line_number: 2, account_id: cashAccountId, debit: 0, credit: APPROVAL_THRESHOLD },
+        ],
+      });
+      trackedEntryIds.push(rejectDraft.entry.id);
+
+      const rejectPending = await journalEntriesService.post(rejectDraft.entry.id, {
+        actor_id: E2E_ACCOUNTANT_ID,
+        actor_role: CompanyRole.Accountant,
+      });
+      expect(rejectPending.entry.status).toBe(JournalEntryStatus.PendingApproval);
+
+      const rejected = await journalEntriesService.reject(rejectPending.entry.id, {
+        actor_id: E2E_OWNER_ID,
+        actor_role: CompanyRole.Owner,
+        rejection_reason: 'E2E rejection — documentation incomplete',
+      });
+      expect(rejected.entry.status).toBe(JournalEntryStatus.Rejected);
+      expect(rejected.entry.rejection_reason).toBe('E2E rejection — documentation incomplete');
+      await assertStatusChangeAudit(
+        rejectDraft.entry.id,
+        JournalEntryStatus.PendingApproval,
+        JournalEntryStatus.Rejected,
+        'Stage 9 — Owner reject audit',
+        (row) => {
+          expect(row.new_data?.rejection_reason).toBe(
+            'E2E rejection — documentation incomplete',
+          );
+          expect(row.new_data?.rejected_by).toBe(E2E_OWNER_ID);
+        },
+      );
+      await assertTrialBalanced('Stage 9 — rejected entry left ledger unchanged');
 
       // P&L activity for year-end close
       const revenueDraft = await journalEntriesService.create({
