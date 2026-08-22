@@ -27,6 +27,11 @@ export class JournalEntriesController {
     return this.journalEntriesService.findOne(id);
   }
 
+  @Post(':id/post')
+  post(@Param('id', ParseUUIDPipe) id: string) {
+    return this.journalEntriesService.post(id);
+  }
+
   @Patch(':id')
   update(@Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateJournalEntryDto) {
     return this.journalEntriesService.update(id, dto);
