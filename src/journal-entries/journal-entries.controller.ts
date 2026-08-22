@@ -2,6 +2,7 @@ import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post } from '@nestj
 import { JournalEntriesService } from './journal-entries.service';
 import { CreateJournalEntryDto } from './dto/create-journal-entry.dto';
 import { CreateOpeningBalanceDto } from './dto/create-opening-balance.dto';
+import { CreateYearEndClosingDto } from './dto/create-year-end-closing.dto';
 import { UpdateJournalEntryDto } from './dto/update-journal-entry.dto';
 import { ReverseJournalEntryDto } from './dto/reverse-journal-entry.dto';
 import {
@@ -22,6 +23,11 @@ export class JournalEntriesController {
   @Post('opening-balance')
   createOpeningBalance(@Body() dto: CreateOpeningBalanceDto) {
     return this.journalEntriesService.createOpeningBalance(dto);
+  }
+
+  @Post('year-end-close')
+  runYearEndClosing(@Body() dto: CreateYearEndClosingDto) {
+    return this.journalEntriesService.runYearEndClosing(dto);
   }
 
   @Get()

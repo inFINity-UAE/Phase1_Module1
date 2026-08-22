@@ -7,6 +7,9 @@ import { JournalEntryStatus } from '../common/enums/journal-entry-status.enum';
 import { PeriodStatus } from '../common/enums/period-status.enum';
 import { CreateJournalEntryDto } from './dto/create-journal-entry.dto';
 import { CreateOpeningBalanceDto } from './dto/create-opening-balance.dto';
+import { CreateYearEndClosingDto } from './dto/create-year-end-closing.dto';
+import { AccountCategory } from '../common/enums/account-category.enum';
+import { NormalBalance } from '../common/enums/normal-balance.enum';
 import { JournalEntryWithDetails } from './entities/journal-entry-with-details.entity';
 import { formatUnbalancedPostError } from './journal-entry-balance.util';
 import {
@@ -29,6 +32,9 @@ const ENTRY_ID = '66666666-6666-6666-6666-666666666666';
 const LINE_ID = '77777777-7777-7777-7777-777777777777';
 const NEXT_PERIOD_ID = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
 const REVERSAL_ENTRY_ID = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb';
+const RETAINED_EARNINGS_ID = '3e393fe1-29e4-46b3-b447-f0939b8683da';
+const INCOME_ACCOUNT_ID = 'f7dc3374-7da4-4c62-b05e-2bbd3ced77b2';
+const EXPENSE_ACCOUNT_ID = 'ca13540e-90c1-4184-bef6-fdc0a79b02c7';
 const FISCAL_YEAR = 2026;
 const OWNER_ID = 'cccccccc-cccc-cccc-cccc-cccccccccccc';
 
@@ -165,7 +171,12 @@ describe('JournalEntriesService', () => {
       findNextOpenPeriod: jest.fn(),
       findEarliestOpenPeriod: jest.fn(),
       hasOpeningBalanceForFiscalYear: jest.fn(),
+      hasYearEndClosingForFiscalYear: jest.fn(),
+      findLatestPeriodForFiscalYear: jest.fn(),
+      findRetainedEarningsAccount: jest.fn(),
+      getProfitAndLossBalancesForFiscalYear: jest.fn(),
       insertOpeningBalanceDraft: jest.fn(),
+      insertYearEndClosingPosted: jest.fn(),
       deleteEntry: jest.fn(),
       getAccountTrialBalance: jest.fn(),
       getCompanySettings: jest.fn(),
@@ -1124,6 +1135,160 @@ describe('JournalEntriesService', () => {
         `An opening balance entry already exists for fiscal year ${FISCAL_YEAR}`,
       );
       expect(repository.insertOpeningBalanceDraft).not.toHaveBeenCalled();
+      expect(repository.postEntry).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('year-end closing', () => {
+    const yearEndDto: CreateYearEndClosingDto = {
+      company_id: COMPANY_ID,
+      fiscal_year: FISCAL_YEAR,
+      created_by: USER_ID,
+    };
+
+    const latestPeriod = {
+      id: PERIOD_ID,
+      company_id: COMPANY_ID,
+      period_start: '2026-02-01',
+      period_end: '2026-02-28',
+      fiscal_year: FISCAL_YEAR,
+      status: PeriodStatus.Open,
+      soft_closed_by: null,
+      soft_closed_at: null,
+      closed_by: null,
+      closed_at: null,
+      reopened_by: null,
+      reopened_at: null,
+      reopen_reason: null,
+      created_at: '2026-08-22T00:00:00.000Z',
+    };
+
+    const plBalances = [
+      {
+        account_id: INCOME_ACCOUNT_ID,
+        category: AccountCategory.Income,
+        normal_balance: NormalBalance.Credit,
+        total_debit: 0,
+        total_credit: 1000,
+        balance: 1000,
+      },
+      {
+        account_id: EXPENSE_ACCOUNT_ID,
+        category: AccountCategory.Expense,
+        normal_balance: NormalBalance.Debit,
+        total_debit: 600,
+        total_credit: 0,
+        balance: 600,
+      },
+    ];
+
+    it('posts a balanced year-end closing entry that zeroes P&L into Retained Earnings', async () => {
+      const draft = draftDetails({
+        entry: {
+          ...draftDetails().entry,
+          entry_type: JournalEntryType.YearEndClosing,
+          entry_date: '2026-02-28',
+          narration: `Year-end closing for fiscal year ${FISCAL_YEAR}`,
+        },
+        lines: [
+          {
+            id: LINE_ID,
+            journal_entry_id: ENTRY_ID,
+            line_number: 1,
+            account_id: INCOME_ACCOUNT_ID,
+            debit: 1000,
+            credit: 0,
+            description: 'Year-end close — zero income balance',
+            cost_center: null,
+            created_at: '2026-08-22T00:00:00.000Z',
+          },
+          {
+            id: '88888888-8888-8888-8888-888888888888',
+            journal_entry_id: ENTRY_ID,
+            line_number: 2,
+            account_id: EXPENSE_ACCOUNT_ID,
+            debit: 0,
+            credit: 600,
+            description: 'Year-end close — zero expense balance',
+            cost_center: null,
+            created_at: '2026-08-22T00:00:00.000Z',
+          },
+          {
+            id: '99999999-9999-9999-9999-999999999999',
+            journal_entry_id: ENTRY_ID,
+            line_number: 3,
+            account_id: RETAINED_EARNINGS_ID,
+            debit: 0,
+            credit: 400,
+            description: 'Year-end close — net P&L to Retained Earnings',
+            cost_center: null,
+            created_at: '2026-08-22T00:00:00.000Z',
+          },
+        ],
+      });
+      const posted = draftDetails({
+        entry: {
+          ...draft.entry,
+          status: JournalEntryStatus.Posted,
+          posted_at: '2026-08-22T12:00:00.000Z',
+        },
+        lines: draft.lines,
+      });
+
+      repository.hasYearEndClosingForFiscalYear.mockResolvedValue(false);
+      repository.findLatestPeriodForFiscalYear.mockResolvedValue(latestPeriod);
+      repository.findRetainedEarningsAccount.mockResolvedValue({
+        id: RETAINED_EARNINGS_ID,
+      });
+      repository.getProfitAndLossBalancesForFiscalYear.mockResolvedValue(plBalances);
+      repository.insertYearEndClosingPosted.mockResolvedValue(posted);
+
+      const result = await service.runYearEndClosing(yearEndDto);
+
+      expect(repository.hasYearEndClosingForFiscalYear).toHaveBeenCalledWith(
+        COMPANY_ID,
+        FISCAL_YEAR,
+      );
+      expect(repository.insertYearEndClosingPosted).toHaveBeenCalledWith(
+        yearEndDto,
+        PERIOD_ID,
+        '2026-02-28',
+        expect.arrayContaining([
+          expect.objectContaining({
+            account_id: INCOME_ACCOUNT_ID,
+            debit: 1000,
+            credit: 0,
+          }),
+          expect.objectContaining({
+            account_id: EXPENSE_ACCOUNT_ID,
+            debit: 0,
+            credit: 600,
+          }),
+          expect.objectContaining({
+            account_id: RETAINED_EARNINGS_ID,
+            debit: 0,
+            credit: 400,
+          }),
+        ]),
+      );
+      expect(result.entry.entry_type).toBe(JournalEntryType.YearEndClosing);
+      expect(result.entry.status).toBe(JournalEntryStatus.Posted);
+      expect(repository.postEntry).not.toHaveBeenCalled();
+      const totalDebit = result.lines.reduce((sum, line) => sum + line.debit, 0);
+      const totalCredit = result.lines.reduce((sum, line) => sum + line.credit, 0);
+      expect(totalDebit).toBe(totalCredit);
+    });
+
+    it('attempting year-end close a second time for the same fiscal year is rejected cleanly', async () => {
+      repository.hasYearEndClosingForFiscalYear.mockResolvedValue(true);
+
+      await expect(service.runYearEndClosing(yearEndDto)).rejects.toThrow(
+        BadRequestException,
+      );
+      await expect(service.runYearEndClosing(yearEndDto)).rejects.toThrow(
+        `A year-end closing entry already exists for fiscal year ${FISCAL_YEAR}`,
+      );
+      expect(repository.insertYearEndClosingPosted).not.toHaveBeenCalled();
       expect(repository.postEntry).not.toHaveBeenCalled();
     });
   });

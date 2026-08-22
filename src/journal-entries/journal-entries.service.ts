@@ -21,6 +21,7 @@ import {
 import { JournalEntryType } from '../common/enums/journal-entry-type.enum';
 import { CreateJournalEntryDto } from './dto/create-journal-entry.dto';
 import { CreateOpeningBalanceDto } from './dto/create-opening-balance.dto';
+import { CreateYearEndClosingDto } from './dto/create-year-end-closing.dto';
 import { UpdateJournalEntryDto } from './dto/update-journal-entry.dto';
 import { ReverseJournalEntryDto } from './dto/reverse-journal-entry.dto';
 import {
@@ -40,6 +41,7 @@ import {
   formatUnbalancedPostError,
   isJournalBalancePostRejection,
 } from './journal-entry-balance.util';
+import { buildYearEndClosingLines, YearEndClosingLineInput } from './year-end-closing.util';
 import {
   JOURNAL_ENTRIES_REPOSITORY,
   JournalEntriesRepository,
@@ -138,6 +140,98 @@ export class JournalEntriesService {
       }
 
       handleDatabaseError(error);
+    }
+  }
+
+  /**
+   * [feature-spec] Year-end closing: transfer P&L to Retained Earnings.
+   * [Rules §4.11] Balance-sheet accounts roll forward unchanged.
+   * [Product decision 2026-08-21] One-time per company per fiscal year.
+   */
+  async runYearEndClosing(
+    dto: CreateYearEndClosingDto,
+  ): Promise<JournalEntryWithDetails> {
+    const alreadyClosed =
+      await this.journalEntriesRepository.hasYearEndClosingForFiscalYear(
+        dto.company_id,
+        dto.fiscal_year,
+      );
+    if (alreadyClosed) {
+      throw new BadRequestException(
+        `A year-end closing entry already exists for fiscal year ${dto.fiscal_year}. ` +
+          'Running year-end close again would double-transfer P&L into Retained Earnings.',
+      );
+    }
+
+    const closingPeriod =
+      await this.journalEntriesRepository.findLatestPeriodForFiscalYear(
+        dto.company_id,
+        dto.fiscal_year,
+      );
+    if (!closingPeriod) {
+      throw new BadRequestException(
+        `No accounting period found for fiscal year ${dto.fiscal_year}`,
+      );
+    }
+
+    const retainedEarnings =
+      await this.journalEntriesRepository.findRetainedEarningsAccount(dto.company_id);
+    if (!retainedEarnings) {
+      throw new BadRequestException(
+        'Retained Earnings system account (3100) was not found for this company',
+      );
+    }
+
+    const plBalances =
+      await this.journalEntriesRepository.getProfitAndLossBalancesForFiscalYear(
+        dto.company_id,
+        dto.fiscal_year,
+      );
+    if (!plBalances.length) {
+      throw new BadRequestException(
+        `No income or expense balances to close for fiscal year ${dto.fiscal_year}`,
+      );
+    }
+
+    const lines = buildYearEndClosingLines(plBalances, retainedEarnings.id);
+    if (!lines.length) {
+      throw new BadRequestException(
+        `No closing lines could be generated for fiscal year ${dto.fiscal_year}`,
+      );
+    }
+
+    const entryDate = dto.entry_date ?? closingPeriod.period_end;
+
+    this.assertYearEndClosingLinesBalanced(lines);
+
+    try {
+      const posted = await this.journalEntriesRepository.insertYearEndClosingPosted(
+        dto,
+        closingPeriod.id,
+        entryDate,
+        lines,
+      );
+
+      if (!posted.entry.posted_at) {
+        throw new InternalServerErrorException(
+          `Year-end closing entry ${posted.entry.entry_number} was posted but posted_at was not set`,
+        );
+      }
+
+      return posted;
+    } catch (error) {
+      handleDatabaseError(error);
+    }
+  }
+
+  private assertYearEndClosingLinesBalanced(lines: YearEndClosingLineInput[]): void {
+    const totalDebit = lines.reduce((sum, line) => sum + (line.debit ?? 0), 0);
+    const totalCredit = lines.reduce((sum, line) => sum + (line.credit ?? 0), 0);
+
+    if (Math.round(totalDebit * 100) !== Math.round(totalCredit * 100)) {
+      throw new InternalServerErrorException(
+        `Year-end closing lines are unbalanced: debits ${totalDebit.toFixed(2)} vs credits ${totalCredit.toFixed(2)}`,
+      );
     }
   }
 

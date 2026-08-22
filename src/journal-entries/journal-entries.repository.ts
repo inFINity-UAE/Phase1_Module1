@@ -1,5 +1,6 @@
 import { CreateJournalEntryDto } from './dto/create-journal-entry.dto';
 import { CreateOpeningBalanceDto } from './dto/create-opening-balance.dto';
+import { CreateYearEndClosingDto } from './dto/create-year-end-closing.dto';
 import { UpdateJournalLineDto } from './dto/update-journal-line.dto';
 import { AccountingPeriod } from '../accounting-periods/entities/accounting-period.entity';
 import { CompanySettings } from '../company-settings/entities/company-settings.entity';
@@ -9,6 +10,8 @@ import { JournalAttachment } from './entities/journal-attachment.entity';
 import { JournalEntry } from './entities/journal-entry.entity';
 import { JournalLine } from './entities/journal-line.entity';
 import { TrialBalanceTotals } from './entities/trial-balance-totals.entity';
+import { ProfitAndLossAccountBalance } from './entities/profit-and-loss-account-balance.entity';
+import { YearEndClosingLineInput } from './year-end-closing.util';
 import { JournalEntryReversalResult } from './entities/journal-entry-reversal-result.entity';
 
 export const JOURNAL_ENTRIES_REPOSITORY = Symbol('JOURNAL_ENTRIES_REPOSITORY');
@@ -31,9 +34,28 @@ export interface JournalEntriesRepository {
     companyId: string,
     fiscalYear: number,
   ): Promise<boolean>;
+  hasYearEndClosingForFiscalYear(
+    companyId: string,
+    fiscalYear: number,
+  ): Promise<boolean>;
+  findLatestPeriodForFiscalYear(
+    companyId: string,
+    fiscalYear: number,
+  ): Promise<AccountingPeriod | null>;
+  findRetainedEarningsAccount(companyId: string): Promise<{ id: string } | null>;
+  getProfitAndLossBalancesForFiscalYear(
+    companyId: string,
+    fiscalYear: number,
+  ): Promise<ProfitAndLossAccountBalance[]>;
   insertOpeningBalanceDraft(
     dto: CreateOpeningBalanceDto,
     periodId: string,
+  ): Promise<JournalEntryWithDetails>;
+  insertYearEndClosingPosted(
+    dto: CreateYearEndClosingDto,
+    periodId: string,
+    entryDate: string,
+    lines: YearEndClosingLineInput[],
   ): Promise<JournalEntryWithDetails>;
   deleteEntry(id: string): Promise<void>;
   getAccountTrialBalance(
