@@ -1,36 +1,68 @@
+import { Type } from 'class-transformer';
 import {
-  IsBoolean,
+  ArrayMinSize,
+  IsArray,
   IsDateString,
-  IsEnum,
   IsInt,
+  IsNumber,
   IsOptional,
   IsString,
+  Min,
+  ValidateNested,
 } from 'class-validator';
-import { JournalEntryType } from '../../common/enums/journal-entry-type.enum';
-import { JournalEntryStatus } from '../../common/enums/journal-entry-status.enum';
 import { IsPostgresUuid } from '../../common/validators/is-postgres-uuid';
 
-/** Writable columns of public.journal_entries. Required = NOT NULL with no default. [schema.sql] */
+/** Line input nested on draft journal entry create — [schema.sql journal_lines] */
+export class CreateJournalEntryLineInputDto {
+  @IsInt()
+  line_number!: number;
+
+  @IsPostgresUuid()
+  account_id!: string;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  debit?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  credit?: number;
+
+  @IsOptional()
+  @IsString()
+  description?: string;
+
+  @IsOptional()
+  @IsString()
+  cost_center?: string;
+}
+
+/** Attachment input nested on draft journal entry create — [schema.sql journal_attachments] */
+export class CreateJournalAttachmentInputDto {
+  @IsString()
+  file_name!: string;
+
+  @IsString()
+  file_url!: string;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  file_size_bytes?: number;
+}
+
+/** Draft manual journal entry create — [feature-spec] narration, reference, attachments. */
 export class CreateJournalEntryDto {
   @IsPostgresUuid()
   company_id!: string;
-
-  @IsInt()
-  entry_number!: number;
 
   @IsPostgresUuid()
   period_id!: string;
 
   @IsDateString()
   entry_date!: string;
-
-  @IsOptional()
-  @IsEnum(JournalEntryType)
-  entry_type?: JournalEntryType;
-
-  @IsOptional()
-  @IsEnum(JournalEntryStatus)
-  status?: JournalEntryStatus;
 
   @IsString()
   narration!: string;
@@ -39,46 +71,18 @@ export class CreateJournalEntryDto {
   @IsString()
   reference_number?: string;
 
-  @IsOptional()
-  @IsPostgresUuid()
-  reverses_entry_id?: string;
-
-  @IsOptional()
-  @IsPostgresUuid()
-  reversed_by_entry_id?: string;
-
-  @IsOptional()
-  @IsPostgresUuid()
-  recurring_template_id?: string;
-
-  @IsOptional()
-  @IsBoolean()
-  requires_approval?: boolean;
-
-  @IsOptional()
-  @IsPostgresUuid()
-  approved_by?: string;
-
-  @IsOptional()
-  @IsDateString()
-  approved_at?: string;
-
-  @IsOptional()
-  @IsPostgresUuid()
-  rejected_by?: string;
-
-  @IsOptional()
-  @IsDateString()
-  rejected_at?: string;
-
-  @IsOptional()
-  @IsString()
-  rejection_reason?: string;
-
   @IsPostgresUuid()
   created_by!: string;
 
+  @IsArray()
+  @ArrayMinSize(1)
+  @ValidateNested({ each: true })
+  @Type(() => CreateJournalEntryLineInputDto)
+  lines!: CreateJournalEntryLineInputDto[];
+
   @IsOptional()
-  @IsDateString()
-  posted_at?: string;
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => CreateJournalAttachmentInputDto)
+  attachments?: CreateJournalAttachmentInputDto[];
 }

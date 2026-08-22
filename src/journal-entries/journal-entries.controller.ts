@@ -17,6 +17,11 @@ export class JournalEntriesController {
     return this.journalEntriesService.findAll();
   }
 
+  @Get(':id/attachments')
+  getAttachments(@Param('id', ParseUUIDPipe) id: string) {
+    return this.journalEntriesService.getAttachments(id);
+  }
+
   @Get(':id')
   findOne(@Param('id', ParseUUIDPipe) id: string) {
     return this.journalEntriesService.findOne(id);
