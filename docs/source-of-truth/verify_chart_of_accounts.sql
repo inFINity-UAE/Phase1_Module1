@@ -21,7 +21,11 @@ checks AS (
   SELECT 'parent_depth_plus_one', count(*)::text, count(*) = 0
   FROM seed c JOIN seed p ON c.parent_account_id = p.id WHERE c.depth <> p.depth + 1
   UNION ALL
-  SELECT 'zakat_reserve_not_seeded_yet', count(*)::text, count(*) = 0
-  FROM seed WHERE account_name = 'Zakat Reserve'
+  SELECT 'zakat_reserve_present_liability', count(*)::text, count(*) = 1
+  FROM seed
+  WHERE account_name = 'Zakat Reserve'
+    AND category = 'liability'
+    AND left(account_number::text, 1) = '2'
+    AND normal_balance = 'credit'
 )
 SELECT * FROM checks ORDER BY check_name;
