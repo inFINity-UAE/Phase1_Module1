@@ -12,6 +12,7 @@ import { AccountingPeriodsModule } from '../accounting-periods/accounting-period
 import { SupabaseService } from '../database/supabase.service';
 import { JOURNAL_ENTRIES_REPOSITORY } from './journal-entries.repository';
 import { SupabaseJournalEntriesRepository } from './journal-entries.repository.supabase';
+import { JournalEntriesModule } from './journal-entries.module';
 import { JournalEntriesService } from './journal-entries.service';
 import { CreateYearEndClosingDto } from './dto/create-year-end-closing.dto';
 import * as yearEndClosingUtil from './year-end-closing.util';
@@ -59,14 +60,7 @@ async function resolveImbalanceProbeFiscalYear(
 
     beforeAll(async () => {
       const module: TestingModule = await Test.createTestingModule({
-        imports: [DatabaseModule, AccountingPeriodsModule],
-        providers: [
-          JournalEntriesService,
-          {
-            provide: JOURNAL_ENTRIES_REPOSITORY,
-            useClass: SupabaseJournalEntriesRepository,
-          },
-        ],
+        imports: [DatabaseModule, AccountingPeriodsModule, JournalEntriesModule],
       }).compile();
 
       service = module.get(JournalEntriesService);
@@ -259,10 +253,9 @@ async function resolveImbalanceProbeFiscalYear(
         const dto: CreateYearEndClosingDto = {
           company_id: COMPANY_ID,
           fiscal_year: FISCAL_YEAR,
-          created_by: USER_ID,
         };
 
-        const result = await service.runYearEndClosing(dto);
+        const result = await service.runYearEndClosing(dto, USER_ID);
         createdEntryIds.push(result.entry.id);
         yearEndAlreadyClosed = true;
 
@@ -302,7 +295,6 @@ async function resolveImbalanceProbeFiscalYear(
       const dto: CreateYearEndClosingDto = {
         company_id: COMPANY_ID,
         fiscal_year: imbalanceProbeFiscalYear,
-        created_by: USER_ID,
       };
 
       const originalBuild = yearEndClosingUtil.buildYearEndClosingLines;
@@ -323,7 +315,7 @@ async function resolveImbalanceProbeFiscalYear(
           return built;
         });
 
-      await expect(service.runYearEndClosing(dto)).rejects.toThrow(
+      await expect(service.runYearEndClosing(dto, USER_ID)).rejects.toThrow(
         /Cannot post journal entry .* total debits .* must equal total credits/i,
       );
 
@@ -333,7 +325,7 @@ async function resolveImbalanceProbeFiscalYear(
         await repository.hasYearEndClosingForFiscalYear(COMPANY_ID, imbalanceProbeFiscalYear),
       ).toBe(false);
 
-      const result = await service.runYearEndClosing(dto);
+      const result = await service.runYearEndClosing(dto, USER_ID);
       createdEntryIds.push(result.entry.id);
 
       expect(result.entry.entry_type).toBe(JournalEntryType.YearEndClosing);
@@ -357,16 +349,14 @@ async function resolveImbalanceProbeFiscalYear(
         const dto: CreateYearEndClosingDto = {
           company_id: COMPANY_ID,
           fiscal_year: FISCAL_YEAR,
-          created_by: USER_ID,
         };
-        const firstClose = await service.runYearEndClosing(dto);
+        const firstClose = await service.runYearEndClosing(dto, USER_ID);
         createdEntryIds.push(firstClose.entry.id);
         yearEndAlreadyClosed = true;
       }
       const dto: CreateYearEndClosingDto = {
         company_id: COMPANY_ID,
         fiscal_year: FISCAL_YEAR,
-        created_by: USER_ID,
       };
 
       const incomeBefore = await getAccountBalance(incomeAccountId);
@@ -380,7 +370,7 @@ async function resolveImbalanceProbeFiscalYear(
           .eq('period_id', closingPeriodId)
       ).count;
 
-      await expect(service.runYearEndClosing(dto)).rejects.toThrow(
+      await expect(service.runYearEndClosing(dto, USER_ID)).rejects.toThrow(
         `A year-end closing entry already exists for fiscal year ${FISCAL_YEAR}`,
       );
 

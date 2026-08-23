@@ -8,7 +8,11 @@ import {
   Patch,
   Post,
   Query,
+  UseGuards,
 } from '@nestjs/common';
+import { AuthenticatedUser } from '../auth/authenticated-user';
+import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { SupabaseAuthGuard } from '../auth/guards/supabase-auth.guard';
 import { RecurringJournalTemplatesService } from './recurring-journal-templates.service';
 import { CreateRecurringJournalTemplateDto } from './dto/create-recurring-journal-template.dto';
 import { UpdateRecurringJournalTemplateDto } from './dto/update-recurring-journal-template.dto';
@@ -21,8 +25,12 @@ export class RecurringJournalTemplatesController {
   constructor(private readonly templatesService: RecurringJournalTemplatesService) {}
 
   @Post()
-  create(@Body() dto: CreateRecurringJournalTemplateDto) {
-    return this.templatesService.create(dto);
+  @UseGuards(SupabaseAuthGuard)
+  create(
+    @Body() dto: CreateRecurringJournalTemplateDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.templatesService.create(dto, user.id);
   }
 
   @Post('run-due')

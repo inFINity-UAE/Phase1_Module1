@@ -5,7 +5,6 @@ config({ path: resolve(__dirname, '../../.env.local') });
 
 import { Test, TestingModule } from '@nestjs/testing';
 import { AuditAction } from '../common/enums/audit-action.enum';
-import { CompanyRole } from '../common/enums/company-role.enum';
 import { JournalEntryStatus } from '../common/enums/journal-entry-status.enum';
 import { JournalEntryType } from '../common/enums/journal-entry-type.enum';
 import { AccountingPeriodsModule } from '../accounting-periods/accounting-periods.module';
@@ -97,17 +96,19 @@ const USER_ID = INTEGRATION_USER_ID;
       'service-layer post and reverse produce insert, status_change, and reversal audit rows',
       async () => {
         // Draft create → insert audit only
-        const draft = await journalEntriesService.create({
-          company_id: COMPANY_ID,
-          period_id: periodId,
-          entry_date: '2026-01-15',
-          narration: 'audit-log service-layer draft probe',
-          created_by: USER_ID,
-          lines: [
-            { line_number: 1, account_id: cashAccountId, debit: 125, credit: 0 },
-            { line_number: 2, account_id: bankAccountId, debit: 0, credit: 125 },
-          ],
-        });
+        const draft = await journalEntriesService.create(
+          {
+            company_id: COMPANY_ID,
+            period_id: periodId,
+            entry_date: '2026-01-15',
+            narration: 'audit-log service-layer draft probe',
+            lines: [
+              { line_number: 1, account_id: cashAccountId, debit: 125, credit: 0 },
+              { line_number: 2, account_id: bankAccountId, debit: 0, credit: 125 },
+            ],
+          },
+          USER_ID,
+        );
         createdEntryIds.push(draft.entry.id);
 
         const draftHistory = await auditLogService.find({
@@ -123,10 +124,7 @@ const USER_ID = INTEGRATION_USER_ID;
         expect(draftHistory[0].actor_id).toBe(USER_ID);
 
         // Real postEntry() path → status_change (draft → posted)
-        const posted = await journalEntriesService.post(draft.entry.id, {
-          actor_id: USER_ID,
-          actor_role: CompanyRole.Owner,
-        });
+        const posted = await journalEntriesService.post(draft.entry.id, USER_ID);
         expect(posted.entry.status).toBe(JournalEntryStatus.Posted);
 
         const postedHistory = await auditLogService.find({

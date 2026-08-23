@@ -22,6 +22,7 @@ import {
 } from '../accounting-periods/accounting-periods.repository';
 import { AccountingPeriod } from '../accounting-periods/entities/accounting-period.entity';
 import { JournalEntriesService } from './journal-entries.service';
+import { CompanyMembersService } from '../company-members/company-members.service';
 
 const COMPANY_ID = '00000000-0000-0000-0000-000000000001';
 const PERIOD_ID = '22222222-2222-2222-2222-222222222222';
@@ -37,9 +38,6 @@ const INCOME_ACCOUNT_ID = 'f7dc3374-7da4-4c62-b05e-2bbd3ced77b2';
 const EXPENSE_ACCOUNT_ID = 'ca13540e-90c1-4184-bef6-fdc0a79b02c7';
 const FISCAL_YEAR = 2026;
 const OWNER_ID = 'cccccccc-cccc-cccc-cccc-cccccccccccc';
-
-const ownerActor = { actor_id: OWNER_ID, actor_role: CompanyRole.Owner };
-const accountantActor = { actor_id: USER_ID, actor_role: CompanyRole.Accountant };
 
 function pgError(code: string, message: string): PostgrestError {
   return { code, message, details: '', hint: '', name: 'PostgrestError' } as PostgrestError;
@@ -138,6 +136,9 @@ describe('JournalEntriesService', () => {
   let service: JournalEntriesService;
   let repository: jest.Mocked<JournalEntriesRepository>;
   let periodsRepository: jest.Mocked<AccountingPeriodsRepository>;
+  let companyMembersService: jest.Mocked<
+    Pick<CompanyMembersService, 'resolveRoleForJournalEntry'>
+  >;
 
   const companySettingsOpen = {
     company_id: COMPANY_ID,
@@ -154,7 +155,6 @@ describe('JournalEntriesService', () => {
     entry_date: '2026-01-15',
     narration: 'Test narration',
     reference_number: 'REF-001',
-    created_by: USER_ID,
     lines: [
       { line_number: 1, account_id: ACCOUNT_A, debit: 100, credit: 0 },
       { line_number: 2, account_id: ACCOUNT_B, debit: 0, credit: 100 },
@@ -198,11 +198,19 @@ describe('JournalEntriesService', () => {
     };
     periodsRepository.findById.mockResolvedValue(samplePeriod());
 
+    companyMembersService = {
+      resolveRoleForJournalEntry: jest.fn(async (userId: string, _entryId: string) => ({
+        companyId: COMPANY_ID,
+        role: userId === OWNER_ID ? CompanyRole.Owner : CompanyRole.Accountant,
+      })),
+    };
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         JournalEntriesService,
         { provide: JOURNAL_ENTRIES_REPOSITORY, useValue: repository },
         { provide: ACCOUNTING_PERIODS_REPOSITORY, useValue: periodsRepository },
+        { provide: CompanyMembersService, useValue: companyMembersService },
       ],
     }).compile();
 
@@ -213,7 +221,7 @@ describe('JournalEntriesService', () => {
     const created = draftDetails();
     repository.insertDraft.mockResolvedValue(created);
 
-    await expect(service.create(baseDto)).resolves.toEqual(created);
+    await expect(service.create(baseDto, USER_ID)).resolves.toEqual(created);
     expect(created.entry.status).toBe(JournalEntryStatus.Draft);
     expect(created.lines.reduce((s, l) => s + l.debit, 0)).toBe(
       created.lines.reduce((s, l) => s + l.credit, 0),
@@ -256,17 +264,17 @@ describe('JournalEntriesService', () => {
     });
     repository.insertDraft.mockResolvedValue(created);
 
-    const result = await service.create(unbalancedDto);
+    const result = await service.create(unbalancedDto, USER_ID);
     expect(result.entry.status).toBe(JournalEntryStatus.Draft);
     expect(result.lines[0].debit).toBe(100);
     expect(result.lines[1].credit).toBe(50);
   });
 
   it('creating an entry with zero lines fails', async () => {
-    await expect(service.create({ ...baseDto, lines: [] })).rejects.toThrow(
+    await expect(service.create({ ...baseDto, lines: [] }, USER_ID)).rejects.toThrow(
       BadRequestException,
     );
-    await expect(service.create({ ...baseDto, lines: [] })).rejects.toThrow(
+    await expect(service.create({ ...baseDto, lines: [] }, USER_ID)).rejects.toThrow(
       'Journal entry must have at least one line',
     );
     expect(repository.insertDraft).not.toHaveBeenCalled();
@@ -298,7 +306,7 @@ describe('JournalEntriesService', () => {
       ],
     };
 
-    const result = await service.create(dto);
+    const result = await service.create(dto, USER_ID);
     expect(result.attachments).toHaveLength(1);
     expect(result.attachments[0].file_name).toBe('invoice.pdf');
 
@@ -331,7 +339,7 @@ describe('JournalEntriesService', () => {
       .mockResolvedValueOnce(posted);
     repository.postEntry.mockResolvedValue(posted.entry);
 
-    const result = await service.post(ENTRY_ID, ownerActor);
+    const result = await service.post(ENTRY_ID, OWNER_ID, {});
 
     expect(repository.postEntry).toHaveBeenCalledWith(ENTRY_ID);
     expect(result.entry.status).toBe(JournalEntryStatus.Posted);
@@ -379,8 +387,8 @@ describe('JournalEntriesService', () => {
       unbalanced.lines,
     );
 
-    await expect(service.post(ENTRY_ID, ownerActor)).rejects.toThrow(BadRequestException);
-    await expect(service.post(ENTRY_ID, ownerActor)).rejects.toThrow(expectedMessage);
+    await expect(service.post(ENTRY_ID, OWNER_ID, {})).rejects.toThrow(BadRequestException);
+    await expect(service.post(ENTRY_ID, OWNER_ID, {})).rejects.toThrow(expectedMessage);
   });
 
   it('after posting, attempting to edit a line fails with a DB trigger error', async () => {
@@ -611,7 +619,7 @@ describe('JournalEntriesService', () => {
       repository.getCompanySettings.mockResolvedValue(companySettingsOpen);
       repository.postEntry.mockResolvedValue(posted.entry);
 
-      const result = await service.post(ENTRY_ID, ownerActor);
+      const result = await service.post(ENTRY_ID, OWNER_ID, {});
 
       expect(result.entry.status).toBe(JournalEntryStatus.Posted);
       expect(periodsRepository.logSoftClosedPostingOverride).not.toHaveBeenCalled();
@@ -623,8 +631,8 @@ describe('JournalEntriesService', () => {
       periodsRepository.findById.mockResolvedValue(samplePeriod(PeriodStatus.SoftClosed));
       repository.findByIdWithDetails.mockResolvedValue(draft);
 
-      await expect(service.post(ENTRY_ID, ownerActor)).rejects.toThrow(BadRequestException);
-      await expect(service.post(ENTRY_ID, ownerActor)).rejects.toThrow(
+      await expect(service.post(ENTRY_ID, OWNER_ID, {})).rejects.toThrow(BadRequestException);
+      await expect(service.post(ENTRY_ID, OWNER_ID, {})).rejects.toThrow(
         /provide soft_closed_override_reason/,
       );
       expect(repository.postEntry).not.toHaveBeenCalled();
@@ -655,10 +663,11 @@ describe('JournalEntriesService', () => {
       repository.postEntry.mockResolvedValue(posted.entry);
       periodsRepository.logSoftClosedPostingOverride.mockResolvedValue(loggedPeriod);
 
-      const result = await service.post(ENTRY_ID, {
-        ...ownerActor,
-        soft_closed_override_reason: 'Correcting missed accrual',
-      });
+      const result = await service.post(
+        ENTRY_ID,
+        OWNER_ID,
+        { soft_closed_override_reason: 'Correcting missed accrual' },
+      );
 
       expect(periodsRepository.logSoftClosedPostingOverride).toHaveBeenCalledWith(
         PERIOD_ID,
@@ -677,14 +686,12 @@ describe('JournalEntriesService', () => {
       repository.getCompanySettings.mockResolvedValue(companySettingsOpen);
 
       await expect(
-        service.post(ENTRY_ID, {
-          ...accountantActor,
+        service.post(ENTRY_ID, USER_ID, {
           soft_closed_override_reason: 'Should not be allowed',
         }),
       ).rejects.toThrow(ForbiddenException);
       await expect(
-        service.post(ENTRY_ID, {
-          ...accountantActor,
+        service.post(ENTRY_ID, USER_ID, {
           soft_closed_override_reason: 'Should not be allowed',
         }),
       ).rejects.toThrow(/Only an Owner may post into a soft-closed period/);
@@ -719,7 +726,7 @@ describe('JournalEntriesService', () => {
       repository.getCompanySettings.mockResolvedValue(companySettings(5000));
       repository.postEntry.mockResolvedValue(posted.entry);
 
-      const result = await service.post(ENTRY_ID, accountantActor);
+      const result = await service.post(ENTRY_ID, USER_ID, {});
 
       expect(repository.submitForApproval).not.toHaveBeenCalled();
       expect(repository.postEntry).toHaveBeenCalledWith(ENTRY_ID);
@@ -742,7 +749,7 @@ describe('JournalEntriesService', () => {
       repository.getCompanySettings.mockResolvedValue(companySettings(100));
       repository.submitForApproval.mockResolvedValue(pending.entry);
 
-      const result = await service.post(ENTRY_ID, accountantActor);
+      const result = await service.post(ENTRY_ID, USER_ID, {});
 
       expect(repository.submitForApproval).toHaveBeenCalledWith(ENTRY_ID);
       expect(repository.postEntry).not.toHaveBeenCalled();
@@ -762,11 +769,11 @@ describe('JournalEntriesService', () => {
       repository.findByIdWithDetails.mockResolvedValue(pending);
 
       await expect(
-        service.approve(ENTRY_ID, accountantActor),
+        service.approve(ENTRY_ID, USER_ID, {}),
       ).rejects.toThrow(ForbiddenException);
       await expect(
-        service.approve(ENTRY_ID, accountantActor),
-      ).rejects.toThrow(/Only an Owner can approve/);
+        service.approve(ENTRY_ID, USER_ID, {}),
+      ).rejects.toThrow(/Only an Owner or Manager can approve/);
       expect(repository.approveAndPostEntry).not.toHaveBeenCalled();
     });
 
@@ -793,7 +800,7 @@ describe('JournalEntriesService', () => {
         .mockResolvedValueOnce(posted);
       repository.approveAndPostEntry.mockResolvedValue(posted.entry);
 
-      const result = await service.approve(ENTRY_ID, ownerActor);
+      const result = await service.approve(ENTRY_ID, OWNER_ID, {});
 
       expect(repository.approveAndPostEntry).toHaveBeenCalledWith(ENTRY_ID, OWNER_ID);
       expect(result.entry.status).toBe(JournalEntryStatus.Posted);
@@ -846,10 +853,10 @@ describe('JournalEntriesService', () => {
         pending.lines,
       );
 
-      await expect(service.approve(ENTRY_ID, ownerActor)).rejects.toThrow(
+      await expect(service.approve(ENTRY_ID, OWNER_ID, {})).rejects.toThrow(
         BadRequestException,
       );
-      await expect(service.approve(ENTRY_ID, ownerActor)).rejects.toThrow(
+      await expect(service.approve(ENTRY_ID, OWNER_ID, {})).rejects.toThrow(
         expectedMessage,
       );
     });
@@ -877,8 +884,7 @@ describe('JournalEntriesService', () => {
         .mockResolvedValueOnce(rejected);
       repository.rejectEntry.mockResolvedValue(rejected.entry);
 
-      const result = await service.reject(ENTRY_ID, {
-        ...ownerActor,
+      const result = await service.reject(ENTRY_ID, OWNER_ID, {
         rejection_reason: 'Incorrect accrual amount',
       });
 
@@ -934,7 +940,7 @@ describe('JournalEntriesService', () => {
         .mockResolvedValueOnce(posted);
       repository.postEntry.mockResolvedValue(posted.entry);
 
-      const result = await service.post(ENTRY_ID, ownerActor);
+      const result = await service.post(ENTRY_ID, OWNER_ID, {});
 
       expect(repository.getCompanySettings).not.toHaveBeenCalled();
       expect(repository.submitForApproval).not.toHaveBeenCalled();
@@ -949,7 +955,6 @@ describe('JournalEntriesService', () => {
       fiscal_year: FISCAL_YEAR,
       entry_date: '2026-01-01',
       narration: 'Opening balances FY2026',
-      created_by: USER_ID,
       lines: [
         { line_number: 1, account_id: ACCOUNT_A, debit: 500, credit: 0 },
         { line_number: 2, account_id: ACCOUNT_B, debit: 0, credit: 500 },
@@ -1036,7 +1041,7 @@ describe('JournalEntriesService', () => {
           balance: -500,
         });
 
-      const result = await service.createOpeningBalance(openingBalanceDto);
+      const result = await service.createOpeningBalance(openingBalanceDto, USER_ID);
 
       expect(repository.hasOpeningBalanceForFiscalYear).toHaveBeenCalledWith(
         COMPANY_ID,
@@ -1047,7 +1052,7 @@ describe('JournalEntriesService', () => {
         FISCAL_YEAR,
       );
       expect(repository.insertOpeningBalanceDraft).toHaveBeenCalledWith(
-        openingBalanceDto,
+        { ...openingBalanceDto, created_by: USER_ID },
         PERIOD_ID,
       );
       expect(repository.postEntry).toHaveBeenCalledWith(ENTRY_ID);
@@ -1116,10 +1121,10 @@ describe('JournalEntriesService', () => {
         draft.lines,
       );
 
-      await expect(service.createOpeningBalance(unbalancedDto)).rejects.toThrow(
+      await expect(service.createOpeningBalance(unbalancedDto, USER_ID)).rejects.toThrow(
         BadRequestException,
       );
-      await expect(service.createOpeningBalance(unbalancedDto)).rejects.toThrow(
+      await expect(service.createOpeningBalance(unbalancedDto, USER_ID)).rejects.toThrow(
         expectedMessage,
       );
       expect(repository.deleteEntry).toHaveBeenCalledWith(ENTRY_ID);
@@ -1128,10 +1133,10 @@ describe('JournalEntriesService', () => {
     it('attempting to post a second opening_balance entry for the same company and fiscal year is rejected cleanly, with no new entry created', async () => {
       repository.hasOpeningBalanceForFiscalYear.mockResolvedValue(true);
 
-      await expect(service.createOpeningBalance(openingBalanceDto)).rejects.toThrow(
+      await expect(service.createOpeningBalance(openingBalanceDto, USER_ID)).rejects.toThrow(
         BadRequestException,
       );
-      await expect(service.createOpeningBalance(openingBalanceDto)).rejects.toThrow(
+      await expect(service.createOpeningBalance(openingBalanceDto, USER_ID)).rejects.toThrow(
         `An opening balance entry already exists for fiscal year ${FISCAL_YEAR}`,
       );
       expect(repository.insertOpeningBalanceDraft).not.toHaveBeenCalled();
@@ -1143,7 +1148,6 @@ describe('JournalEntriesService', () => {
     const yearEndDto: CreateYearEndClosingDto = {
       company_id: COMPANY_ID,
       fiscal_year: FISCAL_YEAR,
-      created_by: USER_ID,
     };
 
     const latestPeriod = {
@@ -1245,14 +1249,14 @@ describe('JournalEntriesService', () => {
       repository.postEntry.mockResolvedValue(posted.entry);
       repository.findByIdWithDetails.mockResolvedValue(posted);
 
-      const result = await service.runYearEndClosing(yearEndDto);
+      const result = await service.runYearEndClosing(yearEndDto, USER_ID);
 
       expect(repository.hasYearEndClosingForFiscalYear).toHaveBeenCalledWith(
         COMPANY_ID,
         FISCAL_YEAR,
       );
       expect(repository.insertYearEndClosingDraft).toHaveBeenCalledWith(
-        yearEndDto,
+        { ...yearEndDto, created_by: USER_ID },
         PERIOD_ID,
         '2026-02-28',
         expect.arrayContaining([
@@ -1284,10 +1288,10 @@ describe('JournalEntriesService', () => {
     it('attempting year-end close a second time for the same fiscal year is rejected cleanly', async () => {
       repository.hasYearEndClosingForFiscalYear.mockResolvedValue(true);
 
-      await expect(service.runYearEndClosing(yearEndDto)).rejects.toThrow(
+      await expect(service.runYearEndClosing(yearEndDto, USER_ID)).rejects.toThrow(
         BadRequestException,
       );
-      await expect(service.runYearEndClosing(yearEndDto)).rejects.toThrow(
+      await expect(service.runYearEndClosing(yearEndDto, USER_ID)).rejects.toThrow(
         `A year-end closing entry already exists for fiscal year ${FISCAL_YEAR}`,
       );
       expect(repository.insertYearEndClosingDraft).not.toHaveBeenCalled();

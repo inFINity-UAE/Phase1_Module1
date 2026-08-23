@@ -29,9 +29,6 @@ export class CreateOpeningBalanceDto {
   @IsString()
   reference_number?: string;
 
-  @IsPostgresUuid()
-  created_by!: string;
-
   @IsArray()
   @ArrayMinSize(1)
   @ValidateNested({ each: true })

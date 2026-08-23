@@ -22,6 +22,9 @@ import { ProfitAndLossAccountBalance } from './entities/profit-and-loss-account-
 import { computeAccountBalance, YearEndClosingLineInput } from './year-end-closing.util';
 import {
   InsertGeneratedJournalEntryParams,
+  CreateJournalEntryWithActor,
+  CreateOpeningBalanceWithActor,
+  CreateYearEndClosingWithActor,
   JournalEntriesRepository,
 } from './journal-entries.repository';
 
@@ -45,7 +48,7 @@ export class SupabaseJournalEntriesRepository implements JournalEntriesRepositor
     return typeof max === 'number' ? max + 1 : 1;
   }
 
-  async insertDraft(dto: CreateJournalEntryDto): Promise<JournalEntryWithDetails> {
+  async insertDraft(dto: CreateJournalEntryWithActor): Promise<JournalEntryWithDetails> {
     const entryNumber = await this.getNextEntryNumber(dto.company_id);
 
     const { data: entry, error: entryError } = await this.supabase.client
@@ -444,7 +447,7 @@ export class SupabaseJournalEntriesRepository implements JournalEntriesRepositor
   }
 
   async insertOpeningBalanceDraft(
-    dto: CreateOpeningBalanceDto,
+    dto: CreateOpeningBalanceWithActor,
     periodId: string,
   ): Promise<JournalEntryWithDetails> {
     const entryNumber = await this.getNextEntryNumber(dto.company_id);
@@ -503,7 +506,7 @@ export class SupabaseJournalEntriesRepository implements JournalEntriesRepositor
   }
 
   async insertYearEndClosingDraft(
-    dto: CreateYearEndClosingDto,
+    dto: CreateYearEndClosingWithActor,
     periodId: string,
     entryDate: string,
     lines: YearEndClosingLineInput[],

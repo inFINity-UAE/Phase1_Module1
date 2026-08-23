@@ -42,13 +42,16 @@ export class RecurringJournalTemplatesService {
     private readonly journalEntriesRepository: JournalEntriesRepository,
   ) {}
 
-  async create(dto: CreateRecurringJournalTemplateDto): Promise<RecurringJournalTemplateWithLines> {
+  async create(
+    dto: CreateRecurringJournalTemplateDto,
+    createdBy: string,
+  ): Promise<RecurringJournalTemplateWithLines> {
     if (!dto.lines?.length) {
       throw new BadRequestException('Recurring template must have at least one line');
     }
 
     try {
-      return await this.templatesRepository.insert(dto);
+      return await this.templatesRepository.insert({ ...dto, created_by: createdBy });
     } catch (error) {
       handleDatabaseError(error);
     }

@@ -54,9 +54,6 @@ export class CreateRecurringJournalTemplateDto {
   @IsBoolean()
   is_active?: boolean;
 
-  @IsPostgresUuid()
-  created_by!: string;
-
   @IsArray()
   @ArrayMinSize(1)
   @ValidateNested({ each: true })

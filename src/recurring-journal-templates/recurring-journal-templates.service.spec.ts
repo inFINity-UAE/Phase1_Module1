@@ -338,15 +338,17 @@ describe('RecurringJournalTemplatesService create validation', () => {
 
   it('rejects template creation with zero lines', async () => {
     await expect(
-      service.create({
-        company_id: COMPANY_ID,
-        template_name: 'Empty',
-        narration_template: 'N/A',
-        frequency: RecurrenceFrequency.Monthly,
-        start_date: '2026-01-01',
-        created_by: USER_ID,
-        lines: [],
-      }),
+      service.create(
+        {
+          company_id: COMPANY_ID,
+          template_name: 'Empty',
+          narration_template: 'N/A',
+          frequency: RecurrenceFrequency.Monthly,
+          start_date: '2026-01-01',
+          lines: [],
+        },
+        USER_ID,
+      ),
     ).rejects.toThrow(BadRequestException);
   });
 });

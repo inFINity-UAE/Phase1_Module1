@@ -6,7 +6,6 @@ config({ path: resolve(__dirname, '../../.env.local') });
 import { BadRequestException, ForbiddenException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { AuditAction } from '../common/enums/audit-action.enum';
-import { CompanyRole } from '../common/enums/company-role.enum';
 import { JournalEntryStatus } from '../common/enums/journal-entry-status.enum';
 import { JournalEntryType } from '../common/enums/journal-entry-type.enum';
 import { RecurrenceFrequency } from '../common/enums/recurrence-frequency.enum';
@@ -155,40 +154,44 @@ const hasSupabase = Boolean(
       await assertTrialBalanced('Stage 1 — COA seeded, no postings yet');
 
       // Stage 7 — Opening balance
-      const openingBalance = await journalEntriesService.createOpeningBalance({
-        company_id: E2E_COMPANY_ID,
-        fiscal_year: fiscalYear,
-        entry_date: `${fiscalYear}-01-01`,
-        narration: `E2E opening balance FY${fiscalYear}`,
-        created_by: E2E_OWNER_ID,
-        lines: [
-          { line_number: 1, account_id: cashAccountId, debit: 50_000, credit: 0 },
-          { line_number: 2, account_id: openingEquityAccountId, debit: 0, credit: 50_000 },
-        ],
-      });
+      const openingBalance = await journalEntriesService.createOpeningBalance(
+        {
+          company_id: E2E_COMPANY_ID,
+          fiscal_year: fiscalYear,
+          entry_date: `${fiscalYear}-01-01`,
+          narration: `E2E opening balance FY${fiscalYear}`,
+          lines: [
+            { line_number: 1, account_id: cashAccountId, debit: 50_000, credit: 0 },
+            { line_number: 2, account_id: openingEquityAccountId, debit: 0, credit: 50_000 },
+          ],
+        },
+        E2E_OWNER_ID,
+      );
       trackedEntryIds.push(openingBalance.entry.id);
       expect(openingBalance.entry.entry_type).toBe(JournalEntryType.OpeningBalance);
       expect(openingBalance.entry.status).toBe(JournalEntryStatus.Posted);
       await assertTrialBalanced('Stage 7 — opening balance posted');
 
       // Stage 4/5 — Manual entry below approval threshold
-      const belowThresholdDraft = await journalEntriesService.create({
-        company_id: E2E_COMPANY_ID,
-        period_id: janPeriodId,
-        entry_date: `${fiscalYear}-01-10`,
-        narration: 'E2E below-threshold expense',
-        created_by: E2E_ACCOUNTANT_ID,
-        lines: [
-          { line_number: 1, account_id: expenseAccountId, debit: 4_000, credit: 0 },
-          { line_number: 2, account_id: cashAccountId, debit: 0, credit: 4_000 },
-        ],
-      });
+      const belowThresholdDraft = await journalEntriesService.create(
+        {
+          company_id: E2E_COMPANY_ID,
+          period_id: janPeriodId,
+          entry_date: `${fiscalYear}-01-10`,
+          narration: 'E2E below-threshold expense',
+          lines: [
+            { line_number: 1, account_id: expenseAccountId, debit: 4_000, credit: 0 },
+            { line_number: 2, account_id: cashAccountId, debit: 0, credit: 4_000 },
+          ],
+        },
+        E2E_ACCOUNTANT_ID,
+      );
       trackedEntryIds.push(belowThresholdDraft.entry.id);
 
-      const belowThresholdPosted = await journalEntriesService.post(belowThresholdDraft.entry.id, {
-        actor_id: E2E_ACCOUNTANT_ID,
-        actor_role: CompanyRole.Accountant,
-      });
+      const belowThresholdPosted = await journalEntriesService.post(
+        belowThresholdDraft.entry.id,
+        E2E_ACCOUNTANT_ID,
+      );
       expect(belowThresholdPosted.entry.status).toBe(JournalEntryStatus.Posted);
       await assertStatusChangeAudit(
         belowThresholdDraft.entry.id,
@@ -199,23 +202,25 @@ const hasSupabase = Boolean(
       await assertTrialBalanced('Stage 5 — below-threshold manual entry posted');
 
       // Stage 4/5/9 — Manual entry above approval threshold
-      const aboveThresholdDraft = await journalEntriesService.create({
-        company_id: E2E_COMPANY_ID,
-        period_id: janPeriodId,
-        entry_date: `${fiscalYear}-01-12`,
-        narration: 'E2E above-threshold expense',
-        created_by: E2E_ACCOUNTANT_ID,
-        lines: [
-          { line_number: 1, account_id: expenseAccountId, debit: APPROVAL_THRESHOLD, credit: 0 },
-          { line_number: 2, account_id: cashAccountId, debit: 0, credit: APPROVAL_THRESHOLD },
-        ],
-      });
+      const aboveThresholdDraft = await journalEntriesService.create(
+        {
+          company_id: E2E_COMPANY_ID,
+          period_id: janPeriodId,
+          entry_date: `${fiscalYear}-01-12`,
+          narration: 'E2E above-threshold expense',
+          lines: [
+            { line_number: 1, account_id: expenseAccountId, debit: APPROVAL_THRESHOLD, credit: 0 },
+            { line_number: 2, account_id: cashAccountId, debit: 0, credit: APPROVAL_THRESHOLD },
+          ],
+        },
+        E2E_ACCOUNTANT_ID,
+      );
       trackedEntryIds.push(aboveThresholdDraft.entry.id);
 
-      const pending = await journalEntriesService.post(aboveThresholdDraft.entry.id, {
-        actor_id: E2E_ACCOUNTANT_ID,
-        actor_role: CompanyRole.Accountant,
-      });
+      const pending = await journalEntriesService.post(
+        aboveThresholdDraft.entry.id,
+        E2E_ACCOUNTANT_ID,
+      );
       expect(pending.entry.status).toBe(JournalEntryStatus.PendingApproval);
       await assertStatusChangeAudit(
         aboveThresholdDraft.entry.id,
@@ -225,10 +230,7 @@ const hasSupabase = Boolean(
       );
       await assertTrialBalanced('Stage 9 — above-threshold entry pending approval (still unposted)');
 
-      const approved = await journalEntriesService.approve(pending.entry.id, {
-        actor_id: E2E_OWNER_ID,
-        actor_role: CompanyRole.Owner,
-      });
+      const approved = await journalEntriesService.approve(pending.entry.id, E2E_OWNER_ID);
       expect(approved.entry.status).toBe(JournalEntryStatus.Posted);
       expect(approved.entry.approved_by).toBe(E2E_OWNER_ID);
       await assertStatusChangeAudit(
@@ -244,30 +246,32 @@ const hasSupabase = Boolean(
       await assertTrialBalanced('Stage 9 — above-threshold entry approved and posted');
 
       // Stage 9 rejection path — separate above-threshold entry (does not affect ledger)
-      const rejectDraft = await journalEntriesService.create({
-        company_id: E2E_COMPANY_ID,
-        period_id: janPeriodId,
-        entry_date: `${fiscalYear}-01-13`,
-        narration: 'E2E above-threshold rejection probe',
-        created_by: E2E_ACCOUNTANT_ID,
-        lines: [
-          { line_number: 1, account_id: expenseAccountId, debit: APPROVAL_THRESHOLD, credit: 0 },
-          { line_number: 2, account_id: cashAccountId, debit: 0, credit: APPROVAL_THRESHOLD },
-        ],
-      });
+      const rejectDraft = await journalEntriesService.create(
+        {
+          company_id: E2E_COMPANY_ID,
+          period_id: janPeriodId,
+          entry_date: `${fiscalYear}-01-13`,
+          narration: 'E2E above-threshold rejection probe',
+          lines: [
+            { line_number: 1, account_id: expenseAccountId, debit: APPROVAL_THRESHOLD, credit: 0 },
+            { line_number: 2, account_id: cashAccountId, debit: 0, credit: APPROVAL_THRESHOLD },
+          ],
+        },
+        E2E_ACCOUNTANT_ID,
+      );
       trackedEntryIds.push(rejectDraft.entry.id);
 
-      const rejectPending = await journalEntriesService.post(rejectDraft.entry.id, {
-        actor_id: E2E_ACCOUNTANT_ID,
-        actor_role: CompanyRole.Accountant,
-      });
+      const rejectPending = await journalEntriesService.post(
+        rejectDraft.entry.id,
+        E2E_ACCOUNTANT_ID,
+      );
       expect(rejectPending.entry.status).toBe(JournalEntryStatus.PendingApproval);
 
-      const rejected = await journalEntriesService.reject(rejectPending.entry.id, {
-        actor_id: E2E_OWNER_ID,
-        actor_role: CompanyRole.Owner,
-        rejection_reason: 'E2E rejection — documentation incomplete',
-      });
+      const rejected = await journalEntriesService.reject(
+        rejectPending.entry.id,
+        E2E_OWNER_ID,
+        { rejection_reason: 'E2E rejection — documentation incomplete' },
+      );
       expect(rejected.entry.status).toBe(JournalEntryStatus.Rejected);
       expect(rejected.entry.rejection_reason).toBe('E2E rejection — documentation incomplete');
       await assertStatusChangeAudit(
@@ -285,22 +289,24 @@ const hasSupabase = Boolean(
       await assertTrialBalanced('Stage 9 — rejected entry left ledger unchanged');
 
       // P&L activity for year-end close
-      const revenueDraft = await journalEntriesService.create({
-        company_id: E2E_COMPANY_ID,
-        period_id: janPeriodId,
-        entry_date: `${fiscalYear}-01-20`,
-        narration: 'E2E revenue for year-end close',
-        created_by: E2E_OWNER_ID,
-        lines: [
-          { line_number: 1, account_id: cashAccountId, debit: 10_000, credit: 0 },
-          { line_number: 2, account_id: incomeAccountId, debit: 0, credit: 10_000 },
-        ],
-      });
+      const revenueDraft = await journalEntriesService.create(
+        {
+          company_id: E2E_COMPANY_ID,
+          period_id: janPeriodId,
+          entry_date: `${fiscalYear}-01-20`,
+          narration: 'E2E revenue for year-end close',
+          lines: [
+            { line_number: 1, account_id: cashAccountId, debit: 10_000, credit: 0 },
+            { line_number: 2, account_id: incomeAccountId, debit: 0, credit: 10_000 },
+          ],
+        },
+        E2E_OWNER_ID,
+      );
       trackedEntryIds.push(revenueDraft.entry.id);
-      const revenuePosted = await journalEntriesService.post(revenueDraft.entry.id, {
-        actor_id: E2E_OWNER_ID,
-        actor_role: CompanyRole.Owner,
-      });
+      const revenuePosted = await journalEntriesService.post(
+        revenueDraft.entry.id,
+        E2E_OWNER_ID,
+      );
       expect(revenuePosted.entry.status).toBe(JournalEntryStatus.Posted);
       await assertTrialBalanced('Stage 5 — revenue posted for year-end P&L');
 
@@ -339,20 +345,22 @@ const hasSupabase = Boolean(
       await assertTrialBalanced('Stage 6 — double reversal blocked, ledger unchanged');
 
       // Stage 8 — Recurring template generate + auto-post
-      const recurringTemplate = await recurringService.create({
-        company_id: E2E_COMPANY_ID,
-        template_name: `E2E depreciation FY${fiscalYear}`,
-        narration_template: 'E2E recurring depreciation',
-        frequency: RecurrenceFrequency.Monthly,
-        start_date: `${fiscalYear}-02-01`,
-        next_run_date: `${fiscalYear}-02-01`,
-        auto_post: true,
-        created_by: E2E_OWNER_ID,
-        lines: [
-          { line_number: 1, account_id: expenseAccountId, debit: 500, credit: 0 },
-          { line_number: 2, account_id: cashAccountId, debit: 0, credit: 500 },
-        ],
-      });
+      const recurringTemplate = await recurringService.create(
+        {
+          company_id: E2E_COMPANY_ID,
+          template_name: `E2E depreciation FY${fiscalYear}`,
+          narration_template: 'E2E recurring depreciation',
+          frequency: RecurrenceFrequency.Monthly,
+          start_date: `${fiscalYear}-02-01`,
+          next_run_date: `${fiscalYear}-02-01`,
+          auto_post: true,
+          lines: [
+            { line_number: 1, account_id: expenseAccountId, debit: 500, credit: 0 },
+            { line_number: 2, account_id: cashAccountId, debit: 0, credit: 500 },
+          ],
+        },
+        E2E_OWNER_ID,
+      );
 
       const recurringResult = await recurringService.generateTemplate(recurringTemplate.template.id);
       expect(recurringResult.posted).toBe(true);
@@ -365,39 +373,36 @@ const hasSupabase = Boolean(
       // Stage 10 — Soft-close January, block posting, then Owner override
       await accountingPeriodsService.softClose(janPeriodId, { closed_by: E2E_OWNER_ID });
 
-      const blockedDraft = await journalEntriesService.create({
-        company_id: E2E_COMPANY_ID,
-        period_id: janPeriodId,
-        entry_date: `${fiscalYear}-01-25`,
-        narration: 'E2E soft-closed period blocked post',
-        created_by: E2E_ACCOUNTANT_ID,
-        lines: [
-          { line_number: 1, account_id: expenseAccountId, debit: 100, credit: 0 },
-          { line_number: 2, account_id: cashAccountId, debit: 0, credit: 100 },
-        ],
-      });
+      const blockedDraft = await journalEntriesService.create(
+        {
+          company_id: E2E_COMPANY_ID,
+          period_id: janPeriodId,
+          entry_date: `${fiscalYear}-01-25`,
+          narration: 'E2E soft-closed period blocked post',
+          lines: [
+            { line_number: 1, account_id: expenseAccountId, debit: 100, credit: 0 },
+            { line_number: 2, account_id: cashAccountId, debit: 0, credit: 100 },
+          ],
+        },
+        E2E_ACCOUNTANT_ID,
+      );
       trackedEntryIds.push(blockedDraft.entry.id);
 
       await expect(
-        journalEntriesService.post(blockedDraft.entry.id, {
-          actor_id: E2E_ACCOUNTANT_ID,
-          actor_role: CompanyRole.Accountant,
-        }),
+        journalEntriesService.post(blockedDraft.entry.id, E2E_ACCOUNTANT_ID),
       ).rejects.toThrow(BadRequestException);
 
       await expect(
-        journalEntriesService.post(blockedDraft.entry.id, {
-          actor_id: E2E_ACCOUNTANT_ID,
-          actor_role: CompanyRole.Accountant,
+        journalEntriesService.post(blockedDraft.entry.id, E2E_ACCOUNTANT_ID, {
           soft_closed_override_reason: 'Not owner',
         }),
       ).rejects.toThrow(ForbiddenException);
 
-      const overridePosted = await journalEntriesService.post(blockedDraft.entry.id, {
-        actor_id: E2E_OWNER_ID,
-        actor_role: CompanyRole.Owner,
-        soft_closed_override_reason: 'E2E prior-period correction after soft-close',
-      });
+      const overridePosted = await journalEntriesService.post(
+        blockedDraft.entry.id,
+        E2E_OWNER_ID,
+        { soft_closed_override_reason: 'E2E prior-period correction after soft-close' },
+      );
       expect(overridePosted.entry.status).toBe(JournalEntryStatus.Posted);
       await assertTrialBalanced('Stage 10 — soft-closed override post succeeded');
 
@@ -408,12 +413,14 @@ const hasSupabase = Boolean(
       );
       expect(plBeforeClose.length).toBeGreaterThan(0);
 
-      const yearEndClose = await journalEntriesService.runYearEndClosing({
-        company_id: E2E_COMPANY_ID,
-        fiscal_year: fiscalYear,
-        entry_date: `${fiscalYear}-12-31`,
-        created_by: E2E_OWNER_ID,
-      });
+      const yearEndClose = await journalEntriesService.runYearEndClosing(
+        {
+          company_id: E2E_COMPANY_ID,
+          fiscal_year: fiscalYear,
+          entry_date: `${fiscalYear}-12-31`,
+        },
+        E2E_OWNER_ID,
+      );
       trackedEntryIds.push(yearEndClose.entry.id);
       expect(yearEndClose.entry.entry_type).toBe(JournalEntryType.YearEndClosing);
       expect(yearEndClose.entry.status).toBe(JournalEntryStatus.Posted);

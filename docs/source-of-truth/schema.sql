@@ -745,6 +745,52 @@ alter default privileges in schema public revoke execute on functions from anon;
 alter default privileges in schema public revoke execute on functions from authenticated;
 
 -- ============================================================================
+-- 11. COMPANY MEMBERSHIP & ROLES (minimal — scoped to Module 1.1.A needs only)
+-- ============================================================================
+-- Full RBAC (custom roles, temporary access, per-feature permissions) is
+-- Module 1.6 (Platform, Settings & Security) and is NOT built here. This
+-- table exists solely so the approval workflow (decision #1, Rules §1.24
+-- maker-checker) can resolve a caller's role server-side instead of
+-- trusting a client-supplied actor_role — which was the actual security
+-- gap identified in review.
+--
+-- Role list matches the original phase-wise feature doc's Module 1.6.B
+-- exactly (Owner / Accountant / Manager / Staff / Viewer / External
+-- Accountant) so this table doesn't need re-shaping when Module 1.6 is
+-- eventually built — but only Owner and Manager are actually enforced
+-- against anywhere in Module 1.1.A's code today. The rest exist in the
+-- enum for forward-compatibility, not because 1.1.A gates anything on them.
+
+create type company_role as enum (
+  'owner',
+  'accountant',
+  'manager',
+  'staff',
+  'viewer',
+  'external_accountant'
+);
+
+create table company_members (
+  id           uuid primary key default gen_random_uuid(),
+  company_id   uuid not null references companies(id) on delete cascade,
+  user_id      uuid not null references auth.users(id) on delete cascade,
+  role         company_role not null,
+  invited_by   uuid references auth.users(id),
+  created_at   timestamptz not null default now(),
+  updated_at   timestamptz not null default now(),
+
+  unique (company_id, user_id)
+);
+
+create index idx_company_members_company on company_members(company_id);
+create index idx_company_members_user on company_members(user_id);
+
+alter table company_members enable row level security;
+
+create policy company_isolation_members on company_members
+  using (company_id = (select current_setting('app.current_company_id', true))::uuid);
+
+-- ============================================================================
 -- END OF SCHEMA — Phase A/B complete.
 -- Phase C tables to layer in once accounting rules are received:
 --   • journal_approvals (approval audit trail, if multi-approver in future)

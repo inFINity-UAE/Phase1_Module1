@@ -9,7 +9,7 @@ import { UpdateRecurringJournalTemplateLineDto } from './dto/update-recurring-jo
 import { RecurringJournalTemplate } from './entities/recurring-journal-template.entity';
 import { RecurringJournalTemplateLine } from './entities/recurring-journal-template-line.entity';
 import { RecurringJournalTemplateWithLines } from './entities/recurring-journal-template-with-lines.entity';
-import { RecurringJournalTemplatesRepository } from './recurring-journal-templates.repository';
+import { RecurringJournalTemplatesRepository, CreateRecurringJournalTemplateWithActor } from './recurring-journal-templates.repository';
 
 @Injectable()
 export class SupabaseRecurringJournalTemplatesRepository
@@ -17,7 +17,7 @@ export class SupabaseRecurringJournalTemplatesRepository
 {
   constructor(private readonly supabase: SupabaseService) {}
 
-  async insert(dto: CreateRecurringJournalTemplateDto): Promise<RecurringJournalTemplateWithLines> {
+  async insert(dto: CreateRecurringJournalTemplateWithActor): Promise<RecurringJournalTemplateWithLines> {
     const { data: template, error: templateError } = await this.supabase.client
       .from('recurring_journal_templates')
       .insert({
@@ -144,7 +144,6 @@ export class SupabaseRecurringJournalTemplatesRepository
     if (dto.day_of_month !== undefined) payload.day_of_month = dto.day_of_month;
     if (dto.auto_post !== undefined) payload.auto_post = dto.auto_post;
     if (dto.is_active !== undefined) payload.is_active = dto.is_active;
-    if (dto.created_by !== undefined) payload.created_by = dto.created_by;
 
     const { data, error } = await this.supabase.client
       .from('recurring_journal_templates')

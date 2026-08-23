@@ -16,7 +16,4 @@ export class CreateYearEndClosingDto {
   @IsOptional()
   @IsString()
   narration?: string;
-
-  @IsPostgresUuid()
-  created_by!: string;
 }

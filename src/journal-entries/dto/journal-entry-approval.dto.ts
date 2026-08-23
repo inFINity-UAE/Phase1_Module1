@@ -1,15 +1,7 @@
-import { IsEnum, IsOptional, IsString, MinLength } from 'class-validator';
-import { CompanyRole } from '../../common/enums/company-role.enum';
-import { IsPostgresUuid } from '../../common/validators/is-postgres-uuid';
+import { IsOptional, IsString, MinLength } from 'class-validator';
 
-/** Actor context for draft → post — [Rules §1.24] maker-checker threshold check. */
+/** Draft → post — [Rules §1.24] maker-checker threshold check. Actor identity/role from session. */
 export class PostJournalEntryDto {
-  @IsPostgresUuid()
-  actor_id!: string;
-
-  @IsEnum(CompanyRole)
-  actor_role!: CompanyRole;
-
   /** Required when posting into a soft-closed period — [Rules §1.3] prior period adjustment. */
   @IsOptional()
   @IsString()
@@ -17,28 +9,16 @@ export class PostJournalEntryDto {
   soft_closed_override_reason?: string;
 }
 
-/** Owner approval of a pending journal entry. */
+/** Owner or Manager approval of a pending journal entry — [Module 1.6.B]. */
 export class ApproveJournalEntryDto {
-  @IsPostgresUuid()
-  actor_id!: string;
-
-  @IsEnum(CompanyRole)
-  actor_role!: CompanyRole;
-
   @IsOptional()
   @IsString()
   @MinLength(1)
   soft_closed_override_reason?: string;
 }
 
-/** Owner rejection of a pending journal entry. */
+/** Owner or Manager rejection of a pending journal entry — [Module 1.6.B]. */
 export class RejectJournalEntryDto {
-  @IsPostgresUuid()
-  actor_id!: string;
-
-  @IsEnum(CompanyRole)
-  actor_role!: CompanyRole;
-
   @IsString()
   @MinLength(1)
   rejection_reason!: string;

@@ -158,3 +158,22 @@ Logged 2026-08-23, resolving `reverse_journal_entry` RPC review questions:
     `information_schema.role_routine_grants` after creation — the
     default-privileges change above reduces the risk but doesn't guarantee
     someone won't explicitly re-grant it later.
+
+Logged 2026-08-23, resolving the actor_role/actor_id spoofing finding
+from the SupabaseAuthGuard scope review:
+
+11. **`company_members` / `company_role` is intentionally minimal, not
+    full RBAC.** Full role-based permissions (custom roles, temporary
+    access, per-feature gating) is Module 1.6 (Platform, Settings &
+    Security) and is explicitly NOT built here — building it now would be
+    scope creep into a different module. The `company_role` enum lists
+    all six roles from the original phase-wise feature doc's Module 1.6.B
+    (Owner / Accountant / Manager / Staff / Viewer / External Accountant)
+    so the table doesn't need reshaping later, but Module 1.1.A only
+    enforces two of them: **Owner** bypasses the approval workflow
+    entirely (decision #1), and **Owner or Manager** may approve/reject
+    a pending entry (Module 1.6.B: "Manager: approve journals... no data
+    entry"). Every role check is resolved server-side from
+    `company_members` on every call — never trusted from a client-
+    supplied `actor_role`/`actor_id` field, which was the vulnerability
+    this decision closes.

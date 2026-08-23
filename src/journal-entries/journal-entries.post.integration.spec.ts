@@ -14,6 +14,7 @@ import {
   JOURNAL_ENTRIES_REPOSITORY,
 } from './journal-entries.repository';
 import { SupabaseJournalEntriesRepository } from './journal-entries.repository.supabase';
+import { JournalEntriesModule } from './journal-entries.module';
 import { JournalEntriesService } from './journal-entries.service';
 import {
   ensurePostIntegrationCompanyReady,
@@ -38,14 +39,7 @@ const USER_ID = INTEGRATION_USER_ID;
 
     beforeAll(async () => {
       const module: TestingModule = await Test.createTestingModule({
-        imports: [DatabaseModule, AccountingPeriodsModule],
-        providers: [
-          JournalEntriesService,
-          {
-            provide: JOURNAL_ENTRIES_REPOSITORY,
-            useClass: SupabaseJournalEntriesRepository,
-          },
-        ],
+        imports: [DatabaseModule, AccountingPeriodsModule, JournalEntriesModule],
       }).compile();
 
       service = module.get(JournalEntriesService);

@@ -1,11 +1,14 @@
 import { SupabaseService } from '../database/supabase.service';
 import { PeriodStatus } from '../common/enums/period-status.enum';
 import { JournalEntriesRepository } from '../journal-entries/journal-entries.repository';
+import { CompanyRole } from '../common/enums/company-role.enum';
+import { ensureCompanyMember, testUserEmail } from '../test/company-members.setup';
 
 export const E2E_COMPANY_ID = '00000000-0000-0000-0000-00000000e2e1';
 export const E2E_OWNER_ID = '00000000-0000-0000-0000-000000000003';
 export const E2E_ACCOUNTANT_ID = '00000000-0000-0000-0000-000000000004';
 export const DEMO_COMPANY_ID = '00000000-0000-0000-0000-000000000001';
+export const DEMO_OWNER_ID = '00000000-0000-0000-0000-000000000002';
 export const APPROVAL_THRESHOLD = 5000;
 
 const MONTHS = [
@@ -165,6 +168,16 @@ export async function ensureCompanyWithCoa(
 
     numberToCompanyId.set(inserted.account_number as string, inserted.id as string);
   }
+
+  if (companyId === DEMO_COMPANY_ID) {
+    await ensureCompanyMember(
+      supabase,
+      companyId,
+      DEMO_OWNER_ID,
+      CompanyRole.Owner,
+      testUserEmail(DEMO_OWNER_ID),
+    );
+  }
 }
 
 export async function ensureE2eCompanyReady(supabase: SupabaseService): Promise<void> {
@@ -172,6 +185,20 @@ export async function ensureE2eCompanyReady(supabase: SupabaseService): Promise<
     supabase,
     E2E_COMPANY_ID,
     'E2E Lifecycle Test Company',
+  );
+  await ensureCompanyMember(
+    supabase,
+    E2E_COMPANY_ID,
+    E2E_OWNER_ID,
+    CompanyRole.Owner,
+    testUserEmail(E2E_OWNER_ID),
+  );
+  await ensureCompanyMember(
+    supabase,
+    E2E_COMPANY_ID,
+    E2E_ACCOUNTANT_ID,
+    CompanyRole.Accountant,
+    testUserEmail(E2E_ACCOUNTANT_ID),
   );
 }
 

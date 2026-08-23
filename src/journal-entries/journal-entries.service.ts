@@ -14,6 +14,8 @@ import {
 import { CompanyRole } from '../common/enums/company-role.enum';
 import { PeriodStatus } from '../common/enums/period-status.enum';
 import { JournalEntryStatus } from '../common/enums/journal-entry-status.enum';
+import { ActorContext } from '../auth/actor-context';
+import { CompanyMembersService } from '../company-members/company-members.service';
 import {
   ACCOUNTING_PERIODS_REPOSITORY,
   AccountingPeriodsRepository,
@@ -53,19 +55,20 @@ export class JournalEntriesService {
     private readonly journalEntriesRepository: JournalEntriesRepository,
     @Inject(ACCOUNTING_PERIODS_REPOSITORY)
     private readonly accountingPeriodsRepository: AccountingPeriodsRepository,
+    private readonly companyMembersService: CompanyMembersService,
   ) {}
 
   /**
    * [feature-spec] Manual journal entry as draft — balance enforced on post only
    * [schema] enforce_journal_balance_on_post
    */
-  async create(dto: CreateJournalEntryDto): Promise<JournalEntryWithDetails> {
+  async create(dto: CreateJournalEntryDto, createdBy: string): Promise<JournalEntryWithDetails> {
     if (!dto.lines?.length) {
       throw new BadRequestException('Journal entry must have at least one line');
     }
 
     try {
-      return await this.journalEntriesRepository.insertDraft(dto);
+      return await this.journalEntriesRepository.insertDraft({ ...dto, created_by: createdBy });
     } catch (error) {
       handleDatabaseError(error);
     }
@@ -78,6 +81,7 @@ export class JournalEntriesService {
    */
   async createOpeningBalance(
     dto: CreateOpeningBalanceDto,
+    createdBy: string,
   ): Promise<JournalEntryWithDetails> {
     if (!dto.lines?.length) {
       throw new BadRequestException('Opening balance entry must have at least one line');
@@ -109,7 +113,7 @@ export class JournalEntriesService {
 
     try {
       draft = await this.journalEntriesRepository.insertOpeningBalanceDraft(
-        dto,
+        { ...dto, created_by: createdBy },
         period.id,
       );
 
@@ -149,6 +153,7 @@ export class JournalEntriesService {
    */
   async runYearEndClosing(
     dto: CreateYearEndClosingDto,
+    createdBy: string,
   ): Promise<JournalEntryWithDetails> {
     const alreadyClosed =
       await this.journalEntriesRepository.hasYearEndClosingForFiscalYear(
@@ -205,7 +210,7 @@ export class JournalEntriesService {
 
     try {
       draft = await this.journalEntriesRepository.insertYearEndClosingDraft(
-        dto,
+        { ...dto, created_by: createdBy },
         closingPeriod.id,
         entryDate,
         lines,
@@ -258,8 +263,16 @@ export class JournalEntriesService {
    * Post a draft journal entry. [Rules §1.1] debits must equal credits.
    * [Rules §1.24] Entries at/above threshold require Owner approval unless poster is Owner.
    * [Product decision 2026-08-21] Owner bypasses approval workflow on draft → post.
+   * [company_members.sql §11] actor role resolved server-side — never from request body.
    */
-  async post(id: string, dto: PostJournalEntryDto): Promise<JournalEntryWithDetails> {
+  async post(
+    id: string,
+    userId: string,
+    dto: PostJournalEntryDto = {},
+  ): Promise<JournalEntryWithDetails> {
+    const { role } = await this.companyMembersService.resolveRoleForJournalEntry(userId, id);
+    const actor: ActorContext = { id: userId, role };
+
     const existing = await this.findOne(id);
 
     if (existing.entry.status !== JournalEntryStatus.Draft) {
@@ -271,12 +284,12 @@ export class JournalEntriesService {
     await this.assertPeriodAllowsPosting(
       existing.entry.period_id,
       existing.entry.company_id,
-      dto.actor_id,
-      dto.actor_role,
+      actor.id,
+      actor.role,
       dto.soft_closed_override_reason,
     );
 
-    const isOwner = dto.actor_role === CompanyRole.Owner;
+    const isOwner = actor.role === CompanyRole.Owner;
 
     if (!isOwner) {
       const settings = await this.journalEntriesRepository.getCompanySettings(
@@ -302,10 +315,16 @@ export class JournalEntriesService {
   }
 
   /**
-   * [feature-spec] Owner approves a pending entry — still subject to balance validation.
+   * [Module 1.6.B] Owner or Manager approves a pending entry — still subject to balance validation.
    */
-  async approve(id: string, dto: ApproveJournalEntryDto): Promise<JournalEntryWithDetails> {
-    this.assertOwnerActor(dto.actor_role, 'approve');
+  async approve(
+    id: string,
+    userId: string,
+    dto: ApproveJournalEntryDto = {},
+  ): Promise<JournalEntryWithDetails> {
+    const { role } = await this.companyMembersService.resolveRoleForJournalEntry(userId, id);
+    const actor: ActorContext = { id: userId, role };
+    this.assertApprovalActor(actor.role, 'approve');
 
     const existing = await this.findOne(id);
 
@@ -318,16 +337,13 @@ export class JournalEntriesService {
     await this.assertPeriodAllowsPosting(
       existing.entry.period_id,
       existing.entry.company_id,
-      dto.actor_id,
-      dto.actor_role,
+      actor.id,
+      actor.role,
       dto.soft_closed_override_reason,
     );
 
     try {
-      const posted = await this.journalEntriesRepository.approveAndPostEntry(
-        id,
-        dto.actor_id,
-      );
+      const posted = await this.journalEntriesRepository.approveAndPostEntry(id, actor.id);
 
       if (!posted.posted_at) {
         throw new InternalServerErrorException(
@@ -342,10 +358,16 @@ export class JournalEntriesService {
   }
 
   /**
-   * [feature-spec] Owner rejects a pending entry — entry remains unposted.
+   * [Module 1.6.B] Owner or Manager rejects a pending entry — entry remains unposted.
    */
-  async reject(id: string, dto: RejectJournalEntryDto): Promise<JournalEntryWithDetails> {
-    this.assertOwnerActor(dto.actor_role, 'reject');
+  async reject(
+    id: string,
+    userId: string,
+    dto: RejectJournalEntryDto,
+  ): Promise<JournalEntryWithDetails> {
+    const { role } = await this.companyMembersService.resolveRoleForJournalEntry(userId, id);
+    const actor: ActorContext = { id: userId, role };
+    this.assertApprovalActor(actor.role, 'reject');
 
     const existing = await this.findOne(id);
 
@@ -356,11 +378,7 @@ export class JournalEntriesService {
     }
 
     try {
-      await this.journalEntriesRepository.rejectEntry(
-        id,
-        dto.actor_id,
-        dto.rejection_reason,
-      );
+      await this.journalEntriesRepository.rejectEntry(id, actor.id, dto.rejection_reason);
       return this.findOne(id);
     } catch (error) {
       handleDatabaseError(error);
@@ -386,10 +404,11 @@ export class JournalEntriesService {
     }
   }
 
-  private assertOwnerActor(role: CompanyRole, action: 'approve' | 'reject'): void {
-    if (role !== CompanyRole.Owner) {
+  // [Module 1.6.B] Manager: approve journals — no data entry; Owner retains full control.
+  private assertApprovalActor(role: CompanyRole, action: 'approve' | 'reject'): void {
+    if (role !== CompanyRole.Owner && role !== CompanyRole.Manager) {
       throw new ForbiddenException(
-        `Only an Owner can ${action} journal entries pending approval`,
+        `Only an Owner or Manager can ${action} journal entries pending approval`,
       );
     }
   }

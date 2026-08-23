@@ -5,7 +5,6 @@ config({ path: resolve(__dirname, '../../.env.local') });
 
 import { createClient } from '@supabase/supabase-js';
 import { Test, TestingModule } from '@nestjs/testing';
-import { CompanyRole } from '../common/enums/company-role.enum';
 import { JournalEntryStatus } from '../common/enums/journal-entry-status.enum';
 import { JournalEntryType } from '../common/enums/journal-entry-type.enum';
 import { AccountingPeriodsModule } from '../accounting-periods/accounting-periods.module';
@@ -79,23 +78,22 @@ const USER_ID = INTEGRATION_USER_ID;
     });
 
     async function createPostedProbe(narration: string) {
-      const draft = await service.create({
-        company_id: COMPANY_ID,
-        period_id: periodId,
-        entry_date: '2026-01-18',
-        narration,
-        created_by: USER_ID,
-        lines: [
-          { line_number: 1, account_id: cashAccountId, debit: 250, credit: 0 },
-          { line_number: 2, account_id: bankAccountId, debit: 0, credit: 250 },
-        ],
-      });
+      const draft = await service.create(
+        {
+          company_id: COMPANY_ID,
+          period_id: periodId,
+          entry_date: '2026-01-18',
+          narration,
+          lines: [
+            { line_number: 1, account_id: cashAccountId, debit: 250, credit: 0 },
+            { line_number: 2, account_id: bankAccountId, debit: 0, credit: 250 },
+          ],
+        },
+        USER_ID,
+      );
       createdEntryIds.push(draft.entry.id);
 
-      const posted = await service.post(draft.entry.id, {
-        actor_id: USER_ID,
-        actor_role: CompanyRole.Owner,
-      });
+      const posted = await service.post(draft.entry.id, USER_ID);
       expect(posted.entry.status).toBe(JournalEntryStatus.Posted);
       return posted;
     }

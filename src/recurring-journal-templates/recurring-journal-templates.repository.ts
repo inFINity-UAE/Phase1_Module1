@@ -11,8 +11,12 @@ export const RECURRING_JOURNAL_TEMPLATES_REPOSITORY = Symbol(
   'RECURRING_JOURNAL_TEMPLATES_REPOSITORY',
 );
 
+export type CreateRecurringJournalTemplateWithActor = CreateRecurringJournalTemplateDto & {
+  created_by: string;
+};
+
 export interface RecurringJournalTemplatesRepository {
-  insert(dto: CreateRecurringJournalTemplateDto): Promise<RecurringJournalTemplateWithLines>;
+  insert(dto: CreateRecurringJournalTemplateWithActor): Promise<RecurringJournalTemplateWithLines>;
   findAll(companyId?: string): Promise<RecurringJournalTemplateWithLines[]>;
   findByIdWithLines(id: string): Promise<RecurringJournalTemplateWithLines | null>;
   update(

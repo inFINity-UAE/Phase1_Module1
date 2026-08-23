@@ -16,9 +16,14 @@ import { JournalEntryReversalResult } from './entities/journal-entry-reversal-re
 
 export const JOURNAL_ENTRIES_REPOSITORY = Symbol('JOURNAL_ENTRIES_REPOSITORY');
 
+/** Repository payloads include created_by from the authenticated session, not the HTTP body. */
+export type CreateJournalEntryWithActor = CreateJournalEntryDto & { created_by: string };
+export type CreateOpeningBalanceWithActor = CreateOpeningBalanceDto & { created_by: string };
+export type CreateYearEndClosingWithActor = CreateYearEndClosingDto & { created_by: string };
+
 export interface JournalEntriesRepository {
   getNextEntryNumber(companyId: string): Promise<number>;
-  insertDraft(dto: CreateJournalEntryDto): Promise<JournalEntryWithDetails>;
+  insertDraft(dto: CreateJournalEntryWithActor): Promise<JournalEntryWithDetails>;
   findByIdWithDetails(id: string): Promise<JournalEntryWithDetails | null>;
   findAttachmentsByEntryId(entryId: string): Promise<JournalAttachment[]>;
   findPeriodById(id: string): Promise<AccountingPeriod | null>;
@@ -48,11 +53,11 @@ export interface JournalEntriesRepository {
     fiscalYear: number,
   ): Promise<ProfitAndLossAccountBalance[]>;
   insertOpeningBalanceDraft(
-    dto: CreateOpeningBalanceDto,
+    dto: CreateOpeningBalanceWithActor,
     periodId: string,
   ): Promise<JournalEntryWithDetails>;
   insertYearEndClosingDraft(
-    dto: CreateYearEndClosingDto,
+    dto: CreateYearEndClosingWithActor,
     periodId: string,
     entryDate: string,
     lines: YearEndClosingLineInput[],
