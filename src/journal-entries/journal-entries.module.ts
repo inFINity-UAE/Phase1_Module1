@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { AuthModule } from '../auth/auth.module';
 import { AccountingPeriodsModule } from '../accounting-periods/accounting-periods.module';
 import { JournalEntriesController } from './journal-entries.controller';
 import { JournalLinesController } from './journal-lines.controller';
@@ -7,7 +8,7 @@ import { JOURNAL_ENTRIES_REPOSITORY } from './journal-entries.repository';
 import { SupabaseJournalEntriesRepository } from './journal-entries.repository.supabase';
 
 @Module({
-  imports: [AccountingPeriodsModule],
+  imports: [AccountingPeriodsModule, AuthModule],
   controllers: [JournalEntriesController, JournalLinesController],
   providers: [
     JournalEntriesService,

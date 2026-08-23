@@ -1,8 +1,9 @@
-import { config } from 'dotenv';
+﻿import { config } from 'dotenv';
 import { resolve } from 'path';
 
 config({ path: resolve(__dirname, '../../.env.local') });
 
+import { createClient } from '@supabase/supabase-js';
 import { Test, TestingModule } from '@nestjs/testing';
 import { CompanyRole } from '../common/enums/company-role.enum';
 import { JournalEntryStatus } from '../common/enums/journal-entry-status.enum';
@@ -13,16 +14,16 @@ import { SupabaseService } from '../database/supabase.service';
 import { JournalEntriesModule } from './journal-entries.module';
 import { JournalEntriesService } from './journal-entries.service';
 import {
-  ensurePostIntegrationCompanyReady,
+  ensureReverseIntegrationCompanyReady,
   INTEGRATION_USER_ID,
-  POST_INTEGRATION_COMPANY_ID,
+  REVERSE_INTEGRATION_COMPANY_ID,
 } from '../test/integration-company.setup';
 
 const hasSupabase = Boolean(
   process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.SUPABASE_SECRET_KEY,
 );
 
-const COMPANY_ID = POST_INTEGRATION_COMPANY_ID;
+const COMPANY_ID = REVERSE_INTEGRATION_COMPANY_ID;
 const USER_ID = INTEGRATION_USER_ID;
 
 (hasSupabase ? describe : describe.skip)(
@@ -43,7 +44,7 @@ const USER_ID = INTEGRATION_USER_ID;
       service = module.get(JournalEntriesService);
       supabase = module.get(SupabaseService);
 
-      await ensurePostIntegrationCompanyReady(supabase);
+      await ensureReverseIntegrationCompanyReady(supabase);
 
       const { data: period, error: periodError } = await supabase.client
         .from('accounting_periods')
@@ -102,7 +103,7 @@ const USER_ID = INTEGRATION_USER_ID;
     it('happy path reverse via RPC posts reversal and marks original reversed', async () => {
       const posted = await createPostedProbe('atomic reverse happy-path probe');
 
-      const result = await service.reverse(posted.entry.id, { created_by: USER_ID });
+      const result = await service.reverse(posted.entry.id, USER_ID);
       createdEntryIds.push(result.reversal.entry.id);
 
       expect(result.reversal.entry.entry_type).toBe(JournalEntryType.Reversal);
@@ -112,6 +113,45 @@ const USER_ID = INTEGRATION_USER_ID;
       expect(result.original.entry.reversed_by_entry_id).toBe(result.reversal.entry.id);
       expect(result.reversal.lines).toHaveLength(2);
     }, 30000);
+
+    it(
+      'anon-role client cannot execute reverse_journal_entry (decision #10 grant lockdown)',
+      async () => {
+        const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+        const publishableKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
+        expect(url).toBeTruthy();
+        expect(publishableKey).toBeTruthy();
+
+        const posted = await createPostedProbe('atomic reverse anon-permission probe');
+
+        // Publishable key maps to the anon PostgREST role — must not EXECUTE the RPC.
+        const anonClient = createClient(url!, publishableKey!);
+        const { data, error } = await anonClient.rpc('reverse_journal_entry', {
+          p_original_id: posted.entry.id,
+          p_created_by: USER_ID,
+          p_fail_before_original_update: false,
+        });
+
+        expect(data).toBeNull();
+        expect(error).not.toBeNull();
+        expect(
+          error?.code === '42501' ||
+            /permission denied|not find the function|insufficient_privilege|PGRST202/i.test(
+              error?.message ?? '',
+            ),
+        ).toBe(true);
+
+        const originalAfter = await service.findOne(posted.entry.id);
+        expect(originalAfter.entry.status).toBe(JournalEntryStatus.Posted);
+        expect(originalAfter.entry.reversed_by_entry_id).toBeNull();
+
+        // eslint-disable-next-line no-console
+        console.log(
+          `[PERMS OK] anon RPC rejected: code=${error?.code ?? 'n/a'} message=${error?.message}`,
+        );
+      },
+      30000,
+    );
 
     it(
       'forced failure before original UPDATE rolls back everything — no orphan reversal',
@@ -177,8 +217,7 @@ const USER_ID = INTEGRATION_USER_ID;
           '[ATOMIC OK] forced failure before original UPDATE left no orphan reversal/lines; original still posted',
         );
 
-        // After rollback, a real reverse must still succeed
-        const recovered = await service.reverse(posted.entry.id, { created_by: USER_ID });
+        const recovered = await service.reverse(posted.entry.id, USER_ID);
         createdEntryIds.push(recovered.reversal.entry.id);
         expect(recovered.original.entry.status).toBe(JournalEntryStatus.Reversed);
       },

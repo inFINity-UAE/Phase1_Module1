@@ -514,7 +514,7 @@ describe('JournalEntriesService', () => {
       reversal,
     });
 
-    const result = await service.reverse(ENTRY_ID, { created_by: USER_ID });
+    const result = await service.reverse(ENTRY_ID, USER_ID);
 
     expect(repository.reverseEntry).toHaveBeenCalledWith(ENTRY_ID, USER_ID);
     expect(result.original.entry.status).toBe(JournalEntryStatus.Reversed);
@@ -557,10 +557,10 @@ describe('JournalEntriesService', () => {
 
     repository.findByIdWithDetails.mockResolvedValue(alreadyReversed);
 
-    await expect(service.reverse(ENTRY_ID, { created_by: USER_ID })).rejects.toThrow(
+    await expect(service.reverse(ENTRY_ID, USER_ID)).rejects.toThrow(
       BadRequestException,
     );
-    await expect(service.reverse(ENTRY_ID, { created_by: USER_ID })).rejects.toThrow(
+    await expect(service.reverse(ENTRY_ID, USER_ID)).rejects.toThrow(
       'Journal entry 1 has already been reversed and cannot be reversed again',
     );
     expect(repository.reverseEntry).not.toHaveBeenCalled();
@@ -587,7 +587,7 @@ describe('JournalEntriesService', () => {
     });
     repository.findNextOpenPeriod.mockResolvedValue(null);
 
-    await expect(service.reverse(ENTRY_ID, { created_by: USER_ID })).rejects.toThrow(
+    await expect(service.reverse(ENTRY_ID, USER_ID)).rejects.toThrow(
       /No open accounting period exists after 2026-01-31/,
     );
     expect(repository.reverseEntry).not.toHaveBeenCalled();

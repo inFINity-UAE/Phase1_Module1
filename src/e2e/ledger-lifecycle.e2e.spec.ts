@@ -305,9 +305,7 @@ const hasSupabase = Boolean(
       await assertTrialBalanced('Stage 5 — revenue posted for year-end P&L');
 
       // Stage 6 — Reverse the below-threshold entry
-      const reversal = await journalEntriesService.reverse(belowThresholdDraft.entry.id, {
-        created_by: E2E_OWNER_ID,
-      });
+      const reversal = await journalEntriesService.reverse(belowThresholdDraft.entry.id, E2E_OWNER_ID);
       trackedEntryIds.push(reversal.reversal.entry.id);
       expect(reversal.reversal.entry.entry_type).toBe(JournalEntryType.Reversal);
       expect(reversal.reversal.entry.status).toBe(JournalEntryStatus.Posted);
@@ -336,9 +334,7 @@ const hasSupabase = Boolean(
       await assertTrialBalanced('Stage 6 — reversal posted in next open period');
 
       await expect(
-        journalEntriesService.reverse(belowThresholdDraft.entry.id, {
-          created_by: E2E_OWNER_ID,
-        }),
+        journalEntriesService.reverse(belowThresholdDraft.entry.id, E2E_OWNER_ID),
       ).rejects.toThrow(BadRequestException);
       await assertTrialBalanced('Stage 6 — double reversal blocked, ledger unchanged');
 

@@ -738,6 +738,7 @@ $$;
 -- `public`, only the trusted backend.
 revoke all on function reverse_journal_entry(uuid, uuid, boolean) from public;
 revoke all on function reverse_journal_entry(uuid, uuid, boolean) from authenticated;
+revoke all on function reverse_journal_entry(uuid, uuid, boolean) from anon;
 grant execute on function reverse_journal_entry(uuid, uuid, boolean) to service_role;
 
 -- ============================================================================

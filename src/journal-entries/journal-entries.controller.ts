@@ -1,10 +1,12 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post } from '@nestjs/common';
+import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post, UseGuards } from '@nestjs/common';
+import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { AuthenticatedUser } from '../auth/authenticated-user';
+import { SupabaseAuthGuard } from '../auth/guards/supabase-auth.guard';
 import { JournalEntriesService } from './journal-entries.service';
 import { CreateJournalEntryDto } from './dto/create-journal-entry.dto';
 import { CreateOpeningBalanceDto } from './dto/create-opening-balance.dto';
 import { CreateYearEndClosingDto } from './dto/create-year-end-closing.dto';
 import { UpdateJournalEntryDto } from './dto/update-journal-entry.dto';
-import { ReverseJournalEntryDto } from './dto/reverse-journal-entry.dto';
 import {
   ApproveJournalEntryDto,
   PostJournalEntryDto,
@@ -66,12 +68,17 @@ export class JournalEntriesController {
     return this.journalEntriesService.reject(id, dto);
   }
 
+  /**
+   * [feature-spec decision #10] created_by for the reversal RPC is the
+   * authenticated session user — never a client body field.
+   */
   @Post(':id/reverse')
+  @UseGuards(SupabaseAuthGuard)
   reverse(
     @Param('id', ParseUUIDPipe) id: string,
-    @Body() dto: ReverseJournalEntryDto,
+    @CurrentUser() user: AuthenticatedUser,
   ) {
-    return this.journalEntriesService.reverse(id, dto);
+    return this.journalEntriesService.reverse(id, user.id);
   }
 
   @Patch(':id')

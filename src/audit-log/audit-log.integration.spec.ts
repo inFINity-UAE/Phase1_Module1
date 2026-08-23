@@ -148,9 +148,7 @@ const USER_ID = INTEGRATION_USER_ID;
         // Real reverseEntry() path — schema.log_journal_entry_change:
         //   • reversing entry INSERT → action = insert (distinct record_id)
         //   • original UPDATE to reversed → action = reversal (distinct row on original)
-        const reversal = await journalEntriesService.reverse(draft.entry.id, {
-          created_by: USER_ID,
-        });
+        const reversal = await journalEntriesService.reverse(draft.entry.id, USER_ID);
         createdEntryIds.push(reversal.reversal.entry.id);
 
         expect(reversal.original.entry.status).toBe(JournalEntryStatus.Reversed);
@@ -164,11 +162,23 @@ const USER_ID = INTEGRATION_USER_ID;
           table_name: 'journal_entries',
         });
 
-        expect(reversalEntryHistory).toHaveLength(1);
-        expect(reversalEntryHistory[0].action).toBe(AuditAction.Insert);
-        expect(reversalEntryHistory[0].new_data?.entry_type).toBe(JournalEntryType.Reversal);
-        expect(reversalEntryHistory[0].new_data?.status).toBe(JournalEntryStatus.Posted);
-        expect(reversalEntryHistory[0].new_data?.reverses_entry_id).toBe(draft.entry.id);
+        expect(reversalEntryHistory.length).toBeGreaterThanOrEqual(2);
+        const reversalInsert = reversalEntryHistory.find(
+          (row) => row.action === AuditAction.Insert,
+        );
+        expect(reversalInsert).toBeDefined();
+        expect(reversalInsert?.new_data?.entry_type).toBe(JournalEntryType.Reversal);
+        expect(reversalInsert?.new_data?.status).toBe(JournalEntryStatus.Draft);
+        expect(reversalInsert?.new_data?.reverses_entry_id).toBe(draft.entry.id);
+
+        const reversalPost = reversalEntryHistory.find(
+          (row) =>
+            row.action === AuditAction.StatusChange &&
+            row.old_data?.status === JournalEntryStatus.Draft &&
+            row.new_data?.status === JournalEntryStatus.Posted,
+        );
+        expect(reversalPost).toBeDefined();
+        expect(reversalPost?.new_data?.entry_type).toBe(JournalEntryType.Reversal);
 
         const originalHistory = await auditLogService.find({
           company_id: COMPANY_ID,
@@ -186,9 +196,9 @@ const USER_ID = INTEGRATION_USER_ID;
           reversal.reversal.entry.id,
         );
 
-        // Two distinct rows: insert on the reversing entry, reversal on the original
-        expect(reversalEntryHistory[0].id).not.toBe(reversalAudit?.id);
-        expect(reversalEntryHistory[0].record_id).toBe(reversal.reversal.entry.id);
+        // Distinct rows: insert(+status_change) on reversing entry, reversal on original
+        expect(reversalInsert?.id).not.toBe(reversalAudit?.id);
+        expect(reversalInsert?.record_id).toBe(reversal.reversal.entry.id);
         expect(reversalAudit?.record_id).toBe(draft.entry.id);
 
         // Lifecycle on original: insert + status_change + reversal (three distinct actions)

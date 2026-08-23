@@ -23,7 +23,6 @@ import { CreateJournalEntryDto } from './dto/create-journal-entry.dto';
 import { CreateOpeningBalanceDto } from './dto/create-opening-balance.dto';
 import { CreateYearEndClosingDto } from './dto/create-year-end-closing.dto';
 import { UpdateJournalEntryDto } from './dto/update-journal-entry.dto';
-import { ReverseJournalEntryDto } from './dto/reverse-journal-entry.dto';
 import {
   ApproveJournalEntryDto,
   PostJournalEntryDto,
@@ -463,8 +462,10 @@ export class JournalEntriesService {
    * [feature-spec] One-click reversal in the next open period.
    * [Rules §1.3] Corrections via reversing entries — preserve audit trail.
    * [Product decision 2026-08-21] An entry cannot be reversed twice.
+   * [feature-spec decision #10] createdBy must be the authenticated session
+   * user id from the controller — never a client-supplied body field.
    */
-  async reverse(id: string, dto: ReverseJournalEntryDto): Promise<JournalEntryReversalResult> {
+  async reverse(id: string, createdBy: string): Promise<JournalEntryReversalResult> {
     const existing = await this.findOne(id);
     this.assertReversible(existing);
 
@@ -489,7 +490,7 @@ export class JournalEntriesService {
     }
 
     try {
-      return await this.journalEntriesRepository.reverseEntry(id, dto.created_by);
+      return await this.journalEntriesRepository.reverseEntry(id, createdBy);
     } catch (error) {
       if (error instanceof Error && error.message === 'NO_NEXT_OPEN_PERIOD') {
         throw new BadRequestException(
