@@ -168,9 +168,22 @@ end;
 $$;
 
 -- [feature-spec.md decision #10] service_role only — SECURITY DEFINER
--- bypasses RLS, so this must never be reachable by `authenticated` or
--- `public`, only the trusted backend.
+-- bypasses RLS, so this must never be reachable by `authenticated`,
+-- `anon`, or `public`, only the trusted backend.
+--
+-- NOTE: Supabase auto-grants EXECUTE on every new public-schema function
+-- to anon, authenticated, AND service_role at creation time. The revokes
+-- below must be explicit and complete — a first pass at this file missed
+-- `anon`, which is worse than missing `authenticated` (anon = fully
+-- unauthenticated callers). See feature-spec.md decision #10's
+-- 2026-08-23 correction for the full story.
 revoke all on function reverse_journal_entry(uuid, uuid, boolean) from public;
 revoke all on function reverse_journal_entry(uuid, uuid, boolean) from authenticated;
 revoke all on function reverse_journal_entry(uuid, uuid, boolean) from anon;
 grant execute on function reverse_journal_entry(uuid, uuid, boolean) to service_role;
+
+-- Schema-level hardening so this class of bug can't recur silently on
+-- future functions: new public-schema functions no longer auto-grant to
+-- anon/authenticated by default. Explicit grant required going forward.
+alter default privileges in schema public revoke execute on functions from anon;
+alter default privileges in schema public revoke execute on functions from authenticated;

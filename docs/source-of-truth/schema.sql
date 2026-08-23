@@ -734,12 +734,15 @@ end;
 $$;
 
 -- [feature-spec.md decision #10] service_role only — SECURITY DEFINER
--- bypasses RLS, so this must never be reachable by `authenticated` or
--- `public`, only the trusted backend.
+-- bypasses RLS, so this must never be reachable by `authenticated`,
+-- `anon`, or `public`, only the trusted backend.
 revoke all on function reverse_journal_entry(uuid, uuid, boolean) from public;
 revoke all on function reverse_journal_entry(uuid, uuid, boolean) from authenticated;
 revoke all on function reverse_journal_entry(uuid, uuid, boolean) from anon;
 grant execute on function reverse_journal_entry(uuid, uuid, boolean) to service_role;
+
+alter default privileges in schema public revoke execute on functions from anon;
+alter default privileges in schema public revoke execute on functions from authenticated;
 
 -- ============================================================================
 -- END OF SCHEMA — Phase A/B complete.
