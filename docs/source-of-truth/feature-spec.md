@@ -78,8 +78,6 @@ questions in later stages:
    company + fiscal year must be rejected outright, with no partial
    cleanup attempted.
 
-Logged 2026-08-22, resolving Stage 1 (COA seed) questions:
-
 5. **`normal_balance` values are the exact enum literals `debit` / `credit`**
    (lowercase), per `schema.sql`'s `normal_balance_type` enum. No other
    casing or synonyms.
@@ -95,12 +93,68 @@ Logged 2026-08-22, resolving Stage 1 (COA seed) questions:
    capitalized into inventory cost instead of expensed directly — leave a
    code comment flagging this account's treatment for revisit at that
    point, don't build inventory-costing logic now.
-8. **Zakat Reserve is `category = 'equity'` (3000s), `sub_category = 'Reserve'`.**
-   This is a policy judgment, not a mechanical lookup: the spec names it
-   "Reserve" rather than "Payable," which aligns with AAOIFI treatment of
-   Zakat as an appropriation of retained earnings rather than a P&L
-   expense or liability. FLAG FOR HUMAN REVIEW: confirm this treatment
-   with the business's Zakat/Islamic-finance advisor before this ships —
-   conventional practice in some UAE businesses instead books a "Zakat
-   Payable" liability at the point of obligation, which is a materially
-   different balance-sheet presentation.
+8. **[SUPERSEDED 2026-08-22] Zakat Reserve is `category = 'liability'` (2000s),
+   `sub_category = 'Provision'` or `'Tax & Zakat Payable'`** — not equity.
+   Account name stays `Zakat Reserve` (matching the original feature list's
+   literal wording) but its balance-sheet placement is a liability: at the
+   reporting date, Zakat due is an amount owed, which fits the liability
+   definition more directly than an equity appropriation.
+   Businesses that want the AAOIFI-style equity-appropriation treatment
+   instead are expected to use the existing **custom account creation**
+   feature (already in this spec) to add their own equity-side reserve
+   account — the engine does not need special-case logic to support both
+   treatments, one default liability account plus the existing custom
+   account capability covers it.
+   (Prior guidance below is superseded — kept for audit trail, not to be
+   implemented.)
+   ~~Zakat Reserve is `category = 'equity'` (3000s), `sub_category = 'Reserve'`.~~
+   ~~This is a policy judgment, not a mechanical lookup: the spec names it~~
+   ~~"Reserve" rather than "Payable," which aligns with AAOIFI treatment of~~
+   ~~Zakat as an appropriation of retained earnings rather than a P&L~~
+   ~~expense or liability.~~
+
+Logged 2026-08-23, resolving `reverse_journal_entry` RPC review questions:
+
+9. **A reversal entry cannot itself be reversed.** This extends decision #2
+   rather than restating it: #2 blocks reversing the *same original entry*
+   twice; this blocks reversing an entry whose `entry_type = 'reversal'` at
+   all, i.e. there is no "undo the undo" path through the standard reversal
+   mechanism. Same rationale as #2 — allowing it would double-count a
+   correction and unbalance the ledger. If a reversal itself needs
+   correcting, that requires a manual adjusting entry, not a second-order
+   reversal.
+10. **Data access is backend-mediated via Supabase `service_role` only** —
+    no table, view, or RPC in this schema is intended to be called directly
+    by an `authenticated`-role client (browser/mobile). This is not a
+    style preference: every RLS policy in this schema isolates tenants via
+    the session variable `current_setting('app.current_company_id', true)`,
+    which only a trusted backend can safely set per-request. A client
+    calling Supabase directly with a user JWT has no safe way to set that
+    variable, and if one ever could, it could impersonate any company.
+    Consequence for every future RPC/function: grant `execute` to
+    `service_role` only, never to `authenticated` or `public`, unless a
+    specific function is deliberately redesigned around `auth.uid()`-based
+    RLS instead — that would be a schema-wide architecture change, not a
+    per-function decision, and needs to be raised explicitly if ever
+    proposed. The NestJS backend, in turn, must always derive the acting
+    user's identity (e.g. `created_by`, `approved_by`, `rejected_by`
+    parameters passed to any RPC) from the authenticated request's own
+    session context — never from a client-supplied field in the request
+    body — since `service_role` bypasses RLS and the backend is the only
+    remaining safety net for tenant isolation.
+
+    **Correction, logged 2026-08-23:** the first attempt at this function's
+    grants missed `anon` — Supabase auto-grants `EXECUTE` on every new
+    `public`-schema function to `anon`, `authenticated`, AND `service_role`
+    at creation time. Revoking from `public`/`authenticated` alone left
+    `anon` (fully unauthenticated callers) able to call the RPC directly.
+    Fixed with `revoke execute ... from anon`, and hardened at the schema
+    level so this can't recur silently on future functions:
+    ```sql
+    alter default privileges in schema public revoke execute on functions from anon;
+    alter default privileges in schema public revoke execute on functions from authenticated;
+    ```
+    Going forward, every new RPC/function must be checked against
+    `information_schema.role_routine_grants` after creation — the
+    default-privileges change above reduces the risk but doesn't guarantee
+    someone won't explicitly re-grant it later.

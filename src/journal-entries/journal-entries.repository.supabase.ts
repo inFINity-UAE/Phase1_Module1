@@ -716,6 +716,7 @@ export class SupabaseJournalEntriesRepository implements JournalEntriesRepositor
   /**
    * [feature-spec] One-click reversal in the next open period.
    * [Rules §1.3] Corrections via reversing entries — no hard deletes.
+   * Atomic via reverse_journal_entry() Postgres RPC (single transaction).
    */
   async reverseEntry(
     originalId: string,
@@ -726,100 +727,37 @@ export class SupabaseJournalEntriesRepository implements JournalEntriesRepositor
       throw new Error(`Journal entry ${originalId} not found`);
     }
 
-    const originalPeriod = await this.findPeriodById(originalDetails.entry.period_id);
-    if (!originalPeriod) {
-      throw new Error(`Accounting period ${originalDetails.entry.period_id} not found`);
-    }
+    const { data, error } = await this.supabase.client.rpc('reverse_journal_entry', {
+      p_original_id: originalId,
+      p_created_by: createdBy,
+      p_fail_before_original_update: false,
+    });
 
-    const nextPeriod = await this.findNextOpenPeriod(
-      originalDetails.entry.company_id,
-      originalPeriod.period_end,
-    );
-    if (!nextPeriod) {
-      throw new Error('NO_NEXT_OPEN_PERIOD');
-    }
-
-    const entryNumber = await this.getNextEntryNumber(originalDetails.entry.company_id);
-    const postedAt = new Date().toISOString();
-    const narration = `Reversal of journal entry ${originalDetails.entry.entry_number}`;
-
-    const { data: reversalEntry, error: reversalError } = await this.supabase.client
-      .from('journal_entries')
-      .insert({
-        company_id: originalDetails.entry.company_id,
-        entry_number: entryNumber,
-        period_id: nextPeriod.id,
-        entry_date: nextPeriod.period_start,
-        entry_type: JournalEntryType.Reversal,
-        status: JournalEntryStatus.Posted,
-        narration,
-        reference_number: originalDetails.entry.reference_number,
-        reverses_entry_id: originalId,
-        created_by: createdBy,
-        posted_at: postedAt,
-      })
-      .select()
-      .single();
-
-    if (reversalError) {
-      throw reversalError;
-    }
-
-    const reversalRow = reversalEntry as JournalEntry;
-
-    try {
-      const mirroredLines = originalDetails.lines.map((line) => ({
-        journal_entry_id: reversalRow.id,
-        line_number: line.line_number,
-        account_id: line.account_id,
-        debit: line.credit,
-        credit: line.debit,
-        description: line.description,
-        cost_center: line.cost_center,
-      }));
-
-      const { data: lines, error: linesError } = await this.supabase.client
-        .from('journal_lines')
-        .insert(mirroredLines)
-        .select();
-
-      if (linesError) {
-        throw linesError;
+    if (error) {
+      if (error.message?.includes('NO_NEXT_OPEN_PERIOD')) {
+        throw new Error('NO_NEXT_OPEN_PERIOD');
       }
-
-      const { data: updatedOriginal, error: updateError } = await this.supabase.client
-        .from('journal_entries')
-        .update({
-          status: JournalEntryStatus.Reversed,
-          reversed_by_entry_id: reversalRow.id,
-        })
-        .eq('id', originalId)
-        .eq('status', JournalEntryStatus.Posted)
-        .is('reversed_by_entry_id', null)
-        .select()
-        .single();
-
-      if (updateError) {
-        throw updateError;
-      }
-
-      return {
-        original: {
-          entry: updatedOriginal as JournalEntry,
-          lines: originalDetails.lines,
-          attachments: originalDetails.attachments,
-        },
-        reversal: {
-          entry: reversalRow,
-          lines: (lines ?? []) as JournalLine[],
-          attachments: [],
-        },
-      };
-    } catch (error) {
-      await this.supabase.client.from('journal_lines').delete().eq('journal_entry_id', reversalRow.id);
-      await this.supabase.client.from('journal_entries').delete().eq('id', reversalRow.id);
       throw error;
     }
+
+    const payload = data as {
+      original: JournalEntry;
+      reversal: JournalEntry;
+      reversal_lines: JournalLine[];
+    };
+
+    return {
+      original: {
+        entry: payload.original,
+        lines: originalDetails.lines,
+        attachments: originalDetails.attachments,
+      },
+      reversal: {
+        entry: payload.reversal,
+        lines: payload.reversal_lines ?? [],
+        attachments: [],
+      },
+    };
   }
 
   async updateLine(id: string, dto: UpdateJournalLineDto): Promise<JournalLine> {
