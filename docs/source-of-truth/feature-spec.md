@@ -177,3 +177,61 @@ from the SupabaseAuthGuard scope review:
     `company_members` on every call — never trusted from a client-
     supplied `actor_role`/`actor_id` field, which was the vulnerability
     this decision closes.
+
+Logged 2026-08-24, finalizing the real UAE Chart of Accounts (179 accounts,
+136 default-active) delivered in `Chart_of_Accounts_-_inFINity.xlsx`,
+replacing the generic 100-account template that decision context above
+(and `HANDOFF.md` §7 open item #1) previously flagged as wrong-scheme
+placeholder content:
+
+12. **Zakat naming, finalized — corrects decision #8's literal wording.**
+    Decision #8 said the liability account "stays" named `Zakat Reserve`.
+    The finalized COA instead names the **default liability** account
+    `2350 Zakat Payable` (`category = 'liability'`, `sub_category =
+    'Zakat'`), and reserves the name **`Zakat Reserve`** for `3300`, the
+    **equity**, non-default (`is_active = false`) account used only for
+    AAOIFI-style Islamic-FI presentation via the existing custom-account
+    creation feature. Decision #8's substantive placement logic (liability
+    is the default; equity is opt-in via custom accounts, no special-case
+    engine logic) is unchanged — only the two accounts' names are
+    corrected to match the finalized source file exactly.
+13. **Import Duty is two related accounts, not one — extends decision #7,
+    does not replace it.** The finalized COA includes both
+    `2800 Import Duty Payable` (`category = 'liability'`, `sub_category =
+    'Other Liabilities'` — the accrued amount owed to customs before
+    settlement, an ordinary payable with no special-case treatment) and
+    `5030 Import Duty & Customs Clearance` (`category = 'expense'`,
+    `sub_category = 'COGS'` — the actual cost recognized). Decision #7's
+    conclusion (`category = 'expense'`, 5000s, and the flag to revisit
+    capitalization into inventory once Module 2.2 exists) governs `5030`
+    only; `2800` needs no special handling beyond normal payable behavior.
+14. **`Account Nature` and `VAT / Tax Mapping`, present in the source COA
+    file, have no corresponding columns in `schema.sql`'s `accounts`
+    table.** Adding columns is a schema change and out of scope for a
+    seed-data task (Cursor's standing rule: never alter `schema.sql` to
+    make a feature easier — ask first). Both are preserved instead as a
+    structured prefix inside the existing `description` column, e.g.
+    `[Contra-Asset] IFRS 9 ECL provision, contra to 1100` or
+    `[Control][RCM Input] ...`. VAT-return logic that would actually
+    *consume* the VAT Mapping value operationally (e.g. auto-populating a
+    VAT 201 return) is out of scope for Module 1.1.A and belongs to
+    whichever later module handles VAT filing.
+15. **Hierarchy demonstration accounts — net-new, not sourced from the
+    Rules PDF or feature list, added solely to prove the engine's
+    `parent_account_id`/depth mechanism works**, per the feature spec's
+    "create at least a few real 2-3 level examples" requirement. These use
+    4-digit codes the finalized COA file leaves unused within their band,
+    and are dev-scaffolding in the same spirit as decision #6's fixed-UUID
+    seed company — Cursor does not need to stop-and-ask about these
+    specific numbers:
+    - `1021 Bank Account - Current (AED) - Operations` (parent `1020`, depth 2)
+    - `1022 Bank Account - Current (AED) - Payroll Disbursement` (parent `1020`, depth 2)
+    - `5101 Salaries & Wages Expense - Head Office` (parent `5100`, depth 2)
+    - `5102 Salaries & Wages Expense - Head Office - Management`
+      (parent `5101`, depth 3)
+16. **`3100 Retained Earnings` is seeded with `is_system_account = true`.**
+    It is the year-end closing target (Rules §4.11) and the feature spec's
+    system-account concept ("protected from deletion/renumbering")
+    applies to it directly — `prevent_account_deletion()` already blocks
+    hard deletion of any `is_system_account = true` row regardless of
+    transaction history.
