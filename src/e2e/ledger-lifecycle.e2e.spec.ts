@@ -18,7 +18,6 @@ import { SupabaseService } from '../database/supabase.service';
 import {
   APPROVAL_THRESHOLD,
   E2E_ACCOUNTANT_ID,
-  E2E_COMPANY_ID,
   E2E_OWNER_ID,
   ensureE2eCompanyReady,
   ensureFiscalYearPeriods,
@@ -50,12 +49,16 @@ const hasSupabase = Boolean(
     let journalRepository: JournalEntriesRepository;
     let supabase: SupabaseService;
 
+    /** [feature-spec.md decision #18] Set once per run by ensureE2eCompanyReady (random UUID). */
+    let companyId = '';
     let fiscalYear = 0;
     let janPeriodId = '';
     let cashAccountId = '';
-    let openingEquityAccountId = '';
+    let shareCapitalAccountId = '';
     let expenseAccountId = '';
     let incomeAccountId = '';
+    let depreciationExpenseAccountId = '';
+    let accumulatedDepreciationAccountId = '';
 
     const trackedEntryIds: string[] = [];
 
@@ -77,20 +80,23 @@ const hasSupabase = Boolean(
       journalRepository = module.get(JOURNAL_ENTRIES_REPOSITORY);
       supabase = module.get(SupabaseService);
 
-      await ensureE2eCompanyReady(supabase);
-      fiscalYear = await resolveCleanFiscalYear(journalRepository, E2E_COMPANY_ID);
-      const periods = await ensureFiscalYearPeriods(supabase, E2E_COMPANY_ID, fiscalYear);
+      companyId = await ensureE2eCompanyReady(supabase);
+      fiscalYear = await resolveCleanFiscalYear(journalRepository, companyId);
+      const periods = await ensureFiscalYearPeriods(supabase, companyId, fiscalYear);
 
       janPeriodId = periods.get(`${fiscalYear}-01-01`)!;
 
-      cashAccountId = await getAccountIdByNumber(supabase, E2E_COMPANY_ID, '1011');
-      openingEquityAccountId = await getAccountIdByNumber(supabase, E2E_COMPANY_ID, '3210');
-      expenseAccountId = await getAccountIdByNumber(supabase, E2E_COMPANY_ID, '5010');
-      incomeAccountId = await getAccountIdByNumber(supabase, E2E_COMPANY_ID, '4010');
+      // Plausible opening TB: Dr bank, Cr share capital (not a synthetic plug equity).
+      cashAccountId = await getAccountIdByNumber(supabase, companyId, '1020');
+      shareCapitalAccountId = await getAccountIdByNumber(supabase, companyId, '3000');
+      expenseAccountId = await getAccountIdByNumber(supabase, companyId, '5100');
+      incomeAccountId = await getAccountIdByNumber(supabase, companyId, '4000');
+      depreciationExpenseAccountId = await getAccountIdByNumber(supabase, companyId, '5600');
+      accumulatedDepreciationAccountId = await getAccountIdByNumber(supabase, companyId, '1640');
     }, 120000);
 
     async function assertTrialBalanced(step: string): Promise<void> {
-      const totals = await journalRepository.getTrialBalanceTotals(E2E_COMPANY_ID);
+      const totals = await journalRepository.getTrialBalanceTotals(companyId);
       expect(totals.total_debit).toBeCloseTo(totals.total_credit, 2);
       // eslint-disable-next-line no-console
       console.log(
@@ -102,7 +108,7 @@ const hasSupabase = Boolean(
       const { count, error } = await supabase.client
         .from('accounts')
         .select('id', { count: 'exact', head: true })
-        .eq('company_id', E2E_COMPANY_ID);
+        .eq('company_id', companyId);
 
       if (error) {
         throw error;
@@ -122,7 +128,7 @@ const hasSupabase = Boolean(
       }) => void,
     ): Promise<void> {
       const audit = await auditLogService.find({
-        company_id: E2E_COMPANY_ID,
+        company_id: companyId,
         record_id: recordId,
         table_name: 'journal_entries',
       });
@@ -148,21 +154,24 @@ const hasSupabase = Boolean(
     }
 
     it('runs the full accounting engine lifecycle with trial balance integrity at every step', async () => {
-      // Stage 1 — COA seed
+      // Stage 1 — COA seed (scoped to this run's company — fresh UUID ⇒ TB starts at zero)
       const accountCount = await countAccounts();
-      expect(accountCount).toBeGreaterThanOrEqual(80);
+      expect(accountCount).toBeGreaterThanOrEqual(183);
+      const openingTotals = await journalRepository.getTrialBalanceTotals(companyId);
+      expect(openingTotals.total_debit).toBe(0);
+      expect(openingTotals.total_credit).toBe(0);
       await assertTrialBalanced('Stage 1 — COA seeded, no postings yet');
 
       // Stage 7 — Opening balance
       const openingBalance = await journalEntriesService.createOpeningBalance(
         {
-          company_id: E2E_COMPANY_ID,
+          company_id: companyId,
           fiscal_year: fiscalYear,
           entry_date: `${fiscalYear}-01-01`,
           narration: `E2E opening balance FY${fiscalYear}`,
           lines: [
             { line_number: 1, account_id: cashAccountId, debit: 50_000, credit: 0 },
-            { line_number: 2, account_id: openingEquityAccountId, debit: 0, credit: 50_000 },
+            { line_number: 2, account_id: shareCapitalAccountId, debit: 0, credit: 50_000 },
           ],
         },
         E2E_OWNER_ID,
@@ -175,7 +184,7 @@ const hasSupabase = Boolean(
       // Stage 4/5 — Manual entry below approval threshold
       const belowThresholdDraft = await journalEntriesService.create(
         {
-          company_id: E2E_COMPANY_ID,
+          company_id: companyId,
           period_id: janPeriodId,
           entry_date: `${fiscalYear}-01-10`,
           narration: 'E2E below-threshold expense',
@@ -204,7 +213,7 @@ const hasSupabase = Boolean(
       // Stage 4/5/9 — Manual entry above approval threshold
       const aboveThresholdDraft = await journalEntriesService.create(
         {
-          company_id: E2E_COMPANY_ID,
+          company_id: companyId,
           period_id: janPeriodId,
           entry_date: `${fiscalYear}-01-12`,
           narration: 'E2E above-threshold expense',
@@ -248,7 +257,7 @@ const hasSupabase = Boolean(
       // Stage 9 rejection path — separate above-threshold entry (does not affect ledger)
       const rejectDraft = await journalEntriesService.create(
         {
-          company_id: E2E_COMPANY_ID,
+          company_id: companyId,
           period_id: janPeriodId,
           entry_date: `${fiscalYear}-01-13`,
           narration: 'E2E above-threshold rejection probe',
@@ -291,7 +300,7 @@ const hasSupabase = Boolean(
       // P&L activity for year-end close
       const revenueDraft = await journalEntriesService.create(
         {
-          company_id: E2E_COMPANY_ID,
+          company_id: companyId,
           period_id: janPeriodId,
           entry_date: `${fiscalYear}-01-20`,
           narration: 'E2E revenue for year-end close',
@@ -324,7 +333,7 @@ const hasSupabase = Boolean(
       expect(originalAfterReversal.entry.reversed_by_entry_id).toBe(reversal.reversal.entry.id);
 
       const originalReversalAudit = await auditLogService.find({
-        company_id: E2E_COMPANY_ID,
+        company_id: companyId,
         record_id: belowThresholdDraft.entry.id,
         table_name: 'journal_entries',
       });
@@ -347,7 +356,7 @@ const hasSupabase = Boolean(
       // Stage 8 — Recurring template generate + auto-post
       const recurringTemplate = await recurringService.create(
         {
-          company_id: E2E_COMPANY_ID,
+          company_id: companyId,
           template_name: `E2E depreciation FY${fiscalYear}`,
           narration_template: 'E2E recurring depreciation',
           frequency: RecurrenceFrequency.Monthly,
@@ -355,8 +364,18 @@ const hasSupabase = Boolean(
           next_run_date: `${fiscalYear}-02-01`,
           auto_post: true,
           lines: [
-            { line_number: 1, account_id: expenseAccountId, debit: 500, credit: 0 },
-            { line_number: 2, account_id: cashAccountId, debit: 0, credit: 500 },
+            {
+              line_number: 1,
+              account_id: depreciationExpenseAccountId,
+              debit: 500,
+              credit: 0,
+            },
+            {
+              line_number: 2,
+              account_id: accumulatedDepreciationAccountId,
+              debit: 0,
+              credit: 500,
+            },
           ],
         },
         E2E_OWNER_ID,
@@ -375,7 +394,7 @@ const hasSupabase = Boolean(
 
       const blockedDraft = await journalEntriesService.create(
         {
-          company_id: E2E_COMPANY_ID,
+          company_id: companyId,
           period_id: janPeriodId,
           entry_date: `${fiscalYear}-01-25`,
           narration: 'E2E soft-closed period blocked post',
@@ -408,14 +427,14 @@ const hasSupabase = Boolean(
 
       // Stage 11 — Year-end closing
       const plBeforeClose = await journalRepository.getProfitAndLossBalancesForFiscalYear(
-        E2E_COMPANY_ID,
+        companyId,
         fiscalYear,
       );
       expect(plBeforeClose.length).toBeGreaterThan(0);
 
       const yearEndClose = await journalEntriesService.runYearEndClosing(
         {
-          company_id: E2E_COMPANY_ID,
+          company_id: companyId,
           fiscal_year: fiscalYear,
           entry_date: `${fiscalYear}-12-31`,
         },
@@ -426,7 +445,7 @@ const hasSupabase = Boolean(
       expect(yearEndClose.entry.status).toBe(JournalEntryStatus.Posted);
 
       const plAfterClose = await journalRepository.getProfitAndLossBalancesForFiscalYear(
-        E2E_COMPANY_ID,
+        companyId,
         fiscalYear,
       );
       expect(plAfterClose).toHaveLength(0);
@@ -438,14 +457,14 @@ const hasSupabase = Boolean(
 
       // Stage 12 — Audit trail covers the lifecycle
       const openingAudit = await auditLogService.find({
-        company_id: E2E_COMPANY_ID,
+        company_id: companyId,
         record_id: openingBalance.entry.id,
         table_name: 'journal_entries',
       });
       expect(openingAudit.some((row) => row.action === AuditAction.Insert)).toBe(true);
 
       const belowAudit = await auditLogService.find({
-        company_id: E2E_COMPANY_ID,
+        company_id: companyId,
         record_id: belowThresholdDraft.entry.id,
         table_name: 'journal_entries',
       });
@@ -454,7 +473,7 @@ const hasSupabase = Boolean(
       expect(belowAudit.some((row) => row.action === AuditAction.Reversal)).toBe(true);
 
       const reversalAudit = await auditLogService.find({
-        company_id: E2E_COMPANY_ID,
+        company_id: companyId,
         record_id: reversal.reversal.entry.id,
         table_name: 'journal_entries',
       });
@@ -463,7 +482,7 @@ const hasSupabase = Boolean(
       );
 
       const yearEndAudit = await auditLogService.find({
-        company_id: E2E_COMPANY_ID,
+        company_id: companyId,
         record_id: yearEndClose.entry.id,
         table_name: 'journal_entries',
       });
@@ -472,7 +491,7 @@ const hasSupabase = Boolean(
       ).toBe(true);
 
       const companyAudit = await auditLogService.find({
-        company_id: E2E_COMPANY_ID,
+        company_id: companyId,
         table_name: 'journal_entries',
         actor_id: E2E_OWNER_ID,
       });

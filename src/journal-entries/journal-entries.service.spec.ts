@@ -24,7 +24,7 @@ import { AccountingPeriod } from '../accounting-periods/entities/accounting-peri
 import { JournalEntriesService } from './journal-entries.service';
 import { CompanyMembersService } from '../company-members/company-members.service';
 
-const COMPANY_ID = '00000000-0000-0000-0000-000000000001';
+const COMPANY_ID = '00000000-0000-0000-0000-000000000002';
 const PERIOD_ID = '22222222-2222-2222-2222-222222222222';
 const USER_ID = '33333333-3333-3333-3333-333333333333';
 const ACCOUNT_A = '44444444-4444-4444-4444-444444444444';

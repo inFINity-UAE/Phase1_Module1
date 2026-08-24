@@ -73,17 +73,17 @@ async function resolveImbalanceProbeFiscalYear(
         .from('accounts')
         .select('id, account_number, category')
         .eq('company_id', COMPANY_ID)
-        .in('account_number', ['4010', '5010', '1011', '3100']);
+        .in('account_number', ['4000', '5100', '1010', '3100']);
       if (accountsError || !accounts) {
         throw accountsError ?? new Error('Required accounts not found');
       }
 
       for (const account of accounts) {
-        if (account.account_number === '4010') {
+        if (account.account_number === '4000') {
           incomeAccountId = account.id;
-        } else if (account.account_number === '5010') {
+        } else if (account.account_number === '5100') {
           expenseAccountId = account.id;
-        } else if (account.account_number === '1011') {
+        } else if (account.account_number === '1010') {
           cashAccountId = account.id;
         } else if (account.account_number === '3100') {
           retainedEarningsId = account.id;

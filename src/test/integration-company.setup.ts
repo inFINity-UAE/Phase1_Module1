@@ -7,13 +7,14 @@ import {
 import { CompanyRole } from '../common/enums/company-role.enum';
 import { ensureCompanyMember, testUserEmail } from './company-members.setup';
 
-/** Isolated companies for Supabase integration suites — never share demo ...0001. */
+/** Isolated companies for Supabase integration suites — never share demo ...0002. */
 export const POST_INTEGRATION_COMPANY_ID = '00000000-0000-0000-0000-00000000b001';
 export const YEAR_END_INTEGRATION_COMPANY_ID = '00000000-0000-0000-0000-00000000b002';
 export const AUDIT_LOG_INTEGRATION_COMPANY_ID = '00000000-0000-0000-0000-00000000b003';
 export const REVERSE_INTEGRATION_COMPANY_ID = '00000000-0000-0000-0000-00000000b004';
 export const APPROVAL_RBAC_INTEGRATION_COMPANY_ID = '00000000-0000-0000-0000-00000000b005';
-export const INTEGRATION_USER_ID = '00000000-0000-0000-0000-000000000002';
+/** Auth user for integration suites — must not collide with DEMO_COMPANY_ID (...0002). */
+export const INTEGRATION_USER_ID = '00000000-0000-0000-0000-0000000000a2';
 /** Non-Owner/non-Manager member for RBAC negative tests on integration company b005. */
 export const INTEGRATION_ACCOUNTANT_ID = E2E_ACCOUNTANT_ID;
 

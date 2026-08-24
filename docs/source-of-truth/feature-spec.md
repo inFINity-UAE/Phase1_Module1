@@ -235,3 +235,39 @@ placeholder content:
     applies to it directly — `prevent_account_deletion()` already blocks
     hard deletion of any `is_system_account = true` row regardless of
     transaction history.
+17. **A second fixed demo-company UUID was minted — corrects/extends
+    decision #6, does not replace it.** Attempting to reseed the
+    finalized COA (decisions #12–16) into the original demo company
+    (`00000000-0000-0000-0000-000000000001`) correctly aborted: that
+    company had accumulated 228 `journal_lines` from Stage 4–13 test runs
+    against the old placeholder COA, and the schema's own immutability
+    guarantees (`prevent_posted_entry_deletion`, `prevent_account_deletion`)
+    refuse to let posted transaction history be deleted — this is the
+    guarantee working as intended, not a bug to bypass (no `TRUNCATE`,
+    no disabling triggers, no force-delete). Rather than fight that,
+    `00000000-0000-0000-0000-000000000001` is retired as legacy
+    placeholder-era test data — left untouched, no longer used by any
+    seed script, test fixture, or e2e setup going forward. A new fixed
+    UUID, `00000000-0000-0000-0000-000000000002` (`'Demo Company
+    (Finalized COA Seed)'`), is the one and only demo company for all
+    COA-seeding, e2e, and dev/test scaffolding from this point on. Still
+    dev/test scaffolding only, per decision #6's original rationale —
+    production company onboarding remains a separate, not-yet-built
+    feature.
+18. E2E test company "teardown," logged 2026-08-24 resolving HANDOFF §7 
+    item #4: there is no row-level delete path, by design, and that's 
+    correct — not a gap to route around. A company row cannot be deleted 
+    once any of its journal_entries are posted: prevent_posted_entry_deletion
+     fires per-row even under an ON DELETE CASCADE from companies, exactly 
+     like the guard that blocked reseeding …001/…e2e1 above. "Teardown" 
+     therefore does NOT mean deleting or truncating old test companies — 
+     it means never reusing a fixed ID for a destructive reset in the first 
+     place. Fix: e2e test setup generates a fresh, randomly-generated company 
+     UUID per test run (not a hardcoded literal like …e2e1/…e2e2), seeds the 
+     finalized COA fresh into it every time, and never wipes or reseeds an 
+     existing company. Old test companies accumulate as disposable rows in 
+     the non-prod Supabase project; reclaiming that space is an infrequent, 
+     manual, whole-environment reset (drop/recreate the test project, or a 
+     one-off manual cleanup applied directly in the Supabase SQL editor by 
+     the developer) — never something app code or Cursor's test suite does 
+     automatically.

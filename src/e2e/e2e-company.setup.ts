@@ -1,14 +1,16 @@
+import { randomUUID } from 'crypto';
 import { SupabaseService } from '../database/supabase.service';
 import { PeriodStatus } from '../common/enums/period-status.enum';
 import { JournalEntriesRepository } from '../journal-entries/journal-entries.repository';
 import { CompanyRole } from '../common/enums/company-role.enum';
 import { ensureCompanyMember, testUserEmail } from '../test/company-members.setup';
 
-export const E2E_COMPANY_ID = '00000000-0000-0000-0000-00000000e2e1';
 export const E2E_OWNER_ID = '00000000-0000-0000-0000-000000000003';
 export const E2E_ACCOUNTANT_ID = '00000000-0000-0000-0000-000000000004';
-export const DEMO_COMPANY_ID = '00000000-0000-0000-0000-000000000001';
-export const DEMO_OWNER_ID = '00000000-0000-0000-0000-000000000002';
+/** Fixed demo company for cloning the finalized 183-account COA into fresh test companies. */
+export const DEMO_COMPANY_ID = '00000000-0000-0000-0000-000000000002';
+/** Auth user for demo-company membership seed — distinct from DEMO_COMPANY_ID. */
+export const DEMO_OWNER_ID = '00000000-0000-0000-0000-0000000000d2';
 export const APPROVAL_THRESHOLD = 5000;
 
 const MONTHS = [
@@ -41,12 +43,17 @@ export async function resolveCleanFiscalYear(
   throw new Error(`No unused fiscal year found for E2E company ${companyId}`);
 }
 
+/**
+ * Insert company + settings and clone the finalized COA from DEMO_COMPANY_ID.
+ * [feature-spec.md decision #18] No wipe/reseed of existing companies — callers must
+ * pass a fresh company UUID (or an id that already has the finalized COA).
+ */
 export async function ensureCompanyWithCoa(
   supabase: SupabaseService,
   companyId: string,
   legalName: string,
 ): Promise<void> {
-  await supabase.client.from('companies').upsert({
+  const { error: companyError } = await supabase.client.from('companies').insert({
     id: companyId,
     legal_name: legalName,
     base_currency: 'AED',
@@ -54,13 +61,22 @@ export async function ensureCompanyWithCoa(
     fiscal_year_start_month: 1,
   });
 
-  await supabase.client.from('company_settings').upsert({
+  // 23505 = already exists (integration suites that still use a fixed id with finalized COA)
+  if (companyError && companyError.code !== '23505') {
+    throw companyError;
+  }
+
+  const { error: settingsError } = await supabase.client.from('company_settings').upsert({
     company_id: companyId,
     journal_approval_threshold: APPROVAL_THRESHOLD,
     approval_threshold_currency: 'AED',
     default_period_length: 'monthly',
     allow_period_reopen: true,
   });
+
+  if (settingsError) {
+    throw settingsError;
+  }
 
   const { count, error: countError } = await supabase.client
     .from('accounts')
@@ -71,8 +87,28 @@ export async function ensureCompanyWithCoa(
     throw countError;
   }
 
-  if ((count ?? 0) >= 80) {
+  const { data: hierarchyDemo, error: hierarchyError } = await supabase.client
+    .from('accounts')
+    .select('id')
+    .eq('company_id', companyId)
+    .eq('account_number', '1021')
+    .maybeSingle();
+
+  if (hierarchyError) {
+    throw hierarchyError;
+  }
+
+  // Finalized UAE COA = 179 Excel rows + 4 hierarchy demos = 183 (marker: 1021)
+  if ((count ?? 0) >= 183 && hierarchyDemo) {
     return;
+  }
+
+  if ((count ?? 0) > 0) {
+    // [feature-spec.md decision #18] Never wipe — mint a fresh UUID instead.
+    throw new Error(
+      `Company ${companyId} already has ${(count ?? 0)} accounts but not the finalized COA ` +
+        '(183 rows + hierarchy demo 1021). Do not wipe/reseed; use a fresh company UUID.',
+    );
   }
 
   const { data: demoAccounts, error: demoError } = await supabase.client
@@ -85,7 +121,13 @@ export async function ensureCompanyWithCoa(
     .order('account_number', { ascending: true });
 
   if (demoError || !demoAccounts?.length) {
-    throw demoError ?? new Error('Demo COA not found — run Stage 1 seed first');
+    throw demoError ?? new Error('Demo COA not found — apply seed_finalized_coa_demo_company_0002.sql first');
+  }
+
+  if (demoAccounts.length < 183) {
+    throw new Error(
+      `Demo COA has ${demoAccounts.length} accounts — expected 183 after finalized seed`,
+    );
   }
 
   const { data: demoWithParents, error: parentError } = await supabase.client
@@ -103,22 +145,6 @@ export async function ensureCompanyWithCoa(
   const numberToCompanyId = new Map<string, string>();
 
   for (const account of demoAccounts) {
-    const { data: existingAccount, error: existingError } = await supabase.client
-      .from('accounts')
-      .select('id')
-      .eq('company_id', companyId)
-      .eq('account_number', account.account_number)
-      .maybeSingle();
-
-    if (existingError) {
-      throw existingError;
-    }
-
-    if (existingAccount) {
-      numberToCompanyId.set(account.account_number as string, existingAccount.id as string);
-      continue;
-    }
-
     const parentNumber = account.parent_account_id
       ? demoIdToNumber.get(account.parent_account_id as string)
       : null;
@@ -142,28 +168,8 @@ export async function ensureCompanyWithCoa(
       .select('id, account_number')
       .single();
 
-    if (insertError) {
-      if (insertError.code === '23505') {
-        const { data: racedAccount, error: racedError } = await supabase.client
-          .from('accounts')
-          .select('id, account_number')
-          .eq('company_id', companyId)
-          .eq('account_number', account.account_number)
-          .single();
-
-        if (racedError || !racedAccount) {
-          throw racedError ?? insertError;
-        }
-
-        numberToCompanyId.set(racedAccount.account_number as string, racedAccount.id as string);
-        continue;
-      }
-
-      throw insertError;
-    }
-
-    if (!inserted) {
-      throw new Error(`Failed to seed account ${account.account_number}`);
+    if (insertError || !inserted) {
+      throw insertError ?? new Error(`Failed to seed account ${account.account_number}`);
     }
 
     numberToCompanyId.set(inserted.account_number as string, inserted.id as string);
@@ -180,26 +186,32 @@ export async function ensureCompanyWithCoa(
   }
 }
 
-export async function ensureE2eCompanyReady(supabase: SupabaseService): Promise<void> {
-  await ensureCompanyWithCoa(
-    supabase,
-    E2E_COMPANY_ID,
-    'E2E Lifecycle Test Company',
-  );
+/**
+ * [feature-spec.md decision #18] Mint a fresh random company UUID per e2e run —
+ * never reuse …e2e1/…e2e2 or any other fixed id for destructive reset.
+ */
+export async function ensureE2eCompanyReady(supabase: SupabaseService): Promise<string> {
+  const companyId = randomUUID();
+
+  await ensureCompanyWithCoa(supabase, companyId, `E2E Lifecycle Test Company ${companyId}`);
   await ensureCompanyMember(
     supabase,
-    E2E_COMPANY_ID,
+    companyId,
     E2E_OWNER_ID,
     CompanyRole.Owner,
     testUserEmail(E2E_OWNER_ID),
   );
   await ensureCompanyMember(
     supabase,
-    E2E_COMPANY_ID,
+    companyId,
     E2E_ACCOUNTANT_ID,
     CompanyRole.Accountant,
     testUserEmail(E2E_ACCOUNTANT_ID),
   );
+
+  // eslint-disable-next-line no-console
+  console.log(`[e2e] fresh company_id=${companyId}`);
+  return companyId;
 }
 
 export async function ensureFiscalYearPeriods(

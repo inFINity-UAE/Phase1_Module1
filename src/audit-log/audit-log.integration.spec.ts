@@ -70,14 +70,14 @@ const USER_ID = INTEGRATION_USER_ID;
         .from('accounts')
         .select('id, account_number')
         .eq('company_id', COMPANY_ID)
-        .in('account_number', ['1011', '1020']);
+        .in('account_number', ['1010', '1020']);
 
       if (accountsError || !accounts || accounts.length < 2) {
         throw accountsError ?? new Error('Need cash and bank accounts for audit probes');
       }
 
       for (const account of accounts) {
-        if (account.account_number === '1011') {
+        if (account.account_number === '1010') {
           cashAccountId = account.id as string;
         } else if (account.account_number === '1020') {
           bankAccountId = account.id as string;

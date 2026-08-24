@@ -4,7 +4,7 @@ import { AuditLogService } from './audit-log.service';
 import { AUDIT_LOG_REPOSITORY, AuditLogRepository } from './audit-log.repository';
 import { QueryAuditLogDto } from './dto/query-audit-log.dto';
 
-const COMPANY_ID = '00000000-0000-0000-0000-000000000001';
+const COMPANY_ID = '00000000-0000-0000-0000-000000000002';
 const RECORD_ID = '66666666-6666-6666-6666-666666666666';
 const ACTOR_ID = '33333333-3333-3333-3333-333333333333';
 

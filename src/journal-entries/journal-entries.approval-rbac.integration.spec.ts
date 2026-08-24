@@ -73,17 +73,17 @@ const ACCOUNTANT_ID = INTEGRATION_ACCOUNTANT_ID;
         .from('accounts')
         .select('id, account_number')
         .eq('company_id', COMPANY_ID)
-        .in('account_number', ['1011', '5010']);
+        .in('account_number', ['1010', '5100']);
 
       if (accountsError || !accounts || accounts.length < 2) {
         throw accountsError ?? new Error('Need cash and expense accounts for RBAC probe');
       }
 
       for (const account of accounts) {
-        if (account.account_number === '1011') {
+        if (account.account_number === '1010') {
           cashAccountId = account.id as string;
         }
-        if (account.account_number === '5010') {
+        if (account.account_number === '5100') {
           expenseAccountId = account.id as string;
         }
       }

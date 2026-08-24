@@ -12,7 +12,7 @@ import { NormalBalance } from '../common/enums/normal-balance.enum';
 import { Account } from './entities/account.entity';
 import { CreateAccountDto } from './dto/create-account.dto';
 
-const COMPANY_ID = '00000000-0000-0000-0000-000000000001';
+const COMPANY_ID = '00000000-0000-0000-0000-000000000002';
 const ACCOUNT_ID = '11111111-1111-1111-1111-111111111111';
 
 function pgError(code: string, message: string): PostgrestError {
