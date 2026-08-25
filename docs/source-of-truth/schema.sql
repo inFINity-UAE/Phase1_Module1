@@ -540,8 +540,19 @@ create policy company_isolation_attachments on journal_attachments
 -- ============================================================================
 -- 9. HELPER VIEW — trial balance (sanity-check view, expand into full reports later)
 -- ============================================================================
+-- [feature-spec.md decision #22 / HANDOFF §6 item 4] security_invoker = true
+-- is REQUIRED here. Without it, Postgres runs this view's row-level security
+-- checks as the VIEW OWNER, not the querying role — silently bypassing the
+-- company_isolation_* RLS policies above for anyone permitted to query the
+-- view. This was previously reported fixed (HANDOFF §6 item 4) but the live
+-- Supabase linter flagged it again on 2026-08-24 with no security_invoker
+-- clause present anywhere in the canonical schema.sql — meaning the original
+-- fix was either never captured back into this file, or was lost. Treat this
+-- clause as non-negotiable on any future CREATE OR REPLACE of this view.
 
-create view v_trial_balance as
+create view v_trial_balance
+with (security_invoker = true)
+as
 select
   a.company_id,
   a.id as account_id,
@@ -603,12 +614,6 @@ revoke all on function allocate_next_entry_number(uuid) from authenticated;
 revoke all on function allocate_next_entry_number(uuid) from anon;
 grant execute on function allocate_next_entry_number(uuid) to service_role;
 
--- Verify grants after apply:
--- select grantee, privilege_type
---   from information_schema.role_routine_grants
---  where routine_schema = 'public'
---    and routine_name = 'allocate_next_entry_number';
-
 -- === synced from docs/source-of-truth/insert_journal_entry_draft.sql ===
 -- insert_journal_entry_draft.sql
 -- Apply AFTER allocate_next_entry_number.sql.
@@ -646,7 +651,6 @@ begin
     raise exception 'JOURNAL_DRAFT_REQUIRES_LINES';
   end if;
 
-  -- Nested company lock (released with this transaction).
   v_entry_number := allocate_next_entry_number(p_company_id);
 
   insert into journal_entries (
@@ -740,29 +744,12 @@ revoke all on function insert_journal_entry_draft(uuid, uuid, date, journal_entr
 revoke all on function insert_journal_entry_draft(uuid, uuid, date, journal_entry_type, text, uuid, jsonb, text, uuid, jsonb) from anon;
 grant execute on function insert_journal_entry_draft(uuid, uuid, date, journal_entry_type, text, uuid, jsonb, text, uuid, jsonb) to service_role;
 
--- Verify grants after apply:
--- select grantee, privilege_type
---   from information_schema.role_routine_grants
---  where routine_schema = 'public'
---    and routine_name = 'insert_journal_entry_draft';
-
 -- === synced from docs/source-of-truth/create_opening_balance_entry.sql ===
 -- create_opening_balance_entry.sql
--- Apply AFTER allocate_next_entry_number.sql.
---
 -- [feature-spec.md decision #3] One opening_balance per company per fiscal year.
--- [race fix] Entire check → find period → allocate entry_number → insert → post
--- runs in ONE transaction under pg_advisory_xact_lock keyed on
--- hashtext('ob:' || company_id || ':' || fiscal_year) so concurrent creates
--- for the same company+FY serialize; different companies / FYs stay concurrent.
--- Lock order: ALWAYS acquire the 'ob:' lock FIRST, then allocate_next_entry_number's
--- company-scoped lock (avoids deadlock with other entry inserts).
---
--- Exception tokens (Nest maps these):
---   OPENING_BALANCE_ALREADY_EXISTS
---   NO_OPEN_PERIOD_FOR_FISCAL_YEAR  — earliest *open* period lookup failed
---     (distinct from year-end's NO_PERIOD_FOR_FISCAL_YEAR, which is any period)
---
+-- [race fix] Lock 'ob:' namespace FIRST, then allocate_next_entry_number's
+-- company-scoped lock.
+-- Exception tokens: OPENING_BALANCE_ALREADY_EXISTS, NO_OPEN_PERIOD_FOR_FISCAL_YEAR
 -- [feature-spec.md decision #10] service_role only.
 
 create or replace function create_opening_balance_entry(
@@ -791,7 +778,6 @@ begin
     raise exception 'JOURNAL_DRAFT_REQUIRES_LINES';
   end if;
 
-  -- Outer lock first (before any company entry-number lock).
   perform pg_advisory_xact_lock(
     hashtext('ob:' || p_company_id::text || ':' || p_fiscal_year::text)
   );
@@ -810,8 +796,6 @@ begin
     raise exception 'OPENING_BALANCE_ALREADY_EXISTS';
   end if;
 
-  -- Opening balance requires an *open* period (Nest: findEarliestOpenPeriod).
-  -- Token: NO_OPEN_PERIOD_FOR_FISCAL_YEAR (not NO_PERIOD_FOR_FISCAL_YEAR).
   select * into v_period
     from accounting_periods
    where company_id = p_company_id
@@ -900,32 +884,13 @@ revoke all on function create_opening_balance_entry(uuid, integer, date, text, u
 revoke all on function create_opening_balance_entry(uuid, integer, date, text, uuid, jsonb, text) from anon;
 grant execute on function create_opening_balance_entry(uuid, integer, date, text, uuid, jsonb, text) to service_role;
 
--- Verify grants after apply:
--- select grantee, privilege_type
---   from information_schema.role_routine_grants
---  where routine_schema = 'public'
---    and routine_name = 'create_opening_balance_entry';
-
 -- === synced from docs/source-of-truth/create_year_end_closing_entry.sql ===
 -- create_year_end_closing_entry.sql
--- Apply AFTER allocate_next_entry_number.sql.
---
 -- [feature-spec.md decision #4] One year_end_closing per company per fiscal year.
--- [Rules §4.11] Transfer P&L into Retained Earnings (3100).
--- [race fix] Lock → existence check → build P&L lines → allocate → insert → post
--- in ONE transaction under pg_advisory_xact_lock keyed on
--- hashtext('ye:' || company_id || ':' || fiscal_year).
--- Lock order: ALWAYS acquire the 'ye:' lock FIRST, then allocate_next_entry_number's
+-- [race fix] Lock 'ye:' namespace FIRST, then allocate_next_entry_number's
 -- company-scoped lock. 'ob:' and 'ye:' namespaces do NOT block each other.
---
--- Exception tokens (Nest maps these):
---   YEAR_END_ALREADY_CLOSED
---   NO_PERIOD_FOR_FISCAL_YEAR — latest period for FY missing (any status).
---     Distinct from opening-balance's NO_OPEN_PERIOD_FOR_FISCAL_YEAR
---     (which requires status = 'open').
---   RETAINED_EARNINGS_NOT_FOUND
---   NO_PL_BALANCES_TO_CLOSE
---
+-- Exception tokens: YEAR_END_ALREADY_CLOSED, NO_PERIOD_FOR_FISCAL_YEAR,
+-- RETAINED_EARNINGS_NOT_FOUND, NO_PL_BALANCES_TO_CLOSE
 -- [feature-spec.md decision #10] service_role only.
 
 create or replace function create_year_end_closing_entry(
@@ -973,8 +938,6 @@ begin
     raise exception 'YEAR_END_ALREADY_CLOSED';
   end if;
 
-  -- Year-end uses latest period for the FY regardless of open/closed status.
-  -- Token: NO_PERIOD_FOR_FISCAL_YEAR (not NO_OPEN_PERIOD_FOR_FISCAL_YEAR).
   select * into v_period
     from accounting_periods
    where company_id = p_company_id
@@ -997,8 +960,6 @@ begin
     raise exception 'RETAINED_EARNINGS_NOT_FOUND';
   end if;
 
-  -- Build closing lines from posted P&L balances for this company+FY
-  -- (mirrors Nest getProfitAndLossBalancesForFiscalYear + buildYearEndClosingLines).
   create temporary table tmp_ye_lines (
     line_number int primary key,
     account_id uuid not null,
@@ -1038,24 +999,12 @@ begin
   loop
     if r.category = 'income' then
       insert into tmp_ye_lines(line_number, account_id, debit, credit, description)
-      values (
-        v_line_number,
-        r.account_id,
-        r.balance,
-        0,
-        'Year-end close — zero income balance'
-      );
+      values (v_line_number, r.account_id, r.balance, 0, 'Year-end close — zero income balance');
       v_total_debits := v_total_debits + r.balance;
       v_line_number := v_line_number + 1;
     elsif r.category = 'expense' then
       insert into tmp_ye_lines(line_number, account_id, debit, credit, description)
-      values (
-        v_line_number,
-        r.account_id,
-        0,
-        r.balance,
-        'Year-end close — zero expense balance'
-      );
+      values (v_line_number, r.account_id, 0, r.balance, 'Year-end close — zero expense balance');
       v_total_credits := v_total_credits + r.balance;
       v_line_number := v_line_number + 1;
     end if;
@@ -1068,22 +1017,10 @@ begin
   v_net := round((v_total_debits - v_total_credits)::numeric, 2);
   if v_net > 0 then
     insert into tmp_ye_lines(line_number, account_id, debit, credit, description)
-    values (
-      v_line_number,
-      v_re_id,
-      0,
-      v_net,
-      'Year-end close — net P&L to Retained Earnings'
-    );
+    values (v_line_number, v_re_id, 0, v_net, 'Year-end close — net P&L to Retained Earnings');
   elsif v_net < 0 then
     insert into tmp_ye_lines(line_number, account_id, debit, credit, description)
-    values (
-      v_line_number,
-      v_re_id,
-      abs(v_net),
-      0,
-      'Year-end close — net P&L to Retained Earnings'
-    );
+    values (v_line_number, v_re_id, abs(v_net), 0, 'Year-end close — net P&L to Retained Earnings');
   end if;
 
   v_entry_date := coalesce(p_entry_date, v_period.period_end);
@@ -1095,41 +1032,14 @@ begin
   v_entry_number := allocate_next_entry_number(p_company_id);
 
   insert into journal_entries (
-    company_id,
-    entry_number,
-    period_id,
-    entry_date,
-    entry_type,
-    status,
-    narration,
-    created_by
+    company_id, entry_number, period_id, entry_date, entry_type, status, narration, created_by
   ) values (
-    p_company_id,
-    v_entry_number,
-    v_period.id,
-    v_entry_date,
-    'year_end_closing',
-    'draft',
-    v_narration,
-    p_created_by
+    p_company_id, v_entry_number, v_period.id, v_entry_date, 'year_end_closing', 'draft', v_narration, p_created_by
   )
   returning * into v_entry;
 
-  insert into journal_lines (
-    journal_entry_id,
-    line_number,
-    account_id,
-    debit,
-    credit,
-    description
-  )
-  select
-    v_entry.id,
-    t.line_number,
-    t.account_id,
-    t.debit,
-    t.credit,
-    t.description
+  insert into journal_lines (journal_entry_id, line_number, account_id, debit, credit, description)
+  select v_entry.id, t.line_number, t.account_id, t.debit, t.credit, t.description
   from tmp_ye_lines t
   order by t.line_number;
 
@@ -1161,30 +1071,9 @@ revoke all on function create_year_end_closing_entry(uuid, integer, uuid, date, 
 revoke all on function create_year_end_closing_entry(uuid, integer, uuid, date, text) from anon;
 grant execute on function create_year_end_closing_entry(uuid, integer, uuid, date, text) to service_role;
 
--- Verify grants after apply:
--- select grantee, privilege_type
---   from information_schema.role_routine_grants
---  where routine_schema = 'public'
---    and routine_name = 'create_year_end_closing_entry';
-
 -- ============================================================================
 -- 10. REVERSAL RPC — atomic reversal (draft -> lines -> post -> mark original)
 -- ============================================================================
-
--- reverse_journal_entry.sql
--- Apply to live Supabase (SQL editor) if not already deployed from schema.sql §10.
--- Atomic reversal: draft → lines → post → mark original reversed, one transaction.
---
--- [feature-spec.md decision #9] A reversal entry cannot itself be reversed —
--- enforced below by the entry_type = 'reversal' check.
--- [feature-spec.md decision #10] This function is service_role-only. It is
--- SECURITY DEFINER and therefore bypasses RLS entirely — granting execute
--- to `authenticated` would let any logged-in user, from any company, pass
--- an arbitrary p_original_id and reverse another company's journal entry.
--- The NestJS backend is the only intended caller, and must derive
--- p_created_by from the authenticated request's own session — never from
--- a client-supplied field — since this function has no RLS safety net of
--- its own.
 
 create or replace function reverse_journal_entry(
   p_original_id uuid,
@@ -1224,7 +1113,6 @@ begin
       v_original.entry_number;
   end if;
 
-  -- [feature-spec.md decision #9] reversal-of-a-reversal is blocked
   if v_original.entry_type = 'reversal' or v_original.reverses_entry_id is not null then
     raise exception 'Journal entry % is a reversal entry and cannot be reversed',
       v_original.entry_number;
@@ -1250,51 +1138,20 @@ begin
     raise exception 'NO_NEXT_OPEN_PERIOD';
   end if;
 
-  -- [race fix] Same company-scoped advisory lock as all other entry inserts.
   v_entry_number := allocate_next_entry_number(v_original.company_id);
 
   insert into journal_entries (
-    company_id,
-    entry_number,
-    period_id,
-    entry_date,
-    entry_type,
-    status,
-    narration,
-    reference_number,
-    reverses_entry_id,
-    created_by
+    company_id, entry_number, period_id, entry_date, entry_type, status,
+    narration, reference_number, reverses_entry_id, created_by
   ) values (
-    v_original.company_id,
-    v_entry_number,
-    v_next_period.id,
-    v_next_period.period_start,
-    'reversal',
-    'draft',
-    format('Reversal of journal entry %s', v_original.entry_number),
-    v_original.reference_number,
-    p_original_id,
-    p_created_by
+    v_original.company_id, v_entry_number, v_next_period.id, v_next_period.period_start,
+    'reversal', 'draft', format('Reversal of journal entry %s', v_original.entry_number),
+    v_original.reference_number, p_original_id, p_created_by
   )
   returning * into v_reversal;
 
-  insert into journal_lines (
-    journal_entry_id,
-    line_number,
-    account_id,
-    debit,
-    credit,
-    description,
-    cost_center
-  )
-  select
-    v_reversal.id,
-    jl.line_number,
-    jl.account_id,
-    jl.credit,
-    jl.debit,
-    jl.description,
-    jl.cost_center
+  insert into journal_lines (journal_entry_id, line_number, account_id, debit, credit, description, cost_center)
+  select v_reversal.id, jl.line_number, jl.account_id, jl.credit, jl.debit, jl.description, jl.cost_center
   from journal_lines jl
   where jl.journal_entry_id = p_original_id
   order by jl.line_number;
@@ -1338,9 +1195,6 @@ begin
 end;
 $$;
 
--- [feature-spec.md decision #10] service_role only — SECURITY DEFINER
--- bypasses RLS, so this must never be reachable by `authenticated`,
--- `anon`, or `public`, only the trusted backend.
 revoke all on function reverse_journal_entry(uuid, uuid, boolean) from public;
 revoke all on function reverse_journal_entry(uuid, uuid, boolean) from authenticated;
 revoke all on function reverse_journal_entry(uuid, uuid, boolean) from anon;
@@ -1352,19 +1206,6 @@ alter default privileges in schema public revoke execute on functions from authe
 -- ============================================================================
 -- 11. COMPANY MEMBERSHIP & ROLES (minimal — scoped to Module 1.1.A needs only)
 -- ============================================================================
--- Full RBAC (custom roles, temporary access, per-feature permissions) is
--- Module 1.6 (Platform, Settings & Security) and is NOT built here. This
--- table exists solely so the approval workflow (decision #1, Rules §1.24
--- maker-checker) can resolve a caller's role server-side instead of
--- trusting a client-supplied actor_role — which was the actual security
--- gap identified in review.
---
--- Role list matches the original phase-wise feature doc's Module 1.6.B
--- exactly (Owner / Accountant / Manager / Staff / Viewer / External
--- Accountant) so this table doesn't need re-shaping when Module 1.6 is
--- eventually built — but only Owner and Manager are actually enforced
--- against anywhere in Module 1.1.A's code today. The rest exist in the
--- enum for forward-compatibility, not because 1.1.A gates anything on them.
 
 create type company_role as enum (
   'owner',
@@ -1397,8 +1238,4 @@ create policy company_isolation_members on company_members
 
 -- ============================================================================
 -- END OF SCHEMA — Phase A/B complete.
--- Phase C tables to layer in once accounting rules are received:
---   • journal_approvals (approval audit trail, if multi-approver in future)
---   • year_end_closing_runs (tracks each closing run + which entries it generated)
---   • Any FTA-specific compliance tables (VAT 201 snapshots, CT computations)
 -- ============================================================================
