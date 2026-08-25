@@ -576,9 +576,7 @@ group by a.company_id, a.id, a.account_number, a.account_name, a.category, a.nor
 -- Functions only — no table/column/constraint changes.
 -- ============================================================================
 
--- === synced from docs/source-of-truth/allocate_next_entry_number.sql ===
--- allocate_next_entry_number.sql
--- Apply in Supabase SQL editor, then keep in sync with schema.sql.
+-- allocate_next_entry_number
 --
 -- [HANDOFF §7 / race fix] Company-scoped transaction advisory lock around
 -- max(entry_number)+1 so concurrent creates for the SAME company serialize
@@ -614,9 +612,7 @@ revoke all on function allocate_next_entry_number(uuid) from authenticated;
 revoke all on function allocate_next_entry_number(uuid) from anon;
 grant execute on function allocate_next_entry_number(uuid) to service_role;
 
--- === synced from docs/source-of-truth/insert_journal_entry_draft.sql ===
--- insert_journal_entry_draft.sql
--- Apply AFTER allocate_next_entry_number.sql.
+-- insert_journal_entry_draft
 -- Atomic draft insert: advisory-locked entry_number + entry + lines + attachments.
 -- Used by Nest insertDraft (manual) and insertGeneratedFromTemplate (recurring).
 --
@@ -744,8 +740,7 @@ revoke all on function insert_journal_entry_draft(uuid, uuid, date, journal_entr
 revoke all on function insert_journal_entry_draft(uuid, uuid, date, journal_entry_type, text, uuid, jsonb, text, uuid, jsonb) from anon;
 grant execute on function insert_journal_entry_draft(uuid, uuid, date, journal_entry_type, text, uuid, jsonb, text, uuid, jsonb) to service_role;
 
--- === synced from docs/source-of-truth/create_opening_balance_entry.sql ===
--- create_opening_balance_entry.sql
+-- create_opening_balance_entry
 -- [feature-spec.md decision #3] One opening_balance per company per fiscal year.
 -- [race fix] Lock 'ob:' namespace FIRST, then allocate_next_entry_number's
 -- company-scoped lock.
@@ -884,8 +879,7 @@ revoke all on function create_opening_balance_entry(uuid, integer, date, text, u
 revoke all on function create_opening_balance_entry(uuid, integer, date, text, uuid, jsonb, text) from anon;
 grant execute on function create_opening_balance_entry(uuid, integer, date, text, uuid, jsonb, text) to service_role;
 
--- === synced from docs/source-of-truth/create_year_end_closing_entry.sql ===
--- create_year_end_closing_entry.sql
+-- create_year_end_closing_entry
 -- [feature-spec.md decision #4] One year_end_closing per company per fiscal year.
 -- [race fix] Lock 'ye:' namespace FIRST, then allocate_next_entry_number's
 -- company-scoped lock. 'ob:' and 'ye:' namespaces do NOT block each other.
@@ -1237,5 +1231,24 @@ create policy company_isolation_members on company_members
   using (company_id = (select current_setting('app.current_company_id', true))::uuid);
 
 -- ============================================================================
--- END OF SCHEMA — Phase A/B complete.
+-- 12. DATA API GRANTS (service_role / sb_secret_*)
+-- ============================================================================
+-- [feature-spec.md section 5.1 / decision #10] Backend-mediated access only.
+-- New Supabase projects no longer auto-GRANT public tables to service_role;
+-- without this block PostgREST returns 42501 permission denied for table *.
+-- Keep in sync with apply_data_api_grants.sql for one-shot re-apply on live DBs.
+
+grant usage on schema public to service_role;
+
+grant select, insert, update, delete on all tables in schema public to service_role;
+grant usage, select on all sequences in schema public to service_role;
+grant select on public.v_trial_balance to service_role;
+
+alter default privileges in schema public
+  grant select, insert, update, delete on tables to service_role;
+alter default privileges in schema public
+  grant usage, select on sequences to service_role;
+
+-- ============================================================================
+-- END OF SCHEMA - Phase A/B complete.
 -- ============================================================================

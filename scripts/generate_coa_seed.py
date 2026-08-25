@@ -1,4 +1,8 @@
-"""Generate seed_chart_of_accounts.sql from the finalized UAE COA Excel.
+"""Generate the demo COA seed + verify SQL from the finalized UAE COA Excel.
+
+Writes:
+  - docs/source-of-truth/seed_finalized_coa_demo_company_0002.sql
+  - docs/source-of-truth/verify_chart_of_accounts.sql
 
 Sources:
   - docs/source-of-truth/Chart of Accounts - inFINity.xlsx ("Chart of Accounts" sheet)
@@ -15,9 +19,8 @@ import openpyxl
 COMPANY_ID = "00000000-0000-0000-0000-000000000002"
 COMPANY_LEGAL_NAME = "Demo Company (Finalized COA Seed)"
 XLSX = Path("docs/source-of-truth/Chart of Accounts - inFINity.xlsx")
-SEED_OUT = Path("docs/source-of-truth/seed_chart_of_accounts.sql")
 VERIFY_OUT = Path("docs/source-of-truth/verify_chart_of_accounts.sql")
-APPLY_OUT = Path("docs/source-of-truth/seed_finalized_coa_demo_company_0002.sql")
+SEED_OUT = Path("docs/source-of-truth/seed_finalized_coa_demo_company_0002.sql")
 
 CAT_PREFIX = {
     "asset": "1",
@@ -269,7 +272,10 @@ def sql_null_or_str(value: str | None) -> str:
 
 def write_seed(accounts: list[tuple]) -> None:
     lines = [
-        "-- seed_chart_of_accounts.sql",
+        "-- seed_finalized_coa_demo_company_0002.sql",
+        "-- [feature-spec.md decision #17] Apply this file in Supabase to mint the demo company.",
+        "-- INSERT-ONLY — does not touch 00000000-0000-0000-0000-000000000001.",
+        "--",
         "-- Module 1.1.A UAE Chart of Accounts seed (finalized 179-account COA + 4 hierarchy demos)",
         "-- Source: Chart of Accounts - inFINity.xlsx → \"Chart of Accounts\" sheet",
         "-- [feature-spec.md decision #5] normal_balance lowercase debit/credit only",
@@ -322,20 +328,8 @@ def write_seed(accounts: list[tuple]) -> None:
 
     lines.append("COMMIT;")
     lines.append("")
-    text = "\n".join(lines) + "\n"
-    SEED_OUT.write_text(text, encoding="utf-8")
-    # Same payload, apply-oriented filename for Supabase SQL editor (decision #17).
-    apply_header = (
-        "-- seed_finalized_coa_demo_company_0002.sql\n"
-        "-- [feature-spec.md decision #17] Apply this file in Supabase to mint the new demo company.\n"
-        "-- INSERT-ONLY — does not touch 00000000-0000-0000-0000-000000000001.\n"
-        "--\n"
-    )
-    # Drop the first comment line of seed and prepend apply header
-    apply_body = "\n".join(lines[1:]) + "\n"
-    APPLY_OUT.write_text(apply_header + apply_body, encoding="utf-8")
+    SEED_OUT.write_text("\n".join(lines) + "\n", encoding="utf-8")
     print(f"Wrote {SEED_OUT} ({len(accounts)} accounts)")
-    print(f"Wrote {APPLY_OUT} ({len(accounts)} accounts)")
 
 
 def write_verify_sql() -> None:
