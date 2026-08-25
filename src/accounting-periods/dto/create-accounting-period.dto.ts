@@ -1,8 +1,12 @@
-import { IsDateString, IsEnum, IsInt, IsOptional, IsString } from 'class-validator';
+import { IsDateString, IsEnum, IsInt, IsOptional } from 'class-validator';
 import { PeriodStatus } from '../../common/enums/period-status.enum';
 import { IsPostgresUuid } from '../../common/validators/is-postgres-uuid';
 
-/** Writable columns of public.accounting_periods. Required = NOT NULL with no default. [schema.sql] */
+/**
+ * Create accounting period — [schema.sql accounting_periods].
+ * [feature-spec.md decisions #10/#11] No soft_closed_by / closed_by / reopened_by
+ * (or timestamps) — those are set by authenticated soft-close / reopen flows only.
+ */
 export class CreateAccountingPeriodDto {
   @IsPostgresUuid()
   company_id!: string;
@@ -19,32 +23,4 @@ export class CreateAccountingPeriodDto {
   @IsOptional()
   @IsEnum(PeriodStatus)
   status?: PeriodStatus;
-
-  @IsOptional()
-  @IsPostgresUuid()
-  soft_closed_by?: string;
-
-  @IsOptional()
-  @IsDateString()
-  soft_closed_at?: string;
-
-  @IsOptional()
-  @IsPostgresUuid()
-  closed_by?: string;
-
-  @IsOptional()
-  @IsDateString()
-  closed_at?: string;
-
-  @IsOptional()
-  @IsPostgresUuid()
-  reopened_by?: string;
-
-  @IsOptional()
-  @IsDateString()
-  reopened_at?: string;
-
-  @IsOptional()
-  @IsString()
-  reopen_reason?: string;
 }

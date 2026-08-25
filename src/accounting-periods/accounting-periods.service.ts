@@ -1,12 +1,10 @@
 import {
-  BadRequestException,
   Inject,
   Injectable,
   NotFoundException,
   NotImplementedException,
 } from '@nestjs/common';
 import { handleDatabaseError } from '../common/errors/database-error.mapper';
-import { SoftCloseAccountingPeriodDto } from './dto/soft-close-accounting-period.dto';
 import { CreateAccountingPeriodDto } from './dto/create-accounting-period.dto';
 import { UpdateAccountingPeriodDto } from './dto/update-accounting-period.dto';
 import { AccountingPeriod } from './entities/accounting-period.entity';
@@ -49,12 +47,15 @@ export class AccountingPeriodsService {
     throw new NotImplementedException('Not implemented.');
   }
 
-  /** [feature-spec] Period soft-close with override permission for corrections. */
-  async softClose(id: string, dto: SoftCloseAccountingPeriodDto): Promise<AccountingPeriod> {
+  /**
+   * [feature-spec] Period soft-close with override permission for corrections.
+   * [feature-spec.md decisions #10/#11] closedBy is session user id, not a body field.
+   */
+  async softClose(id: string, closedBy: string): Promise<AccountingPeriod> {
     await this.findOne(id);
 
     try {
-      return await this.periodsRepository.softClose(id, dto.closed_by);
+      return await this.periodsRepository.softClose(id, closedBy);
     } catch (error) {
       handleDatabaseError(error);
     }

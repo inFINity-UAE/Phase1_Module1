@@ -59,7 +59,7 @@ describe('AccountingPeriodsService', () => {
     repository.findById.mockResolvedValue(openPeriod);
     repository.softClose.mockResolvedValue(softClosed);
 
-    const result = await service.softClose(PERIOD_ID, { closed_by: USER_ID });
+    const result = await service.softClose(PERIOD_ID, USER_ID);
 
     expect(repository.softClose).toHaveBeenCalledWith(PERIOD_ID, USER_ID);
     expect(result.status).toBe(PeriodStatus.SoftClosed);
@@ -68,7 +68,7 @@ describe('AccountingPeriodsService', () => {
   it('soft-close throws NotFoundException when period missing', async () => {
     repository.findById.mockResolvedValue(null);
 
-    await expect(service.softClose(PERIOD_ID, { closed_by: USER_ID })).rejects.toThrow(
+    await expect(service.softClose(PERIOD_ID, USER_ID)).rejects.toThrow(
       NotFoundException,
     );
   });

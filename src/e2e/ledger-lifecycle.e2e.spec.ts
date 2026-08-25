@@ -390,7 +390,7 @@ const hasSupabase = Boolean(
       await assertTrialBalanced('Stage 8 — recurring template auto-posted');
 
       // Stage 10 — Soft-close January, block posting, then Owner override
-      await accountingPeriodsService.softClose(janPeriodId, { closed_by: E2E_OWNER_ID });
+      await accountingPeriodsService.softClose(janPeriodId, E2E_OWNER_ID);
 
       const blockedDraft = await journalEntriesService.create(
         {
