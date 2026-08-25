@@ -10,12 +10,19 @@ import {
   Patch,
   Post,
   Query,
+  UseGuards,
 } from '@nestjs/common';
+import { SupabaseAuthGuard } from '../auth/guards/supabase-auth.guard';
 import { AccountsService } from './accounts.service';
 import { CreateAccountDto } from './dto/create-account.dto';
 import { UpdateAccountDto } from './dto/update-account.dto';
 
+/**
+ * [feature-spec.md decision #24] Every route requires an authenticated session —
+ * controller-level guard (same pattern as decision #21 / AccountingPeriodsController).
+ */
 @Controller('accounts')
+@UseGuards(SupabaseAuthGuard)
 export class AccountsController {
   constructor(private readonly accountsService: AccountsService) {}
 

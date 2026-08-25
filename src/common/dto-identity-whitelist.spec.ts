@@ -2,6 +2,7 @@ import { ArgumentMetadata, BadRequestException, ValidationPipe } from '@nestjs/c
 import { CreateJournalEntryDto } from '../journal-entries/dto/create-journal-entry.dto';
 import { CreateOpeningBalanceDto } from '../journal-entries/dto/create-opening-balance.dto';
 import { CreateYearEndClosingDto } from '../journal-entries/dto/create-year-end-closing.dto';
+import { UpdateJournalEntryDto } from '../journal-entries/dto/update-journal-entry.dto';
 import {
   ApproveJournalEntryDto,
   PostJournalEntryDto,
@@ -10,13 +11,17 @@ import {
 import { SoftCloseAccountingPeriodDto } from '../accounting-periods/dto/soft-close-accounting-period.dto';
 import { CreateAccountingPeriodDto } from '../accounting-periods/dto/create-accounting-period.dto';
 import { CreateRecurringJournalTemplateDto } from '../recurring-journal-templates/dto/create-recurring-journal-template.dto';
+import { UpdateRecurringJournalTemplateDto } from '../recurring-journal-templates/dto/update-recurring-journal-template.dto';
+import { RunRecurringGenerationDto } from '../recurring-journal-templates/dto/run-recurring-generation.dto';
 import { CreateAccountDto } from '../accounts/dto/create-account.dto';
-import { AccountCategory } from '../common/enums/account-category.enum';
-import { NormalBalance } from '../common/enums/normal-balance.enum';
-import { RecurrenceFrequency } from '../common/enums/recurrence-frequency.enum';
+import { UpdateAccountDto } from '../accounts/dto/update-account.dto';
+import { QueryAuditLogDto } from '../audit-log/dto/query-audit-log.dto';
+import { AccountCategory } from './enums/account-category.enum';
+import { NormalBalance } from './enums/normal-balance.enum';
+import { RecurrenceFrequency } from './enums/recurrence-frequency.enum';
 
 /**
- * [feature-spec.md decisions #10/#11] Global ValidationPipe whitelist must reject
+ * [feature-spec.md decisions #10/#11/#21/#24] Global ValidationPipe whitelist must reject
  * client-supplied identity/role fields on mutation DTOs — not silently strip them.
  */
 describe('DTO identity whitelist (forbidNonWhitelisted)', () => {
@@ -47,6 +52,7 @@ describe('DTO identity whitelist (forbidNonWhitelisted)', () => {
   const periodId = '11111111-1111-1111-1111-111111111111';
   const accountA = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
   const accountB = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb';
+  const sessionFilterActor = '00000000-0000-0000-0000-000000000003';
 
   const validCreateJournal: Record<string, unknown> = {
     company_id: companyId,
@@ -108,6 +114,8 @@ describe('DTO identity whitelist (forbidNonWhitelisted)', () => {
     ['actor_role', CreateJournalEntryDto, validCreateJournal],
     ['approved_by', CreateJournalEntryDto, validCreateJournal],
     ['rejected_by', CreateJournalEntryDto, validCreateJournal],
+    ['created_by', UpdateJournalEntryDto, { narration: 'adj' }],
+    ['actor_role', UpdateJournalEntryDto, { narration: 'adj' }],
     ['created_by', CreateOpeningBalanceDto, validOpeningBalance],
     ['actor_id', CreateOpeningBalanceDto, validOpeningBalance],
     ['created_by', CreateYearEndClosingDto, validYearEnd],
@@ -118,7 +126,14 @@ describe('DTO identity whitelist (forbidNonWhitelisted)', () => {
     ['soft_closed_by', CreateAccountingPeriodDto, validPeriodCreate],
     ['reopened_by', CreateAccountingPeriodDto, validPeriodCreate],
     ['created_by', CreateRecurringJournalTemplateDto, validRecurring],
+    ['actor_id', CreateRecurringJournalTemplateDto, validRecurring],
+    ['created_by', UpdateRecurringJournalTemplateDto, { template_name: 'x' }],
+    ['actor_id', UpdateRecurringJournalTemplateDto, { template_name: 'x' }],
+    ['created_by', RunRecurringGenerationDto, {}],
+    ['actor_id', RunRecurringGenerationDto, {}],
     ['actor_id', CreateAccountDto, validAccount],
+    ['created_by', CreateAccountDto, validAccount],
+    ['actor_role', UpdateAccountDto, { account_name: 'Renamed' }],
     ['approved_by', PostJournalEntryDto, {}],
     ['actor_role', ApproveJournalEntryDto, {}],
     ['rejected_by', RejectJournalEntryDto, { rejection_reason: 'incomplete docs' }],
@@ -154,5 +169,16 @@ describe('DTO identity whitelist (forbidNonWhitelisted)', () => {
     const result = await pipe.transform({}, meta(SoftCloseAccountingPeriodDto));
     expect(result).toEqual({});
     expect(result).not.toHaveProperty('closed_by');
+  });
+
+  it('audit query actor_id remains a filter (not acting identity)', async () => {
+    const result = await pipe.transform(
+      { company_id: companyId, actor_id: sessionFilterActor },
+      { type: 'query', metatype: QueryAuditLogDto, data: '' },
+    );
+    expect(result).toMatchObject({
+      company_id: companyId,
+      actor_id: sessionFilterActor,
+    });
   });
 });

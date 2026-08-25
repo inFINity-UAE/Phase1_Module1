@@ -20,12 +20,17 @@ import { CreateRecurringJournalTemplateLineDto } from './dto/create-recurring-jo
 import { UpdateRecurringJournalTemplateLineDto } from './dto/update-recurring-journal-template-line.dto';
 import { RunRecurringGenerationDto } from './dto/run-recurring-generation.dto';
 
+/**
+ * [feature-spec.md decision #24] Every route requires an authenticated session —
+ * controller-level guard (same pattern as decision #21). Create already derives
+ * created_by from @CurrentUser(); no client identity fields on DTOs.
+ */
 @Controller('recurring-journal-templates')
+@UseGuards(SupabaseAuthGuard)
 export class RecurringJournalTemplatesController {
   constructor(private readonly templatesService: RecurringJournalTemplatesService) {}
 
   @Post()
-  @UseGuards(SupabaseAuthGuard)
   create(
     @Body() dto: CreateRecurringJournalTemplateDto,
     @CurrentUser() user: AuthenticatedUser,
@@ -78,7 +83,11 @@ export class RecurringJournalTemplatesController {
   }
 }
 
+/**
+ * [feature-spec.md decision #24] Line mutations also require a session.
+ */
 @Controller('recurring-journal-template-lines')
+@UseGuards(SupabaseAuthGuard)
 export class RecurringJournalTemplateLinesController {
   constructor(private readonly templatesService: RecurringJournalTemplatesService) {}
 

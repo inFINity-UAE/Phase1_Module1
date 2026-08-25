@@ -1,10 +1,12 @@
 import { Module } from '@nestjs/common';
+import { AuthModule } from '../auth/auth.module';
 import { AuditLogController } from './audit-log.controller';
 import { AuditLogService } from './audit-log.service';
 import { AUDIT_LOG_REPOSITORY } from './audit-log.repository';
 import { SupabaseAuditLogRepository } from './audit-log.repository.supabase';
 
 @Module({
+  imports: [AuthModule],
   controllers: [AuditLogController],
   providers: [
     AuditLogService,

@@ -9,11 +9,21 @@
 --     app logic — no DELETE is ever permitted on posted financial records.
 --   • Debit/credit imbalance rejection is enforced via trigger BEFORE a
 --     journal entry can transition to 'posted', not just on insert.
---   • This schema covers Phase A (ledger + posting engine) and Phase B
---     (manual entry, reversals, opening balances) fully, and lays the table
---     structure for Phase C (approvals, recurring, period close, year-end)
---     — the business RULES for Phase C (thresholds, close policy, etc.) will
---     be wired in once you send them; the tables below are rule-agnostic.
+--   • Scope: this schema fully covers Module 1.1.A (ledger, posting engine,
+--     manual entry, reversals, opening balances, approvals, recurring
+--     entries, period close, year-end closing). All Phase A/B/C business
+--     rules referenced throughout (approval thresholds, one-time opening
+--     balance / year-end closing per fiscal year, reversal restrictions,
+--     etc.) are resolved decisions — see feature-spec.md §4 for the current
+--     rules and §8 for the full decision index. Do not treat any inline
+--     comment below as still-pending; if a comment references a rule as
+--     "TBD" or "once you send it," that comment is stale and should be
+--     corrected, not trusted.
+--   • §9b adds advisory-lock RPCs for entry-number allocation, opening
+--     balance creation, and year-end closing — see feature-spec.md §6 for
+--     the lock-key convention and exception-token contract these implement.
+--   • §12 adds explicit Data API grants — required on fresh Supabase
+--     projects, see feature-spec.md §5.5 / decision #23.
 -- ============================================================================
 
 create extension if not exists "uuid-ossp";
@@ -215,17 +225,17 @@ create index idx_periods_company on accounting_periods(company_id);
 -- ============================================================================
 
 create table journal_entries (
-  id                    uuid primary key default gen_random_uuid(),
-  company_id            uuid not null references companies(id) on delete cascade,
-  entry_number          bigint not null,             -- sequential, human-facing, per company
-  period_id             uuid not null references accounting_periods(id),
+  id                     uuid primary key default gen_random_uuid(),
+  company_id             uuid not null references companies(id) on delete cascade,
+  entry_number           bigint not null,             -- sequential, human-facing, per company
+  period_id              uuid not null references accounting_periods(id),
 
-  entry_date            date not null,
-  entry_type            journal_entry_type not null default 'manual',
-  status                journal_entry_status not null default 'draft',
+  entry_date             date not null,
+  entry_type             journal_entry_type not null default 'manual',
+  status                 journal_entry_status not null default 'draft',
 
-  narration             text not null,
-  reference_number      text,
+  narration              text not null,
+  reference_number       text,
 
   -- Reversal linkage
   reverses_entry_id      uuid references journal_entries(id),
@@ -236,17 +246,17 @@ create table journal_entries (
 
   -- Approval linkage
   requires_approval      boolean not null default false,
-  approved_by             uuid,
-  approved_at              timestamptz,
-  rejected_by              uuid,
-  rejected_at              timestamptz,
-  rejection_reason         text,
+  approved_by            uuid,
+  approved_at            timestamptz,
+  rejected_by            uuid,
+  rejected_at            timestamptz,
+  rejection_reason       text,
 
   created_by             uuid not null,
-  posted_at               timestamptz,
+  posted_at              timestamptz,
 
-  created_at              timestamptz not null default now(),
-  updated_at               timestamptz not null default now(),
+  created_at             timestamptz not null default now(),
+  updated_at             timestamptz not null default now(),
 
   unique (company_id, entry_number)
 );
@@ -483,6 +493,9 @@ create trigger trg_log_journal_entry_change
 -- ============================================================================
 -- Assumes the app sets `request.jwt.claims.company_id` (Supabase convention)
 -- or an equivalent session variable per authenticated request.
+-- [feature-spec.md decision #25] NOTE: `companies` itself has no RLS policy
+-- below — see §12's grant block and decision #25 for why that's currently
+-- safe but flagged as a latent gap, not an oversight.
 
 alter table accounts enable row level security;
 alter table journal_entries enable row level security;
@@ -540,15 +553,13 @@ create policy company_isolation_attachments on journal_attachments
 -- ============================================================================
 -- 9. HELPER VIEW — trial balance (sanity-check view, expand into full reports later)
 -- ============================================================================
--- [feature-spec.md decision #22 / HANDOFF §6 item 4] security_invoker = true
--- is REQUIRED here. Without it, Postgres runs this view's row-level security
--- checks as the VIEW OWNER, not the querying role — silently bypassing the
+-- [feature-spec.md decision #22] security_invoker = true is REQUIRED here.
+-- Without it, Postgres runs this view's row-level security checks as the
+-- VIEW OWNER, not the querying role — silently bypassing the
 -- company_isolation_* RLS policies above for anyone permitted to query the
--- view. This was previously reported fixed (HANDOFF §6 item 4) but the live
--- Supabase linter flagged it again on 2026-08-24 with no security_invoker
--- clause present anywhere in the canonical schema.sql — meaning the original
--- fix was either never captured back into this file, or was lost. Treat this
--- clause as non-negotiable on any future CREATE OR REPLACE of this view.
+-- view. This was previously reported fixed, then found live as
+-- SECURITY DEFINER again by Supabase's linter — treat this clause as
+-- non-negotiable on any future CREATE OR REPLACE of this view.
 
 create view v_trial_balance
 with (security_invoker = true)
@@ -1233,10 +1244,16 @@ create policy company_isolation_members on company_members
 -- ============================================================================
 -- 12. DATA API GRANTS (service_role / sb_secret_*)
 -- ============================================================================
--- [feature-spec.md section 5.1 / decision #10] Backend-mediated access only.
--- New Supabase projects no longer auto-GRANT public tables to service_role;
--- without this block PostgREST returns 42501 permission denied for table *.
--- Keep in sync with apply_data_api_grants.sql for one-shot re-apply on live DBs.
+-- [feature-spec.md decision #23] Backend-mediated access only (§5.1).
+-- New Supabase projects no longer auto-GRANT public-schema tables to
+-- service_role — without this block, PostgREST returns 42501 permission
+-- denied for table * on a fresh project, even though every earlier grant
+-- checklist in this file (§5.1/§9b/§10) covers FUNCTION execute grants
+-- only, not base TABLE access. This was discovered via the fresh-DB drift
+-- verification exercise (feature-spec.md §8 decision index) — exactly the
+-- kind of environment-default assumption that check exists to catch.
+-- Keep in sync with the standalone apply_data_api_grants.sql for one-shot
+-- re-apply on any other live/fresh project.
 
 grant usage on schema public to service_role;
 
@@ -1250,5 +1267,16 @@ alter default privileges in schema public
   grant usage, select on sequences to service_role;
 
 -- ============================================================================
--- END OF SCHEMA - Phase A/B complete.
+-- END OF SCHEMA — Module 1.1.A complete (all 14 features, Phase A/B/C).
+-- Next schema-affecting work belongs to a later module, not this file:
+--   • journal_approvals (multi-approver audit trail, if ever needed beyond
+--     the current single-Owner-approval model)
+--   • year_end_closing_runs (if a dedicated run-tracking table is ever
+--     needed beyond the audit_log + journal_entries.entry_type record)
+--   • FTA-specific compliance tables (VAT 201 snapshots, CT computations) —
+--     out of scope for Module 1.1.A, belongs to whichever module handles
+--     VAT/CT filing
+--   • companies-level RLS policy, if `anon`/`authenticated` are ever
+--     granted table access in the future (see decision #25 — not needed
+--     today since only service_role, which bypasses RLS, has grants)
 -- ============================================================================

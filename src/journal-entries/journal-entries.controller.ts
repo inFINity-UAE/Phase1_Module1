@@ -14,18 +14,22 @@ import {
   RejectJournalEntryDto,
 } from './dto/journal-entry-approval.dto';
 
+/**
+ * [feature-spec.md decision #24] Session required on every route (incl. previously
+ * unguarded GET/list/attachments/PATCH). Ledger-mutating routes keep the same
+ * CurrentUser / JournalEntryCompanyRoleGuard wiring as before (#10/#11/#21).
+ */
 @Controller('journal-entries')
+@UseGuards(SupabaseAuthGuard)
 export class JournalEntriesController {
   constructor(private readonly journalEntriesService: JournalEntriesService) {}
 
   @Post()
-  @UseGuards(SupabaseAuthGuard)
   create(@Body() dto: CreateJournalEntryDto, @CurrentUser() user: AuthenticatedUser) {
     return this.journalEntriesService.create(dto, user.id);
   }
 
   @Post('opening-balance')
-  @UseGuards(SupabaseAuthGuard)
   createOpeningBalance(
     @Body() dto: CreateOpeningBalanceDto,
     @CurrentUser() user: AuthenticatedUser,
@@ -34,7 +38,6 @@ export class JournalEntriesController {
   }
 
   @Post('year-end-close')
-  @UseGuards(SupabaseAuthGuard)
   runYearEndClosing(
     @Body() dto: CreateYearEndClosingDto,
     @CurrentUser() user: AuthenticatedUser,
@@ -58,7 +61,7 @@ export class JournalEntriesController {
   }
 
   @Post(':id/post')
-  @UseGuards(SupabaseAuthGuard, JournalEntryCompanyRoleGuard)
+  @UseGuards(JournalEntryCompanyRoleGuard)
   post(
     @Param('id', ParseUUIDPipe) id: string,
     @CurrentUser() user: AuthenticatedUser,
@@ -68,7 +71,7 @@ export class JournalEntriesController {
   }
 
   @Post(':id/approve')
-  @UseGuards(SupabaseAuthGuard, JournalEntryCompanyRoleGuard)
+  @UseGuards(JournalEntryCompanyRoleGuard)
   approve(
     @Param('id', ParseUUIDPipe) id: string,
     @CurrentUser() user: AuthenticatedUser,
@@ -78,7 +81,7 @@ export class JournalEntriesController {
   }
 
   @Post(':id/reject')
-  @UseGuards(SupabaseAuthGuard, JournalEntryCompanyRoleGuard)
+  @UseGuards(JournalEntryCompanyRoleGuard)
   reject(
     @Param('id', ParseUUIDPipe) id: string,
     @CurrentUser() user: AuthenticatedUser,
@@ -92,7 +95,6 @@ export class JournalEntriesController {
    * authenticated session user — never a client body field.
    */
   @Post(':id/reverse')
-  @UseGuards(SupabaseAuthGuard)
   reverse(
     @Param('id', ParseUUIDPipe) id: string,
     @CurrentUser() user: AuthenticatedUser,

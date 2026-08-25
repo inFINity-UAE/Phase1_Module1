@@ -283,6 +283,71 @@ in `schema.sql` §9; applied live via
 `ALTER VIEW v_trial_balance SET (security_invoker = true);`. Treat this
 clause as non-negotiable on any future edit of this view. *(Decision #22)*
 
+### 5.5 Fresh Supabase project: Data API grants are not automatic
+
+Fresh Supabase projects do **not** auto-`GRANT` base table access
+(`select`/`insert`/`update`/`delete`) to `service_role` on `public`-schema
+tables. Every grant checklist elsewhere in this document (§5.1, §6) covers
+**function** `EXECUTE` grants only — a separate, table-level grant block
+is required or PostgREST returns `42501 permission denied` on a fresh
+project even though `service_role` is otherwise the intended
+all-access role. Discovered during fresh-DB drift verification (§7) —
+exactly the class of environment-default assumption that check exists to
+catch, and a genuinely new, permanent fact about Supabase project
+defaults, not a one-off bug.
+
+**Fixed:** `schema.sql` §12 adds an explicit grant block (table
+select/insert/update/delete, sequence usage/select, plus
+`alter default privileges` so future tables/sequences inherit the same
+grants automatically) — kept in sync with a standalone
+`apply_data_api_grants.sql` for one-shot re-application to any other
+fresh/live project. *(Decision #23)*
+
+### 5.6 Auth-guard coverage — broader gap than decision #21 addressed
+
+The fresh-DB verification pass surfaced that decision #21's fix was
+correctly scoped to what it found, but **not exhaustive across the whole
+codebase** — the same missing-`SupabaseAuthGuard` pattern exists more
+widely:
+- The entire `accounts` controller
+- `journal-entries`: `GET` (list), `GET :id`, attachments, `PATCH`
+- Most `recurring-journal-templates` routes (`run-due`, list, update,
+  delete, generate, lines)
+- The entire `audit-log` controller
+
+**What's already correctly guarded** (unaffected): every journal mutation
+that actually matters for ledger integrity — create, post, approve,
+reject, reverse, opening-balance, year-end-close — plus period soft-close
+(§5.3). So this is a **read-path and completeness gap**, not a ledger-
+integrity gap — no unguarded route can post, alter, or corrupt financial
+data. But per §5.1's own model (the backend is the only remaining safety
+net once `service_role` bypasses RLS), any endpoint reachable without a
+session is a potential cross-company data read, regardless of whether it
+mutates — `audit_log` and `accounts` being fully unguarded is a real
+exposure, not a cosmetic one.
+
+**Priority call:** consistent with #21 and #22 both being treated as
+blocking the moment they were found (ahead of feature-completion work),
+this gets the same treatment — fix with the identical controller-level-
+guard pattern as #21, across every controller listed above, before
+treating any remaining stub-endpoint work as the next priority.
+*(Decision #24)*
+
+### 5.7 `companies` table has no RLS policy — documented, not fixed
+
+`companies` itself has no row-level security policy (§8's RLS section
+covers every *other* multi-tenant table). This is currently safe only
+because `service_role` — which bypasses RLS entirely — is the sole role
+with grants on it (§5.1, §5.5). It's a **latent gap, not an active one**:
+if `anon` or `authenticated` are ever granted table access (accidentally,
+or for a legitimate future feature), `companies` would have zero tenant
+isolation, unlike every other table in this schema. Not fixed now,
+because a real fix means designing a `companies`-level RLS policy
+(plausibly membership-based via `company_members`), which is either
+Module 1.6 RBAC territory or needs its own short design pass — flagged
+for the next security review rather than left silently unnoted.
+*(Decision #25)*
+
 ---
 
 ## 6. Concurrency — Advisory-Lock RPCs
@@ -360,6 +425,20 @@ something app code or the test suite does automatically.
 independently before being generalized into a standing policy; expect it
 to keep applying to any future fixed-company test setup.)*
 
+### 7.1 Fresh-DB drift verification — status
+
+**In progress, not yet green.** Spinning up a fresh Supabase project and
+applying `schema.sql` top to bottom surfaced real findings, not just
+confirmed a clean bill of health — see §5.5 (missing table grants, now
+fixed in schema.sql §12), §5.6 (broader auth-guard gap than #21 covered),
+and §5.7 (documented `companies` RLS risk acceptance). The demo company's
+COA still needs seeding on the fresh project before integration/e2e can
+run; the full suite (unit + all integration + Stage 13 e2e + advisory-lock)
+has not yet been re-run green against this project. Treat this
+verification as still open until that full green run happens — the
+findings so far are exactly why this check existed as a priority item in
+the first place.
+
 ---
 
 ## 8. Decision Log Index
@@ -391,3 +470,6 @@ topical section referenced.
 | 20 | 2026-08-24 | Race conditions (entry-number allocation, opening-balance, year-end) fixed via advisory-lock RPCs | §6 |
 | 21 | 2026-08-24 | DTO spoofing audit found `AccountingPeriodsController` had no auth guard at all — fixed | §5.3 |
 | 22 | 2026-08-24 | `v_trial_balance` found live as `SECURITY DEFINER` despite a prior "fixed" report — re-fixed and documented as non-negotiable | §5.4 |
+| 23 | 2026-08-24 | Fresh Supabase projects don't auto-grant `service_role` table access — explicit grant block added (`schema.sql` §12) | §5.5 |
+| 24 | 2026-08-24 | Auth-guard gap found broader than #21 covered — entire `accounts` and `audit-log` controllers, most `journal-entries` read routes, most `recurring-journal-templates` routes all unguarded; fix takes priority over stub completion | §5.6 |
+| 25 | 2026-08-24 | `companies` has no RLS policy — safe today (service_role-only grants) but documented as a latent gap, not fixed yet | §5.7 |
