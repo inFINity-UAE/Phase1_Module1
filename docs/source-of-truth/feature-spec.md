@@ -427,17 +427,23 @@ to keep applying to any future fixed-company test setup.)*
 
 ### 7.1 Fresh-DB drift verification — status
 
-**In progress, not yet green.** Spinning up a fresh Supabase project and
-applying `schema.sql` top to bottom surfaced real findings, not just
-confirmed a clean bill of health — see §5.5 (missing table grants, now
-fixed in schema.sql §12), §5.6 (broader auth-guard gap than #21 covered),
-and §5.7 (documented `companies` RLS risk acceptance). The demo company's
-COA still needs seeding on the fresh project before integration/e2e can
-run; the full suite (unit + all integration + Stage 13 e2e + advisory-lock)
-has not yet been re-run green against this project. Treat this
-verification as still open until that full green run happens — the
-findings so far are exactly why this check existed as a priority item in
-the first place.
+**Closed 2026-08-25.** Fresh Supabase project (`cuqnkorfhzydxwzkbjlv`),
+`schema.sql` applied top to bottom, real findings surfaced along the way
+(§5.5 missing table grants, §5.6 broader auth-guard gap, §5.7 documented
+`companies` RLS risk acceptance) plus one incidental Jest default-timeout
+fix (integration suites' `mintFreshIntegrationCompany` COA-clone setup
+exceeds the 5000ms default; raised to `180_000` to match Stage 13/
+advisory-lock's existing pattern — five files: `post`, `reverse`,
+`approval-rbac`, `year-end-closing`, `audit-log` integration specs).
+
+**Final proof:** full suite (16 suites / 128 tests — unit, all five
+integration suites, advisory-lock concurrent suite, Stage 13 e2e) run 3x
+consecutive clean against the fresh project. Trial balance landed on the
+identical `88600.00` across all 3 runs on 3 independently-minted e2e
+companies — confirms the deterministic test script, not stale/leaked
+data. This is the first time this project has had actual proof, not
+inference, that `schema.sql` and a live database match from a cold start.
+*(Decision #26)*
 
 ---
 
@@ -473,3 +479,4 @@ topical section referenced.
 | 23 | 2026-08-24 | Fresh Supabase projects don't auto-grant `service_role` table access — explicit grant block added (`schema.sql` §12) | §5.5 |
 | 24 | 2026-08-24 | Auth-guard gap found broader than #21 covered — entire `accounts` and `audit-log` controllers, most `journal-entries` read routes, most `recurring-journal-templates` routes all unguarded; fix takes priority over stub completion | §5.6 |
 | 25 | 2026-08-24 | `companies` has no RLS policy — safe today (service_role-only grants) but documented as a latent gap, not fixed yet | §5.7 |
+| 26 | 2026-08-25 | Fresh-DB drift verification closed — 3x consecutive clean full suite (128 tests) on a fresh Supabase project | §7.1 |

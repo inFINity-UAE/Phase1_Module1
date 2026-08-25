@@ -26,6 +26,9 @@ const USER_ID = INTEGRATION_USER_ID;
 (hasSupabase ? describe : describe.skip)(
   'JournalEntriesService reverseEntry atomicity (Supabase integration)',
   () => {
+    // Match Stage 13 / advisory-lock: COA clone + live RPCs exceed Jest's 5s default.
+    jest.setTimeout(180_000);
+
     let service: JournalEntriesService;
     let supabase: SupabaseService;
     /** [feature-spec.md decision #19] Fresh company UUID per run. */

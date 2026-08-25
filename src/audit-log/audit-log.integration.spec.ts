@@ -28,6 +28,9 @@ const USER_ID = INTEGRATION_USER_ID;
 (hasSupabase ? describe : describe.skip)(
   'AuditLogService (Supabase integration)',
   () => {
+    // Match Stage 13 / advisory-lock: COA clone + live RPCs exceed Jest's 5s default.
+    jest.setTimeout(180_000);
+
     let auditLogService: AuditLogService;
     let journalEntriesService: JournalEntriesService;
     let supabase: SupabaseService;

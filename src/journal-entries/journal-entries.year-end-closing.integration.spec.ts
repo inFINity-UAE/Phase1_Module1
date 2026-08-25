@@ -44,6 +44,9 @@ async function resolveImbalanceProbeFiscalYear(
 (hasSupabase ? describe : describe.skip)(
   'JournalEntriesService year-end closing (Supabase integration)',
   () => {
+    // Match Stage 13 / advisory-lock: COA clone + live RPCs exceed Jest's 5s default.
+    jest.setTimeout(180_000);
+
     let service: JournalEntriesService;
     let repository: SupabaseJournalEntriesRepository;
     let supabase: SupabaseService;

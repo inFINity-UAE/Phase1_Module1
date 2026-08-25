@@ -31,6 +31,9 @@ const ACCOUNTANT_ID = INTEGRATION_ACCOUNTANT_ID;
 (hasSupabase ? describe : describe.skip)(
   'Journal entry approval RBAC (Supabase integration)',
   () => {
+    // Match Stage 13 / advisory-lock: COA clone + live RPCs exceed Jest's 5s default.
+    jest.setTimeout(180_000);
+
     let service: JournalEntriesService;
     let companyMembersService: CompanyMembersService;
     let supabase: SupabaseService;
