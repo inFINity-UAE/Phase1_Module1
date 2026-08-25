@@ -15,7 +15,6 @@ import { SupabaseService } from '../database/supabase.service';
 import { JournalEntriesModule } from '../journal-entries/journal-entries.module';
 import { JournalEntriesService } from '../journal-entries/journal-entries.service';
 import {
-  AUDIT_LOG_INTEGRATION_COMPANY_ID,
   ensureAuditLogIntegrationCompanyReady,
   INTEGRATION_USER_ID,
 } from '../test/integration-company.setup';
@@ -24,7 +23,6 @@ const hasSupabase = Boolean(
   process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.SUPABASE_SECRET_KEY,
 );
 
-const COMPANY_ID = AUDIT_LOG_INTEGRATION_COMPANY_ID;
 const USER_ID = INTEGRATION_USER_ID;
 
 (hasSupabase ? describe : describe.skip)(
@@ -33,6 +31,8 @@ const USER_ID = INTEGRATION_USER_ID;
     let auditLogService: AuditLogService;
     let journalEntriesService: JournalEntriesService;
     let supabase: SupabaseService;
+    /** [feature-spec.md decision #19] Fresh company UUID per run. */
+    let companyId = '';
     const createdEntryIds: string[] = [];
     let periodId = '';
     let cashAccountId = '';
@@ -52,12 +52,12 @@ const USER_ID = INTEGRATION_USER_ID;
       journalEntriesService = module.get(JournalEntriesService);
       supabase = module.get(SupabaseService);
 
-      await ensureAuditLogIntegrationCompanyReady(supabase);
+      companyId = await ensureAuditLogIntegrationCompanyReady(supabase);
 
       const { data: period, error: periodError } = await supabase.client
         .from('accounting_periods')
         .select('id')
-        .eq('company_id', COMPANY_ID)
+        .eq('company_id', companyId)
         .eq('period_start', '2026-01-01')
         .single();
 
@@ -69,7 +69,7 @@ const USER_ID = INTEGRATION_USER_ID;
       const { data: accounts, error: accountsError } = await supabase.client
         .from('accounts')
         .select('id, account_number')
-        .eq('company_id', COMPANY_ID)
+        .eq('company_id', companyId)
         .in('account_number', ['1010', '1020']);
 
       if (accountsError || !accounts || accounts.length < 2) {
@@ -98,7 +98,7 @@ const USER_ID = INTEGRATION_USER_ID;
         // Draft create → insert audit only
         const draft = await journalEntriesService.create(
           {
-            company_id: COMPANY_ID,
+            company_id: companyId,
             period_id: periodId,
             entry_date: '2026-01-15',
             narration: 'audit-log service-layer draft probe',
@@ -112,7 +112,7 @@ const USER_ID = INTEGRATION_USER_ID;
         createdEntryIds.push(draft.entry.id);
 
         const draftHistory = await auditLogService.find({
-          company_id: COMPANY_ID,
+          company_id: companyId,
           record_id: draft.entry.id,
           table_name: 'journal_entries',
         });
@@ -128,7 +128,7 @@ const USER_ID = INTEGRATION_USER_ID;
         expect(posted.entry.status).toBe(JournalEntryStatus.Posted);
 
         const postedHistory = await auditLogService.find({
-          company_id: COMPANY_ID,
+          company_id: companyId,
           record_id: draft.entry.id,
           table_name: 'journal_entries',
         });
@@ -155,7 +155,7 @@ const USER_ID = INTEGRATION_USER_ID;
         expect(reversal.reversal.entry.reverses_entry_id).toBe(draft.entry.id);
 
         const reversalEntryHistory = await auditLogService.find({
-          company_id: COMPANY_ID,
+          company_id: companyId,
           record_id: reversal.reversal.entry.id,
           table_name: 'journal_entries',
         });
@@ -179,7 +179,7 @@ const USER_ID = INTEGRATION_USER_ID;
         expect(reversalPost?.new_data?.entry_type).toBe(JournalEntryType.Reversal);
 
         const originalHistory = await auditLogService.find({
-          company_id: COMPANY_ID,
+          company_id: companyId,
           record_id: draft.entry.id,
           table_name: 'journal_entries',
         });
@@ -207,7 +207,7 @@ const USER_ID = INTEGRATION_USER_ID;
         expect(originalHistory.some((row) => row.action === AuditAction.Reversal)).toBe(true);
 
         const actorFiltered = await auditLogService.find({
-          company_id: COMPANY_ID,
+          company_id: companyId,
           actor_id: USER_ID,
           table_name: 'journal_entries',
         });
@@ -222,7 +222,7 @@ const USER_ID = INTEGRATION_USER_ID;
 
     it('blocks UPDATE and DELETE against audit_log via block_audit_log_mutation', async () => {
       const rows = await auditLogService.find({
-        company_id: COMPANY_ID,
+        company_id: companyId,
         table_name: 'journal_entries',
       });
 
@@ -250,7 +250,7 @@ const USER_ID = INTEGRATION_USER_ID;
       expect(deleteError?.message).toMatch(/DELETE/i);
 
       const stillThere = await auditLogService.find({
-        company_id: COMPANY_ID,
+        company_id: companyId,
         record_id: target.record_id,
         table_name: target.table_name,
       });

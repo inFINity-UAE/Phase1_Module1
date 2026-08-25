@@ -172,11 +172,11 @@ describe('JournalEntriesService', () => {
       findEarliestOpenPeriod: jest.fn(),
       hasOpeningBalanceForFiscalYear: jest.fn(),
       hasYearEndClosingForFiscalYear: jest.fn(),
+      createOpeningBalanceEntry: jest.fn(),
+      createYearEndClosingEntry: jest.fn(),
       findLatestPeriodForFiscalYear: jest.fn(),
       findRetainedEarningsAccount: jest.fn(),
       getProfitAndLossBalancesForFiscalYear: jest.fn(),
-      insertOpeningBalanceDraft: jest.fn(),
-      insertYearEndClosingDraft: jest.fn(),
       deleteEntry: jest.fn(),
       getAccountTrialBalance: jest.fn(),
       getCompanySettings: jest.fn(),
@@ -1022,11 +1022,7 @@ describe('JournalEntriesService', () => {
         lines: draft.lines,
       });
 
-      repository.hasOpeningBalanceForFiscalYear.mockResolvedValue(false);
-      repository.findEarliestOpenPeriod.mockResolvedValue(earliestOpenPeriod);
-      repository.insertOpeningBalanceDraft.mockResolvedValue(draft);
-      repository.postEntry.mockResolvedValue(posted.entry);
-      repository.findByIdWithDetails.mockResolvedValue(posted);
+      repository.createOpeningBalanceEntry.mockResolvedValue(posted);
       repository.getAccountTrialBalance
         .mockResolvedValueOnce({
           account_id: ACCOUNT_A,
@@ -1043,19 +1039,10 @@ describe('JournalEntriesService', () => {
 
       const result = await service.createOpeningBalance(openingBalanceDto, USER_ID);
 
-      expect(repository.hasOpeningBalanceForFiscalYear).toHaveBeenCalledWith(
-        COMPANY_ID,
-        FISCAL_YEAR,
-      );
-      expect(repository.findEarliestOpenPeriod).toHaveBeenCalledWith(
-        COMPANY_ID,
-        FISCAL_YEAR,
-      );
-      expect(repository.insertOpeningBalanceDraft).toHaveBeenCalledWith(
-        { ...openingBalanceDto, created_by: USER_ID },
-        PERIOD_ID,
-      );
-      expect(repository.postEntry).toHaveBeenCalledWith(ENTRY_ID);
+      expect(repository.createOpeningBalanceEntry).toHaveBeenCalledWith({
+        ...openingBalanceDto,
+        created_by: USER_ID,
+      });
       expect(result.entry.entry_type).toBe(JournalEntryType.OpeningBalance);
       expect(result.entry.status).toBe(JournalEntryStatus.Posted);
       expect(result.entry.period_id).toBe(PERIOD_ID);
@@ -1105,33 +1092,26 @@ describe('JournalEntriesService', () => {
         ],
       });
 
-      repository.hasOpeningBalanceForFiscalYear.mockResolvedValue(false);
-      repository.findEarliestOpenPeriod.mockResolvedValue(earliestOpenPeriod);
-      repository.insertOpeningBalanceDraft.mockResolvedValue(draft);
-      repository.postEntry.mockRejectedValue(
+      repository.createOpeningBalanceEntry.mockRejectedValue(
         pgError(
           'P0001',
           'Journal entry 1 is unbalanced: debit 500.00 <> credit 300.00 — posting rejected',
         ),
-      );
-      repository.deleteEntry.mockResolvedValue(undefined);
-
-      const expectedMessage = formatUnbalancedPostError(
-        draft.entry.entry_number,
-        draft.lines,
       );
 
       await expect(service.createOpeningBalance(unbalancedDto, USER_ID)).rejects.toThrow(
         BadRequestException,
       );
       await expect(service.createOpeningBalance(unbalancedDto, USER_ID)).rejects.toThrow(
-        expectedMessage,
+        /unbalanced: debit 500.00 <> credit 300.00/,
       );
-      expect(repository.deleteEntry).toHaveBeenCalledWith(ENTRY_ID);
+      expect(repository.deleteEntry).not.toHaveBeenCalled();
     });
 
     it('attempting to post a second opening_balance entry for the same company and fiscal year is rejected cleanly, with no new entry created', async () => {
-      repository.hasOpeningBalanceForFiscalYear.mockResolvedValue(true);
+      repository.createOpeningBalanceEntry.mockRejectedValue(
+        new Error('OPENING_BALANCE_ALREADY_EXISTS'),
+      );
 
       await expect(service.createOpeningBalance(openingBalanceDto, USER_ID)).rejects.toThrow(
         BadRequestException,
@@ -1139,8 +1119,7 @@ describe('JournalEntriesService', () => {
       await expect(service.createOpeningBalance(openingBalanceDto, USER_ID)).rejects.toThrow(
         `An opening balance entry already exists for fiscal year ${FISCAL_YEAR}`,
       );
-      expect(repository.insertOpeningBalanceDraft).not.toHaveBeenCalled();
-      expect(repository.postEntry).not.toHaveBeenCalled();
+      expect(repository.createOpeningBalanceEntry).toHaveBeenCalled();
     });
   });
 
@@ -1239,45 +1218,14 @@ describe('JournalEntriesService', () => {
         lines: draft.lines,
       });
 
-      repository.hasYearEndClosingForFiscalYear.mockResolvedValue(false);
-      repository.findLatestPeriodForFiscalYear.mockResolvedValue(latestPeriod);
-      repository.findRetainedEarningsAccount.mockResolvedValue({
-        id: RETAINED_EARNINGS_ID,
-      });
-      repository.getProfitAndLossBalancesForFiscalYear.mockResolvedValue(plBalances);
-      repository.insertYearEndClosingDraft.mockResolvedValue(draft);
-      repository.postEntry.mockResolvedValue(posted.entry);
-      repository.findByIdWithDetails.mockResolvedValue(posted);
+      repository.createYearEndClosingEntry.mockResolvedValue(posted);
 
       const result = await service.runYearEndClosing(yearEndDto, USER_ID);
 
-      expect(repository.hasYearEndClosingForFiscalYear).toHaveBeenCalledWith(
-        COMPANY_ID,
-        FISCAL_YEAR,
-      );
-      expect(repository.insertYearEndClosingDraft).toHaveBeenCalledWith(
-        { ...yearEndDto, created_by: USER_ID },
-        PERIOD_ID,
-        '2026-02-28',
-        expect.arrayContaining([
-          expect.objectContaining({
-            account_id: INCOME_ACCOUNT_ID,
-            debit: 1000,
-            credit: 0,
-          }),
-          expect.objectContaining({
-            account_id: EXPENSE_ACCOUNT_ID,
-            debit: 0,
-            credit: 600,
-          }),
-          expect.objectContaining({
-            account_id: RETAINED_EARNINGS_ID,
-            debit: 0,
-            credit: 400,
-          }),
-        ]),
-      );
-      expect(repository.postEntry).toHaveBeenCalledWith(ENTRY_ID);
+      expect(repository.createYearEndClosingEntry).toHaveBeenCalledWith({
+        ...yearEndDto,
+        created_by: USER_ID,
+      });
       expect(result.entry.entry_type).toBe(JournalEntryType.YearEndClosing);
       expect(result.entry.status).toBe(JournalEntryStatus.Posted);
       const totalDebit = result.lines.reduce((sum, line) => sum + line.debit, 0);
@@ -1286,7 +1234,9 @@ describe('JournalEntriesService', () => {
     });
 
     it('attempting year-end close a second time for the same fiscal year is rejected cleanly', async () => {
-      repository.hasYearEndClosingForFiscalYear.mockResolvedValue(true);
+      repository.createYearEndClosingEntry.mockRejectedValue(
+        new Error('YEAR_END_ALREADY_CLOSED'),
+      );
 
       await expect(service.runYearEndClosing(yearEndDto, USER_ID)).rejects.toThrow(
         BadRequestException,
@@ -1294,8 +1244,6 @@ describe('JournalEntriesService', () => {
       await expect(service.runYearEndClosing(yearEndDto, USER_ID)).rejects.toThrow(
         `A year-end closing entry already exists for fiscal year ${FISCAL_YEAR}`,
       );
-      expect(repository.insertYearEndClosingDraft).not.toHaveBeenCalled();
-      expect(repository.postEntry).not.toHaveBeenCalled();
     });
   });
 });

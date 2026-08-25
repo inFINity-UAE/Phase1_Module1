@@ -15,14 +15,12 @@ import { JournalEntriesService } from './journal-entries.service';
 import {
   ensureReverseIntegrationCompanyReady,
   INTEGRATION_USER_ID,
-  REVERSE_INTEGRATION_COMPANY_ID,
 } from '../test/integration-company.setup';
 
 const hasSupabase = Boolean(
   process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.SUPABASE_SECRET_KEY,
 );
 
-const COMPANY_ID = REVERSE_INTEGRATION_COMPANY_ID;
 const USER_ID = INTEGRATION_USER_ID;
 
 (hasSupabase ? describe : describe.skip)(
@@ -30,6 +28,8 @@ const USER_ID = INTEGRATION_USER_ID;
   () => {
     let service: JournalEntriesService;
     let supabase: SupabaseService;
+    /** [feature-spec.md decision #19] Fresh company UUID per run. */
+    let companyId = '';
     const createdEntryIds: string[] = [];
     let periodId = '';
     let cashAccountId = '';
@@ -43,12 +43,12 @@ const USER_ID = INTEGRATION_USER_ID;
       service = module.get(JournalEntriesService);
       supabase = module.get(SupabaseService);
 
-      await ensureReverseIntegrationCompanyReady(supabase);
+      companyId = await ensureReverseIntegrationCompanyReady(supabase);
 
       const { data: period, error: periodError } = await supabase.client
         .from('accounting_periods')
         .select('id')
-        .eq('company_id', COMPANY_ID)
+        .eq('company_id', companyId)
         .eq('period_start', '2026-01-01')
         .single();
       if (periodError || !period) {
@@ -59,7 +59,7 @@ const USER_ID = INTEGRATION_USER_ID;
       const { data: accounts, error: accountsError } = await supabase.client
         .from('accounts')
         .select('id, account_number')
-        .eq('company_id', COMPANY_ID)
+        .eq('company_id', companyId)
         .in('account_number', ['1010', '1020']);
       if (accountsError || !accounts || accounts.length < 2) {
         throw accountsError ?? new Error('Need cash and bank accounts');
@@ -80,7 +80,7 @@ const USER_ID = INTEGRATION_USER_ID;
     async function createPostedProbe(narration: string) {
       const draft = await service.create(
         {
-          company_id: COMPANY_ID,
+          company_id: companyId,
           period_id: periodId,
           entry_date: '2026-01-18',
           narration,
@@ -160,7 +160,7 @@ const USER_ID = INTEGRATION_USER_ID;
           await supabase.client
             .from('journal_entries')
             .select('id', { count: 'exact', head: true })
-            .eq('company_id', COMPANY_ID)
+            .eq('company_id', companyId)
         ).count;
 
         const lineCountBefore = (
@@ -198,7 +198,7 @@ const USER_ID = INTEGRATION_USER_ID;
           await supabase.client
             .from('journal_entries')
             .select('id', { count: 'exact', head: true })
-            .eq('company_id', COMPANY_ID)
+            .eq('company_id', companyId)
         ).count;
         expect(entryCountAfter).toBe(entryCountBefore);
 

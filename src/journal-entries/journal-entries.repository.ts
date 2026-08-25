@@ -11,7 +11,6 @@ import { JournalEntry } from './entities/journal-entry.entity';
 import { JournalLine } from './entities/journal-line.entity';
 import { TrialBalanceTotals } from './entities/trial-balance-totals.entity';
 import { ProfitAndLossAccountBalance } from './entities/profit-and-loss-account-balance.entity';
-import { YearEndClosingLineInput } from './year-end-closing.util';
 import { JournalEntryReversalResult } from './entities/journal-entry-reversal-result.entity';
 
 export const JOURNAL_ENTRIES_REPOSITORY = Symbol('JOURNAL_ENTRIES_REPOSITORY');
@@ -43,6 +42,12 @@ export interface JournalEntriesRepository {
     companyId: string,
     fiscalYear: number,
   ): Promise<boolean>;
+  createOpeningBalanceEntry(
+    dto: CreateOpeningBalanceWithActor,
+  ): Promise<JournalEntryWithDetails>;
+  createYearEndClosingEntry(
+    dto: CreateYearEndClosingWithActor,
+  ): Promise<JournalEntryWithDetails>;
   findLatestPeriodForFiscalYear(
     companyId: string,
     fiscalYear: number,
@@ -52,16 +57,6 @@ export interface JournalEntriesRepository {
     companyId: string,
     fiscalYear: number,
   ): Promise<ProfitAndLossAccountBalance[]>;
-  insertOpeningBalanceDraft(
-    dto: CreateOpeningBalanceWithActor,
-    periodId: string,
-  ): Promise<JournalEntryWithDetails>;
-  insertYearEndClosingDraft(
-    dto: CreateYearEndClosingWithActor,
-    periodId: string,
-    entryDate: string,
-    lines: YearEndClosingLineInput[],
-  ): Promise<JournalEntryWithDetails>;
   deleteEntry(id: string): Promise<void>;
   getAccountTrialBalance(
     companyId: string,

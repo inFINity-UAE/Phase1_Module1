@@ -258,16 +258,31 @@ placeholder content:
     item #4: there is no row-level delete path, by design, and that's 
     correct — not a gap to route around. A company row cannot be deleted 
     once any of its journal_entries are posted: prevent_posted_entry_deletion
-     fires per-row even under an ON DELETE CASCADE from companies, exactly 
-     like the guard that blocked reseeding …001/…e2e1 above. "Teardown" 
-     therefore does NOT mean deleting or truncating old test companies — 
-     it means never reusing a fixed ID for a destructive reset in the first 
-     place. Fix: e2e test setup generates a fresh, randomly-generated company 
-     UUID per test run (not a hardcoded literal like …e2e1/…e2e2), seeds the 
-     finalized COA fresh into it every time, and never wipes or reseeds an 
-     existing company. Old test companies accumulate as disposable rows in 
-     the non-prod Supabase project; reclaiming that space is an infrequent, 
-     manual, whole-environment reset (drop/recreate the test project, or a 
-     one-off manual cleanup applied directly in the Supabase SQL editor by 
-     the developer) — never something app code or Cursor's test suite does 
-     automatically.
+    fires per-row even under an ON DELETE CASCADE from companies, exactly 
+    like the guard that blocked reseeding …001/…e2e1 above. "Teardown" 
+    therefore does NOT mean deleting or truncating old test companies — 
+    it means never reusing a fixed ID for a destructive reset in the first 
+    place. Fix: e2e test setup generates a fresh, randomly-generated company 
+    UUID per test run (not a hardcoded literal like …e2e1/…e2e2), seeds the 
+    finalized COA fresh into it every time, and never wipes or reseeds an 
+    existing company. Old test companies accumulate as disposable rows in 
+    the non-prod Supabase project; reclaiming that space is an infrequent, 
+    manual, whole-environment reset (drop/recreate the test project, or a 
+    one-off manual cleanup applied directly in the Supabase SQL editor by 
+    the developer) — never something app code or Cursor's test suite does 
+    automatically.
+19. Decision #18's fix extended to ALL fixed-company integration suites, 
+    logged 2026-08-24 — this is the third occurrence of the same wall 
+    (main demo company, then e2e, now journal-entries.reverse 
+    .integration.spec.ts's fixed …b004), and a point-fix per suite would 
+    just schedule the next one (approval-rbac and year-end-closing's fixed 
+    companies haven't hit it yet only because they haven't been run enough 
+    times — not because they're exempt). Rather than mint yet another one-off
+    fixed UUID for the reverse suite, the random-UUID-per-run pattern from 
+    decision #18 is now the standard for every integration suite that 
+    currently uses a hardcoded company literal (…b004 reverse, and the 
+    approval-rbac / year-end-closing suites' equivalents) — implemented as 
+    one shared setup helper (ensureCompanyWithCoa / equivalent), not 
+    duplicated per suite. Same rule as #18: never wipe, never reuse a 
+    literal ID across runs; old fixed IDs (…b004 included) are retired 
+    untouched.

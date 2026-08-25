@@ -19,14 +19,12 @@ import { JournalEntriesService } from './journal-entries.service';
 import {
   ensurePostIntegrationCompanyReady,
   INTEGRATION_USER_ID,
-  POST_INTEGRATION_COMPANY_ID,
 } from '../test/integration-company.setup';
 
 const hasSupabase = Boolean(
   process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.SUPABASE_SECRET_KEY,
 );
 
-const COMPANY_ID = POST_INTEGRATION_COMPANY_ID;
 const USER_ID = INTEGRATION_USER_ID;
 
 (hasSupabase ? describe : describe.skip)(
@@ -35,6 +33,8 @@ const USER_ID = INTEGRATION_USER_ID;
     let service: JournalEntriesService;
     let repository: SupabaseJournalEntriesRepository;
     let supabase: SupabaseService;
+    /** [feature-spec.md decision #19] Fresh company UUID per run. */
+    let companyId = '';
     const createdEntryIds: string[] = [];
 
     beforeAll(async () => {
@@ -46,7 +46,7 @@ const USER_ID = INTEGRATION_USER_ID;
       repository = module.get(JOURNAL_ENTRIES_REPOSITORY);
       supabase = module.get(SupabaseService);
 
-      await ensurePostIntegrationCompanyReady(supabase);
+      companyId = await ensurePostIntegrationCompanyReady(supabase);
     }, 120000);
 
     afterAll(async () => {
@@ -57,14 +57,14 @@ const USER_ID = INTEGRATION_USER_ID;
     });
 
     async function nextEntryNumber(): Promise<number> {
-      return repository.getNextEntryNumber(COMPANY_ID);
+      return repository.getNextEntryNumber(companyId);
     }
 
     async function getPeriodId(): Promise<string> {
       const { data, error } = await supabase.client
         .from('accounting_periods')
         .select('id')
-        .eq('company_id', COMPANY_ID)
+        .eq('company_id', companyId)
         .limit(1)
         .single();
       if (error || !data) {
@@ -77,7 +77,7 @@ const USER_ID = INTEGRATION_USER_ID;
       const { data, error } = await supabase.client
         .from('accounts')
         .select('id')
-        .eq('company_id', COMPANY_ID)
+        .eq('company_id', companyId)
         .eq('category', 'asset')
         .limit(2);
       if (error || !data || data.length < 2) {
@@ -98,7 +98,7 @@ const USER_ID = INTEGRATION_USER_ID;
       const { data: entry, error: entryError } = await supabase.client
         .from('journal_entries')
         .insert({
-          company_id: COMPANY_ID,
+          company_id: companyId,
           entry_number: entryNumber,
           period_id: periodId,
           entry_date: '2026-01-15',
@@ -184,13 +184,13 @@ const USER_ID = INTEGRATION_USER_ID;
     });
 
     it('[Rules §3.1] v_trial_balance total debits equal total credits after balanced posted entries', async () => {
-      const before = await repository.getTrialBalanceTotals(COMPANY_ID);
+      const before = await repository.getTrialBalanceTotals(companyId);
 
       await insertPostedBalancedEntry(100, 'integration TB entry 1');
       await insertPostedBalancedEntry(200, 'integration TB entry 2');
       await insertPostedBalancedEntry(300, 'integration TB entry 3');
 
-      const after = await repository.getTrialBalanceTotals(COMPANY_ID);
+      const after = await repository.getTrialBalanceTotals(companyId);
       const debitDelta = after.total_debit - before.total_debit;
       const creditDelta = after.total_credit - before.total_credit;
 

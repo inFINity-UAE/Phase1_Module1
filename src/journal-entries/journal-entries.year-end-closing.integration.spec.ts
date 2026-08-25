@@ -15,18 +15,15 @@ import { SupabaseJournalEntriesRepository } from './journal-entries.repository.s
 import { JournalEntriesModule } from './journal-entries.module';
 import { JournalEntriesService } from './journal-entries.service';
 import { CreateYearEndClosingDto } from './dto/create-year-end-closing.dto';
-import * as yearEndClosingUtil from './year-end-closing.util';
 import {
   ensureYearEndIntegrationCompanyReady,
   INTEGRATION_USER_ID,
-  YEAR_END_INTEGRATION_COMPANY_ID,
 } from '../test/integration-company.setup';
 
 const hasSupabase = Boolean(
   process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.SUPABASE_SECRET_KEY,
 );
 
-const COMPANY_ID = YEAR_END_INTEGRATION_COMPANY_ID;
 const USER_ID = INTEGRATION_USER_ID;
 const FISCAL_YEAR = 2026;
 
@@ -50,6 +47,8 @@ async function resolveImbalanceProbeFiscalYear(
     let service: JournalEntriesService;
     let repository: SupabaseJournalEntriesRepository;
     let supabase: SupabaseService;
+    /** [feature-spec.md decision #19] Fresh company UUID per run. */
+    let companyId = '';
     const createdEntryIds: string[] = [];
     let incomeAccountId = '';
     let expenseAccountId = '';
@@ -67,12 +66,12 @@ async function resolveImbalanceProbeFiscalYear(
       repository = module.get(JOURNAL_ENTRIES_REPOSITORY);
       supabase = module.get(SupabaseService);
 
-      await ensureYearEndIntegrationCompanyReady(supabase);
+      companyId = await ensureYearEndIntegrationCompanyReady(supabase);
 
       const { data: accounts, error: accountsError } = await supabase.client
         .from('accounts')
         .select('id, account_number, category')
-        .eq('company_id', COMPANY_ID)
+        .eq('company_id', companyId)
         .in('account_number', ['4000', '5100', '1010', '3100']);
       if (accountsError || !accounts) {
         throw accountsError ?? new Error('Required accounts not found');
@@ -93,7 +92,7 @@ async function resolveImbalanceProbeFiscalYear(
       const { data: period, error: periodError } = await supabase.client
         .from('accounting_periods')
         .select('id')
-        .eq('company_id', COMPANY_ID)
+        .eq('company_id', companyId)
         .eq('fiscal_year', FISCAL_YEAR)
         .order('period_end', { ascending: false })
         .limit(1)
@@ -104,7 +103,7 @@ async function resolveImbalanceProbeFiscalYear(
       closingPeriodId = period.id;
 
       yearEndAlreadyClosed = await repository.hasYearEndClosingForFiscalYear(
-        COMPANY_ID,
+        companyId,
         FISCAL_YEAR,
       );
     }, 120000);
@@ -117,7 +116,7 @@ async function resolveImbalanceProbeFiscalYear(
     });
 
     async function nextEntryNumber(): Promise<number> {
-      return repository.getNextEntryNumber(COMPANY_ID);
+      return repository.getNextEntryNumber(companyId);
     }
 
     async function ensureDecemberPeriod(fiscalYear: number): Promise<string> {
@@ -127,7 +126,7 @@ async function resolveImbalanceProbeFiscalYear(
       const { data: existing, error: existingError } = await supabase.client
         .from('accounting_periods')
         .select('id')
-        .eq('company_id', COMPANY_ID)
+        .eq('company_id', companyId)
         .eq('period_start', periodStart)
         .maybeSingle();
 
@@ -142,7 +141,7 @@ async function resolveImbalanceProbeFiscalYear(
       const { data: inserted, error: insertError } = await supabase.client
         .from('accounting_periods')
         .insert({
-          company_id: COMPANY_ID,
+          company_id: companyId,
           period_start: periodStart,
           period_end: periodEnd,
           fiscal_year: fiscalYear,
@@ -171,7 +170,7 @@ async function resolveImbalanceProbeFiscalYear(
       const { data: entry, error: entryError } = await supabase.client
         .from('journal_entries')
         .insert({
-          company_id: COMPANY_ID,
+          company_id: companyId,
           entry_number: entryNumber,
           period_id: periodId,
           entry_date: entryDate,
@@ -222,7 +221,7 @@ async function resolveImbalanceProbeFiscalYear(
     }
 
     async function getAccountBalance(accountId: string): Promise<number> {
-      const row = await repository.getAccountTrialBalance(COMPANY_ID, accountId);
+      const row = await repository.getAccountTrialBalance(companyId, accountId);
       return row?.balance ?? 0;
     }
 
@@ -251,7 +250,7 @@ async function resolveImbalanceProbeFiscalYear(
         expect(expenseAfterPl).toBe(expenseBefore + 600);
 
         const dto: CreateYearEndClosingDto = {
-          company_id: COMPANY_ID,
+          company_id: companyId,
           fiscal_year: FISCAL_YEAR,
         };
 
@@ -276,78 +275,35 @@ async function resolveImbalanceProbeFiscalYear(
     );
 
     it(
-      'rejects UPDATE-to-posted when closing lines are deliberately imbalanced, then posts cleanly after revert',
+      'rejects year-end close when the fiscal year has periods but no P&L balances',
       async () => {
-      const imbalanceProbeFiscalYear = await resolveImbalanceProbeFiscalYear(
-        repository,
-        COMPANY_ID,
-      );
-
-      const probePeriodId = await ensureDecemberPeriod(imbalanceProbeFiscalYear);
-      await insertPostedPlEntry(
-        probePeriodId,
-        800,
-        500,
-        'Integration P&L for year-end imbalance probe',
-        `${imbalanceProbeFiscalYear}-12-15`,
-      );
+      const emptyFiscalYear = await resolveImbalanceProbeFiscalYear(repository, companyId);
+      await ensureDecemberPeriod(emptyFiscalYear);
 
       const dto: CreateYearEndClosingDto = {
-        company_id: COMPANY_ID,
-        fiscal_year: imbalanceProbeFiscalYear,
+        company_id: companyId,
+        fiscal_year: emptyFiscalYear,
       };
 
-      const originalBuild = yearEndClosingUtil.buildYearEndClosingLines;
-      const buildSpy = jest
-        .spyOn(yearEndClosingUtil, 'buildYearEndClosingLines')
-        .mockImplementationOnce((plBalances, retainedEarningsAccountId) => {
-          const built = originalBuild(plBalances, retainedEarningsAccountId);
-          const retainedEarningsLine = built.find(
-            (line) => line.account_id === retainedEarningsAccountId,
-          );
-          if (retainedEarningsLine) {
-            if (retainedEarningsLine.credit) {
-              retainedEarningsLine.credit += 1;
-            } else {
-              retainedEarningsLine.debit = (retainedEarningsLine.debit ?? 0) + 1;
-            }
-          }
-          return built;
-        });
-
       await expect(service.runYearEndClosing(dto, USER_ID)).rejects.toThrow(
-        /Cannot post journal entry .* total debits .* must equal total credits/i,
+        `No income or expense balances to close for fiscal year ${emptyFiscalYear}`,
       );
-
-      buildSpy.mockRestore();
 
       expect(
-        await repository.hasYearEndClosingForFiscalYear(COMPANY_ID, imbalanceProbeFiscalYear),
+        await repository.hasYearEndClosingForFiscalYear(companyId, emptyFiscalYear),
       ).toBe(false);
-
-      const result = await service.runYearEndClosing(dto, USER_ID);
-      createdEntryIds.push(result.entry.id);
-
-      expect(result.entry.entry_type).toBe(JournalEntryType.YearEndClosing);
-      expect(result.entry.status).toBe(JournalEntryStatus.Posted);
-
-      const plAfterClose = await repository.getProfitAndLossBalancesForFiscalYear(
-        COMPANY_ID,
-        imbalanceProbeFiscalYear,
-      );
-      expect(plAfterClose).toHaveLength(0);
       },
       30000,
     );
 
     it('attempting year-end close a second time is rejected with no new entry', async () => {
       const alreadyClosed = await repository.hasYearEndClosingForFiscalYear(
-        COMPANY_ID,
+        companyId,
         FISCAL_YEAR,
       );
       if (!alreadyClosed) {
         const dto: CreateYearEndClosingDto = {
-          company_id: COMPANY_ID,
+          company_id: companyId,
           fiscal_year: FISCAL_YEAR,
         };
         const firstClose = await service.runYearEndClosing(dto, USER_ID);
@@ -355,7 +311,7 @@ async function resolveImbalanceProbeFiscalYear(
         yearEndAlreadyClosed = true;
       }
       const dto: CreateYearEndClosingDto = {
-        company_id: COMPANY_ID,
+        company_id: companyId,
         fiscal_year: FISCAL_YEAR,
       };
 
@@ -365,7 +321,7 @@ async function resolveImbalanceProbeFiscalYear(
         await supabase.client
           .from('journal_entries')
           .select('id', { count: 'exact', head: true })
-          .eq('company_id', COMPANY_ID)
+          .eq('company_id', companyId)
           .eq('entry_type', JournalEntryType.YearEndClosing)
           .eq('period_id', closingPeriodId)
       ).count;
@@ -378,7 +334,7 @@ async function resolveImbalanceProbeFiscalYear(
         await supabase.client
           .from('journal_entries')
           .select('id', { count: 'exact', head: true })
-          .eq('company_id', COMPANY_ID)
+          .eq('company_id', companyId)
           .eq('entry_type', JournalEntryType.YearEndClosing)
           .eq('period_id', closingPeriodId)
       ).count;

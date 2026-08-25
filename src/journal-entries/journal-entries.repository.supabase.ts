@@ -19,7 +19,7 @@ import { JournalEntryReversalResult } from './entities/journal-entry-reversal-re
 import { AccountTrialBalance } from './entities/account-trial-balance.entity';
 import { TrialBalanceTotals } from './entities/trial-balance-totals.entity';
 import { ProfitAndLossAccountBalance } from './entities/profit-and-loss-account-balance.entity';
-import { computeAccountBalance, YearEndClosingLineInput } from './year-end-closing.util';
+import { computeAccountBalance } from './year-end-closing.util';
 import {
   InsertGeneratedJournalEntryParams,
   CreateJournalEntryWithActor,
@@ -33,102 +33,79 @@ export class SupabaseJournalEntriesRepository implements JournalEntriesRepositor
   constructor(private readonly supabase: SupabaseService) {}
 
   async getNextEntryNumber(companyId: string): Promise<number> {
-    const { data, error } = await this.supabase.client
-      .from('journal_entries')
-      .select('entry_number')
-      .eq('company_id', companyId)
-      .order('entry_number', { ascending: false })
-      .limit(1);
+    // [race fix] allocate_next_entry_number holds pg_advisory_xact_lock for this
+    // company for the duration of the RPC transaction. Create paths must use
+    // insert_journal_entry_draft (same transaction as the INSERT), not this
+    // helper followed by a separate insert.
+    const { data, error } = await this.supabase.client.rpc('allocate_next_entry_number', {
+      p_company_id: companyId,
+    });
 
     if (error) {
       throw error;
     }
 
-    const max = data?.[0]?.entry_number;
-    return typeof max === 'number' ? max + 1 : 1;
+    return Number(data);
   }
 
   async insertDraft(dto: CreateJournalEntryWithActor): Promise<JournalEntryWithDetails> {
-    const entryNumber = await this.getNextEntryNumber(dto.company_id);
+    return this.insertJournalEntryDraftRpc({
+      p_company_id: dto.company_id,
+      p_period_id: dto.period_id,
+      p_entry_date: dto.entry_date,
+      p_entry_type: JournalEntryType.Manual,
+      p_narration: dto.narration,
+      p_created_by: dto.created_by,
+      p_lines: dto.lines,
+      p_reference_number: dto.reference_number ?? null,
+      p_attachments: dto.attachments ?? [],
+    });
+  }
 
-    const { data: entry, error: entryError } = await this.supabase.client
-      .from('journal_entries')
-      .insert({
-        company_id: dto.company_id,
-        entry_number: entryNumber,
-        period_id: dto.period_id,
-        entry_date: dto.entry_date,
-        entry_type: JournalEntryType.Manual,
-        status: JournalEntryStatus.Draft,
-        narration: dto.narration,
-        reference_number: dto.reference_number ?? null,
-        created_by: dto.created_by,
-      })
-      .select()
-      .single();
+  private parseJournalPayload(data: unknown): JournalEntryWithDetails {
+    const payload = data as {
+      entry: JournalEntry;
+      lines: JournalLine[];
+      attachments?: JournalAttachment[];
+    };
 
-    if (entryError) {
-      throw entryError;
-    }
+    return {
+      entry: payload.entry,
+      lines: payload.lines ?? [],
+      attachments: payload.attachments ?? [],
+    };
+  }
 
-    const entryRow = entry as JournalEntry;
+  private async insertJournalEntryDraftRpc(params: {
+    p_company_id: string;
+    p_period_id: string;
+    p_entry_date: string;
+    p_entry_type: JournalEntryType;
+    p_narration: string;
+    p_created_by: string;
+    p_lines: unknown;
+    p_reference_number?: string | null;
+    p_recurring_template_id?: string | null;
+    p_attachments?: unknown;
+  }): Promise<JournalEntryWithDetails> {
+    const { data, error } = await this.supabase.client.rpc('insert_journal_entry_draft', {
+      p_company_id: params.p_company_id,
+      p_period_id: params.p_period_id,
+      p_entry_date: params.p_entry_date,
+      p_entry_type: params.p_entry_type,
+      p_narration: params.p_narration,
+      p_created_by: params.p_created_by,
+      p_lines: params.p_lines,
+      p_reference_number: params.p_reference_number ?? null,
+      p_recurring_template_id: params.p_recurring_template_id ?? null,
+      p_attachments: params.p_attachments ?? [],
+    });
 
-    try {
-      const lineRows = dto.lines.map((line) => ({
-        journal_entry_id: entryRow.id,
-        line_number: line.line_number,
-        account_id: line.account_id,
-        debit: line.debit ?? 0,
-        credit: line.credit ?? 0,
-        description: line.description ?? null,
-        cost_center: line.cost_center ?? null,
-      }));
-
-      const { data: lines, error: linesError } = await this.supabase.client
-        .from('journal_lines')
-        .insert(lineRows)
-        .select();
-
-      if (linesError) {
-        throw linesError;
-      }
-
-      let attachments: JournalAttachment[] = [];
-
-      if (dto.attachments?.length) {
-        const attachmentRows = dto.attachments.map((attachment) => ({
-          journal_entry_id: entryRow.id,
-          file_name: attachment.file_name,
-          file_url: attachment.file_url,
-          file_size_bytes: attachment.file_size_bytes ?? null,
-          uploaded_by: dto.created_by,
-        }));
-
-        const { data: attachmentData, error: attachmentError } =
-          await this.supabase.client
-            .from('journal_attachments')
-            .insert(attachmentRows)
-            .select();
-
-        if (attachmentError) {
-          throw attachmentError;
-        }
-
-        attachments = (attachmentData ?? []) as JournalAttachment[];
-      }
-
-      return {
-        entry: entryRow,
-        lines: (lines ?? []) as JournalLine[],
-        attachments,
-      };
-    } catch (error) {
-      await this.supabase.client
-        .from('journal_entries')
-        .delete()
-        .eq('id', entryRow.id);
+    if (error) {
       throw error;
     }
+
+    return this.parseJournalPayload(data);
   }
 
   async findByIdWithDetails(id: string): Promise<JournalEntryWithDetails | null> {
@@ -446,126 +423,67 @@ export class SupabaseJournalEntriesRepository implements JournalEntriesRepositor
       .filter((row) => row.balance !== 0);
   }
 
-  async insertOpeningBalanceDraft(
+  async createOpeningBalanceEntry(
     dto: CreateOpeningBalanceWithActor,
-    periodId: string,
   ): Promise<JournalEntryWithDetails> {
-    const entryNumber = await this.getNextEntryNumber(dto.company_id);
+    const { data, error } = await this.supabase.client.rpc('create_opening_balance_entry', {
+      p_company_id: dto.company_id,
+      p_fiscal_year: dto.fiscal_year,
+      p_entry_date: dto.entry_date,
+      p_narration: dto.narration,
+      p_created_by: dto.created_by,
+      p_lines: dto.lines,
+      p_reference_number: dto.reference_number ?? null,
+    });
 
-    const { data: entry, error: entryError } = await this.supabase.client
-      .from('journal_entries')
-      .insert({
-        company_id: dto.company_id,
-        entry_number: entryNumber,
-        period_id: periodId,
-        entry_date: dto.entry_date,
-        entry_type: JournalEntryType.OpeningBalance,
-        status: JournalEntryStatus.Draft,
-        narration: dto.narration,
-        reference_number: dto.reference_number ?? null,
-        created_by: dto.created_by,
-      })
-      .select()
-      .single();
-
-    if (entryError) {
-      throw entryError;
+    if (error) {
+      throw this.mapJournalRpcError(error);
     }
 
-    const entryRow = entry as JournalEntry;
-
-    try {
-      const lineRows = dto.lines.map((line) => ({
-        journal_entry_id: entryRow.id,
-        line_number: line.line_number,
-        account_id: line.account_id,
-        debit: line.debit ?? 0,
-        credit: line.credit ?? 0,
-        description: line.description ?? null,
-        cost_center: line.cost_center ?? null,
-      }));
-
-      const { data: lines, error: linesError } = await this.supabase.client
-        .from('journal_lines')
-        .insert(lineRows)
-        .select();
-
-      if (linesError) {
-        throw linesError;
-      }
-
-      return {
-        entry: entryRow,
-        lines: (lines ?? []) as JournalLine[],
-        attachments: [],
-      };
-    } catch (error) {
-      await this.deleteEntry(entryRow.id);
-      throw error;
-    }
+    return this.parseJournalPayload(data);
   }
 
-  async insertYearEndClosingDraft(
+  async createYearEndClosingEntry(
     dto: CreateYearEndClosingWithActor,
-    periodId: string,
-    entryDate: string,
-    lines: YearEndClosingLineInput[],
   ): Promise<JournalEntryWithDetails> {
-    const entryNumber = await this.getNextEntryNumber(dto.company_id);
-    const narration =
-      dto.narration?.trim() ||
-      `Year-end closing for fiscal year ${dto.fiscal_year}`;
+    const { data, error } = await this.supabase.client.rpc('create_year_end_closing_entry', {
+      p_company_id: dto.company_id,
+      p_fiscal_year: dto.fiscal_year,
+      p_created_by: dto.created_by,
+      p_entry_date: dto.entry_date ?? null,
+      p_narration: dto.narration ?? null,
+    });
 
-    const { data: entry, error: entryError } = await this.supabase.client
-      .from('journal_entries')
-      .insert({
-        company_id: dto.company_id,
-        entry_number: entryNumber,
-        period_id: periodId,
-        entry_date: entryDate,
-        entry_type: JournalEntryType.YearEndClosing,
-        status: JournalEntryStatus.Draft,
-        narration,
-        created_by: dto.created_by,
-      })
-      .select()
-      .single();
-
-    if (entryError) {
-      throw entryError;
+    if (error) {
+      throw this.mapJournalRpcError(error);
     }
 
-    const entryRow = entry as JournalEntry;
+    return this.parseJournalPayload(data);
+  }
 
-    try {
-      const lineRows = lines.map((line) => ({
-        journal_entry_id: entryRow.id,
-        line_number: line.line_number,
-        account_id: line.account_id,
-        debit: line.debit ?? 0,
-        credit: line.credit ?? 0,
-        description: line.description ?? null,
-        cost_center: null,
-      }));
+  /**
+   * Promote known RAISE EXCEPTION tokens so Nest can map them without
+   * depending on PostgREST wrapping. Tokens are prefixes of the message.
+   */
+  private mapJournalRpcError(error: { message?: string }): Error {
+    const message = error.message ?? '';
+    const tokens = [
+      'OPENING_BALANCE_ALREADY_EXISTS',
+      'YEAR_END_ALREADY_CLOSED',
+      'NO_OPEN_PERIOD_FOR_FISCAL_YEAR',
+      'NO_PERIOD_FOR_FISCAL_YEAR',
+      'RETAINED_EARNINGS_NOT_FOUND',
+      'NO_PL_BALANCES_TO_CLOSE',
+      'JOURNAL_DRAFT_REQUIRES_LINES',
+    ] as const;
 
-      const { data: insertedLines, error: linesError } = await this.supabase.client
-        .from('journal_lines')
-        .insert(lineRows)
-        .select();
-
-      if (linesError) {
-        throw linesError;
+    for (const token of tokens) {
+      if (message.includes(token)) {
+        return new Error(token);
       }
-
-      return {
-        entry: entryRow,
-        lines: (insertedLines ?? []) as JournalLine[],
-        attachments: [],
-      };
-    } catch (error) {
-      await this.deleteEntry(entryRow.id);
-      throw error;
     }
+
+    return error as Error;
   }
 
   async deleteEntry(id: string): Promise<void> {
@@ -819,57 +737,15 @@ export class SupabaseJournalEntriesRepository implements JournalEntriesRepositor
   async insertGeneratedFromTemplate(
     params: InsertGeneratedJournalEntryParams,
   ): Promise<JournalEntryWithDetails> {
-    const entryNumber = await this.getNextEntryNumber(params.company_id);
-
-    const { data: entry, error: entryError } = await this.supabase.client
-      .from('journal_entries')
-      .insert({
-        company_id: params.company_id,
-        entry_number: entryNumber,
-        period_id: params.period_id,
-        entry_date: params.entry_date,
-        entry_type: JournalEntryType.Recurring,
-        status: JournalEntryStatus.Draft,
-        narration: params.narration,
-        recurring_template_id: params.recurring_template_id,
-        created_by: params.created_by,
-      })
-      .select()
-      .single();
-
-    if (entryError) {
-      throw entryError;
-    }
-
-    const entryRow = entry as JournalEntry;
-
-    try {
-      const lineRows = params.lines.map((line) => ({
-        journal_entry_id: entryRow.id,
-        line_number: line.line_number,
-        account_id: line.account_id,
-        debit: line.debit ?? 0,
-        credit: line.credit ?? 0,
-        description: line.description ?? null,
-      }));
-
-      const { data: lines, error: linesError } = await this.supabase.client
-        .from('journal_lines')
-        .insert(lineRows)
-        .select();
-
-      if (linesError) {
-        throw linesError;
-      }
-
-      return {
-        entry: entryRow,
-        lines: (lines ?? []) as JournalLine[],
-        attachments: [],
-      };
-    } catch (error) {
-      await this.deleteEntry(entryRow.id);
-      throw error;
-    }
+    return this.insertJournalEntryDraftRpc({
+      p_company_id: params.company_id,
+      p_period_id: params.period_id,
+      p_entry_date: params.entry_date,
+      p_entry_type: JournalEntryType.Recurring,
+      p_narration: params.narration,
+      p_created_by: params.created_by,
+      p_lines: params.lines,
+      p_recurring_template_id: params.recurring_template_id,
+    });
   }
 }

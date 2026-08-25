@@ -42,7 +42,6 @@ import {
   formatUnbalancedPostError,
   isJournalBalancePostRejection,
 } from './journal-entry-balance.util';
-import * as yearEndClosingUtil from './year-end-closing.util';
 import {
   JOURNAL_ENTRIES_REPOSITORY,
   JournalEntriesRepository,
@@ -87,62 +86,21 @@ export class JournalEntriesService {
       throw new BadRequestException('Opening balance entry must have at least one line');
     }
 
-    const alreadyExists =
-      await this.journalEntriesRepository.hasOpeningBalanceForFiscalYear(
-        dto.company_id,
-        dto.fiscal_year,
-      );
-    if (alreadyExists) {
-      throw new BadRequestException(
-        `An opening balance entry already exists for fiscal year ${dto.fiscal_year}. ` +
-          'Use a manual adjusting or reversing entry to correct balances instead.',
-      );
-    }
-
-    const period = await this.journalEntriesRepository.findEarliestOpenPeriod(
-      dto.company_id,
-      dto.fiscal_year,
-    );
-    if (!period) {
-      throw new BadRequestException(
-        `No open accounting period found for fiscal year ${dto.fiscal_year}`,
-      );
-    }
-
-    let draft: JournalEntryWithDetails | undefined;
-
     try {
-      draft = await this.journalEntriesRepository.insertOpeningBalanceDraft(
-        { ...dto, created_by: createdBy },
-        period.id,
-      );
+      const posted = await this.journalEntriesRepository.createOpeningBalanceEntry({
+        ...dto,
+        created_by: createdBy,
+      });
 
-      const posted = await this.journalEntriesRepository.postEntry(draft.entry.id);
-
-      if (!posted.posted_at) {
+      if (!posted.entry.posted_at) {
         throw new InternalServerErrorException(
-          `Opening balance entry ${posted.entry_number} was posted but posted_at was not set`,
+          `Opening balance entry ${posted.entry.entry_number} was posted but posted_at was not set`,
         );
       }
 
-      return this.findOne(draft.entry.id);
+      return posted;
     } catch (error) {
-      if (draft) {
-        await this.journalEntriesRepository.deleteEntry(draft.entry.id);
-      }
-
-      if (
-        draft &&
-        isPostgrestError(error) &&
-        error.code === 'P0001' &&
-        isJournalBalancePostRejection(error.message)
-      ) {
-        throw new BadRequestException(
-          formatUnbalancedPostError(draft.entry.entry_number, draft.lines),
-        );
-      }
-
-      handleDatabaseError(error);
+      this.throwMappedJournalRpcError(error, dto.fiscal_year);
     }
   }
 
@@ -155,94 +113,77 @@ export class JournalEntriesService {
     dto: CreateYearEndClosingDto,
     createdBy: string,
   ): Promise<JournalEntryWithDetails> {
-    const alreadyClosed =
-      await this.journalEntriesRepository.hasYearEndClosingForFiscalYear(
-        dto.company_id,
-        dto.fiscal_year,
-      );
-    if (alreadyClosed) {
+    try {
+      const posted = await this.journalEntriesRepository.createYearEndClosingEntry({
+        ...dto,
+        created_by: createdBy,
+      });
+
+      if (!posted.entry.posted_at) {
+        throw new InternalServerErrorException(
+          `Year-end closing entry ${posted.entry.entry_number} was posted but posted_at was not set`,
+        );
+      }
+
+      return posted;
+    } catch (error) {
+      this.throwMappedJournalRpcError(error, dto.fiscal_year);
+    }
+  }
+
+  /**
+   * Map RPC RAISE tokens to the existing Nest error strings.
+   * NO_OPEN_PERIOD_FOR_FISCAL_YEAR = opening-balance earliest *open* period.
+   * NO_PERIOD_FOR_FISCAL_YEAR = year-end latest period of any status.
+   */
+  private throwMappedJournalRpcError(error: unknown, fiscalYear: number): never {
+    const message = error instanceof Error ? error.message : '';
+
+    if (message === 'OPENING_BALANCE_ALREADY_EXISTS') {
       throw new BadRequestException(
-        `A year-end closing entry already exists for fiscal year ${dto.fiscal_year}. ` +
+        `An opening balance entry already exists for fiscal year ${fiscalYear}. ` +
+          'Use a manual adjusting or reversing entry to correct balances instead.',
+      );
+    }
+    if (message === 'YEAR_END_ALREADY_CLOSED') {
+      throw new BadRequestException(
+        `A year-end closing entry already exists for fiscal year ${fiscalYear}. ` +
           'Running year-end close again would double-transfer P&L into Retained Earnings.',
       );
     }
-
-    const closingPeriod =
-      await this.journalEntriesRepository.findLatestPeriodForFiscalYear(
-        dto.company_id,
-        dto.fiscal_year,
-      );
-    if (!closingPeriod) {
+    if (message === 'NO_OPEN_PERIOD_FOR_FISCAL_YEAR') {
       throw new BadRequestException(
-        `No accounting period found for fiscal year ${dto.fiscal_year}`,
+        `No open accounting period found for fiscal year ${fiscalYear}`,
       );
     }
-
-    const retainedEarnings =
-      await this.journalEntriesRepository.findRetainedEarningsAccount(dto.company_id);
-    if (!retainedEarnings) {
+    if (message === 'NO_PERIOD_FOR_FISCAL_YEAR') {
+      throw new BadRequestException(
+        `No accounting period found for fiscal year ${fiscalYear}`,
+      );
+    }
+    if (message === 'RETAINED_EARNINGS_NOT_FOUND') {
       throw new BadRequestException(
         'Retained Earnings system account (3100) was not found for this company',
       );
     }
-
-    const plBalances =
-      await this.journalEntriesRepository.getProfitAndLossBalancesForFiscalYear(
-        dto.company_id,
-        dto.fiscal_year,
-      );
-    if (!plBalances.length) {
+    if (message === 'NO_PL_BALANCES_TO_CLOSE') {
       throw new BadRequestException(
-        `No income or expense balances to close for fiscal year ${dto.fiscal_year}`,
+        `No income or expense balances to close for fiscal year ${fiscalYear}`,
       );
     }
-
-    const lines = yearEndClosingUtil.buildYearEndClosingLines(plBalances, retainedEarnings.id);
-    if (!lines.length) {
-      throw new BadRequestException(
-        `No closing lines could be generated for fiscal year ${dto.fiscal_year}`,
-      );
+    if (message === 'JOURNAL_DRAFT_REQUIRES_LINES') {
+      throw new BadRequestException('Journal entry must have at least one line');
     }
 
-    const entryDate = dto.entry_date ?? closingPeriod.period_end;
-
-    let draft: JournalEntryWithDetails | undefined;
-
-    try {
-      draft = await this.journalEntriesRepository.insertYearEndClosingDraft(
-        { ...dto, created_by: createdBy },
-        closingPeriod.id,
-        entryDate,
-        lines,
-      );
-
-      const posted = await this.journalEntriesRepository.postEntry(draft.entry.id);
-
-      if (!posted.posted_at) {
-        throw new InternalServerErrorException(
-          `Year-end closing entry ${posted.entry_number} was posted but posted_at was not set`,
-        );
-      }
-
-      return this.findOne(draft.entry.id);
-    } catch (error) {
-      if (draft) {
-        await this.journalEntriesRepository.deleteEntry(draft.entry.id);
-      }
-
-      if (
-        draft &&
-        isPostgrestError(error) &&
-        error.code === 'P0001' &&
-        isJournalBalancePostRejection(error.message)
-      ) {
-        throw new BadRequestException(
-          formatUnbalancedPostError(draft.entry.entry_number, draft.lines),
-        );
-      }
-
-      handleDatabaseError(error);
+    if (
+      isPostgrestError(error) &&
+      error.code === 'P0001' &&
+      isJournalBalancePostRejection(error.message)
+    ) {
+      throw new BadRequestException(error.message);
     }
+
+    handleDatabaseError(error);
   }
 
   async getAccountTrialBalance(

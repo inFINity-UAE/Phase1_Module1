@@ -16,7 +16,6 @@ import { APPROVAL_THRESHOLD } from '../e2e/e2e-company.setup';
 import { JournalEntriesModule } from './journal-entries.module';
 import { JournalEntriesService } from './journal-entries.service';
 import {
-  APPROVAL_RBAC_INTEGRATION_COMPANY_ID,
   ensureApprovalRbacIntegrationCompanyReady,
   INTEGRATION_ACCOUNTANT_ID,
   INTEGRATION_USER_ID,
@@ -26,7 +25,6 @@ const hasSupabase = Boolean(
   process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.SUPABASE_SECRET_KEY,
 );
 
-const COMPANY_ID = APPROVAL_RBAC_INTEGRATION_COMPANY_ID;
 const OWNER_ID = INTEGRATION_USER_ID;
 const ACCOUNTANT_ID = INTEGRATION_ACCOUNTANT_ID;
 
@@ -36,6 +34,8 @@ const ACCOUNTANT_ID = INTEGRATION_ACCOUNTANT_ID;
     let service: JournalEntriesService;
     let companyMembersService: CompanyMembersService;
     let supabase: SupabaseService;
+    /** [feature-spec.md decision #19] Fresh company UUID per run. */
+    let companyId = '';
     const createdEntryIds: string[] = [];
     let periodId = '';
     let expenseAccountId = '';
@@ -55,12 +55,12 @@ const ACCOUNTANT_ID = INTEGRATION_ACCOUNTANT_ID;
       companyMembersService = module.get(CompanyMembersService);
       supabase = module.get(SupabaseService);
 
-      await ensureApprovalRbacIntegrationCompanyReady(supabase);
+      companyId = await ensureApprovalRbacIntegrationCompanyReady(supabase);
 
       const { data: period, error: periodError } = await supabase.client
         .from('accounting_periods')
         .select('id')
-        .eq('company_id', COMPANY_ID)
+        .eq('company_id', companyId)
         .eq('period_start', '2026-01-01')
         .single();
 
@@ -72,7 +72,7 @@ const ACCOUNTANT_ID = INTEGRATION_ACCOUNTANT_ID;
       const { data: accounts, error: accountsError } = await supabase.client
         .from('accounts')
         .select('id, account_number')
-        .eq('company_id', COMPANY_ID)
+        .eq('company_id', companyId)
         .in('account_number', ['1010', '5100']);
 
       if (accountsError || !accounts || accounts.length < 2) {
@@ -99,7 +99,7 @@ const ACCOUNTANT_ID = INTEGRATION_ACCOUNTANT_ID;
     async function createPendingApprovalEntry(): Promise<string> {
       const draft = await service.create(
         {
-          company_id: COMPANY_ID,
+          company_id: companyId,
           period_id: periodId,
           entry_date: '2026-01-20',
           narration: 'RBAC approval probe',

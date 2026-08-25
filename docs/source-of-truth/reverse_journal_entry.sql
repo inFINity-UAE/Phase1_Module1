@@ -77,10 +77,9 @@ begin
     raise exception 'NO_NEXT_OPEN_PERIOD';
   end if;
 
-  select coalesce(max(entry_number), 0) + 1
-    into v_entry_number
-    from journal_entries
-   where company_id = v_original.company_id;
+  -- [race fix] Same company-scoped advisory lock as all other entry inserts.
+  -- Requires allocate_next_entry_number to be applied first.
+  v_entry_number := allocate_next_entry_number(v_original.company_id);
 
   insert into journal_entries (
     company_id,

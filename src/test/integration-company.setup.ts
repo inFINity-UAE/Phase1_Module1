@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto';
 import { SupabaseService } from '../database/supabase.service';
 import {
   ensureCompanyWithCoa,
@@ -7,23 +8,34 @@ import {
 import { CompanyRole } from '../common/enums/company-role.enum';
 import { ensureCompanyMember, testUserEmail } from './company-members.setup';
 
-/** Isolated companies for Supabase integration suites — never share demo ...0002. */
-export const POST_INTEGRATION_COMPANY_ID = '00000000-0000-0000-0000-00000000b001';
-export const YEAR_END_INTEGRATION_COMPANY_ID = '00000000-0000-0000-0000-00000000b002';
-export const AUDIT_LOG_INTEGRATION_COMPANY_ID = '00000000-0000-0000-0000-00000000b003';
-export const REVERSE_INTEGRATION_COMPANY_ID = '00000000-0000-0000-0000-00000000b004';
-export const APPROVAL_RBAC_INTEGRATION_COMPANY_ID = '00000000-0000-0000-0000-00000000b005';
-/** Auth user for integration suites — must not collide with DEMO_COMPANY_ID (...0002). */
+/**
+ * Auth user for integration suites — stable across runs (auth.users), not a company id.
+ * Must not collide with DEMO_COMPANY_ID (...0002).
+ */
 export const INTEGRATION_USER_ID = '00000000-0000-0000-0000-0000000000a2';
-/** Non-Owner/non-Manager member for RBAC negative tests on integration company b005. */
+/** Non-Owner/non-Manager member for RBAC negative tests. */
 export const INTEGRATION_ACCOUNTANT_ID = E2E_ACCOUNTANT_ID;
 
 const INTEGRATION_FISCAL_YEAR = 2026;
 
-async function ensureIntegrationCompanyMember(
+/**
+ * [feature-spec.md decision #19] Shared mint for every integration suite.
+ * Fresh randomUUID per call — never reuse …b001–…b005 or any other fixed company
+ * literal. Old fixed companies are retired untouched (no wipe).
+ */
+export async function mintFreshIntegrationCompany(
   supabase: SupabaseService,
-  companyId: string,
-): Promise<void> {
+  legalNamePrefix: string,
+  options?: {
+    fiscalYear?: number;
+    withAccountant?: boolean;
+  },
+): Promise<string> {
+  const companyId = randomUUID();
+  const fiscalYear = options?.fiscalYear ?? INTEGRATION_FISCAL_YEAR;
+
+  await ensureCompanyWithCoa(supabase, companyId, `${legalNamePrefix} ${companyId}`);
+  await ensureFiscalYearPeriods(supabase, companyId, fiscalYear);
   await ensureCompanyMember(
     supabase,
     companyId,
@@ -31,93 +43,55 @@ async function ensureIntegrationCompanyMember(
     CompanyRole.Owner,
     testUserEmail(INTEGRATION_USER_ID),
   );
+
+  if (options?.withAccountant) {
+    await ensureCompanyMember(
+      supabase,
+      companyId,
+      INTEGRATION_ACCOUNTANT_ID,
+      CompanyRole.Accountant,
+      testUserEmail(INTEGRATION_ACCOUNTANT_ID),
+    );
+  }
+
+  // eslint-disable-next-line no-console
+  console.log(`[integration] fresh company_id=${companyId} (${legalNamePrefix})`);
+  return companyId;
 }
 
+/** @deprecated decision #19 — use mintFreshIntegrationCompany; returns new id each call. */
 export async function ensurePostIntegrationCompanyReady(
   supabase: SupabaseService,
-): Promise<void> {
-  await ensureCompanyWithCoa(
-    supabase,
-    POST_INTEGRATION_COMPANY_ID,
-    'Journal Post Integration Test Company',
-  );
-  await ensureFiscalYearPeriods(supabase, POST_INTEGRATION_COMPANY_ID, INTEGRATION_FISCAL_YEAR);
-  await ensureIntegrationCompanyMember(supabase, POST_INTEGRATION_COMPANY_ID);
+): Promise<string> {
+  return mintFreshIntegrationCompany(supabase, 'Journal Post Integration');
 }
 
+/** @deprecated decision #19 — use mintFreshIntegrationCompany; returns new id each call. */
 export async function ensureYearEndIntegrationCompanyReady(
   supabase: SupabaseService,
-): Promise<void> {
-  await ensureCompanyWithCoa(
-    supabase,
-    YEAR_END_INTEGRATION_COMPANY_ID,
-    'Year-End Closing Integration Test Company',
-  );
-  await ensureFiscalYearPeriods(
-    supabase,
-    YEAR_END_INTEGRATION_COMPANY_ID,
-    INTEGRATION_FISCAL_YEAR,
-  );
-  await ensureIntegrationCompanyMember(supabase, YEAR_END_INTEGRATION_COMPANY_ID);
+): Promise<string> {
+  return mintFreshIntegrationCompany(supabase, 'Year-End Closing Integration');
 }
 
+/** @deprecated decision #19 — use mintFreshIntegrationCompany; returns new id each call. */
 export async function ensureAuditLogIntegrationCompanyReady(
   supabase: SupabaseService,
-): Promise<void> {
-  await ensureCompanyWithCoa(
-    supabase,
-    AUDIT_LOG_INTEGRATION_COMPANY_ID,
-    'Audit Log Integration Test Company',
-  );
-  await ensureFiscalYearPeriods(
-    supabase,
-    AUDIT_LOG_INTEGRATION_COMPANY_ID,
-    INTEGRATION_FISCAL_YEAR,
-  );
-  await ensureIntegrationCompanyMember(supabase, AUDIT_LOG_INTEGRATION_COMPANY_ID);
+): Promise<string> {
+  return mintFreshIntegrationCompany(supabase, 'Audit Log Integration');
 }
 
+/** @deprecated decision #19 — use mintFreshIntegrationCompany; returns new id each call. */
 export async function ensureReverseIntegrationCompanyReady(
   supabase: SupabaseService,
-): Promise<void> {
-  await ensureCompanyWithCoa(
-    supabase,
-    REVERSE_INTEGRATION_COMPANY_ID,
-    'Journal Reverse Integration Test Company',
-  );
-  await ensureFiscalYearPeriods(
-    supabase,
-    REVERSE_INTEGRATION_COMPANY_ID,
-    INTEGRATION_FISCAL_YEAR,
-  );
-  await ensureIntegrationCompanyMember(supabase, REVERSE_INTEGRATION_COMPANY_ID);
+): Promise<string> {
+  return mintFreshIntegrationCompany(supabase, 'Journal Reverse Integration');
 }
 
+/** @deprecated decision #19 — use mintFreshIntegrationCompany; returns new id each call. */
 export async function ensureApprovalRbacIntegrationCompanyReady(
   supabase: SupabaseService,
-): Promise<void> {
-  await ensureCompanyWithCoa(
-    supabase,
-    APPROVAL_RBAC_INTEGRATION_COMPANY_ID,
-    'Approval RBAC Integration Test Company',
-  );
-  await ensureFiscalYearPeriods(
-    supabase,
-    APPROVAL_RBAC_INTEGRATION_COMPANY_ID,
-    INTEGRATION_FISCAL_YEAR,
-  );
-  await ensureCompanyMember(
-    supabase,
-    APPROVAL_RBAC_INTEGRATION_COMPANY_ID,
-    INTEGRATION_USER_ID,
-    CompanyRole.Owner,
-    testUserEmail(INTEGRATION_USER_ID),
-  );
-  await ensureCompanyMember(
-    supabase,
-    APPROVAL_RBAC_INTEGRATION_COMPANY_ID,
-    INTEGRATION_ACCOUNTANT_ID,
-    CompanyRole.Accountant,
-    testUserEmail(INTEGRATION_ACCOUNTANT_ID),
-  );
+): Promise<string> {
+  return mintFreshIntegrationCompany(supabase, 'Approval RBAC Integration', {
+    withAccountant: true,
+  });
 }

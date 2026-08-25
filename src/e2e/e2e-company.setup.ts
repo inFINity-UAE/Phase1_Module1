@@ -187,8 +187,9 @@ export async function ensureCompanyWithCoa(
 }
 
 /**
- * [feature-spec.md decision #18] Mint a fresh random company UUID per e2e run —
+ * [feature-spec.md decision #18 / #19] Mint a fresh random company UUID per e2e run —
  * never reuse …e2e1/…e2e2 or any other fixed id for destructive reset.
+ * Integration suites use the same pattern via mintFreshIntegrationCompany.
  */
 export async function ensureE2eCompanyReady(supabase: SupabaseService): Promise<string> {
   const companyId = randomUUID();
