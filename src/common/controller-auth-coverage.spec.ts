@@ -7,6 +7,7 @@ import { AuditLogController } from '../audit-log/audit-log.controller';
 import { AuditLogService } from '../audit-log/audit-log.service';
 import { SupabaseService } from '../database/supabase.service';
 import { JournalEntriesController } from '../journal-entries/journal-entries.controller';
+import { JournalLinesController } from '../journal-entries/journal-lines.controller';
 import { JournalEntriesService } from '../journal-entries/journal-entries.service';
 import {
   RecurringJournalTemplateLinesController,
@@ -18,8 +19,8 @@ import { JournalEntryCompanyRoleGuard } from '../auth/guards/journal-entry-compa
 import { SupabaseAuthGuard } from '../auth/guards/supabase-auth.guard';
 
 /**
- * [feature-spec.md decision #24] Newly-guarded controllers reject unauthenticated
- * requests (401) and still succeed for a verified Bearer session — same bar as #21.
+ * [feature-spec.md decisions #24/#27] Controllers reject unauthenticated requests (401)
+ * and still succeed for a verified Bearer session — same bar as #21.
  */
 describe('Controller auth coverage (decision #24)', () => {
   let app: INestApplication;
@@ -60,6 +61,10 @@ describe('Controller auth coverage (decision #24)', () => {
       approve: jest.fn(),
       reject: jest.fn(),
       reverse: jest.fn(),
+      createLine: jest.fn().mockImplementation(() => {
+        throw new Error('Not implemented.');
+      }),
+      updateLine: jest.fn().mockResolvedValue({ id: 'ffffffff-ffff-ffff-ffff-ffffffffffff' }),
     };
 
     const recurringService = {
@@ -83,6 +88,7 @@ describe('Controller auth coverage (decision #24)', () => {
       controllers: [
         AccountsController,
         JournalEntriesController,
+        JournalLinesController,
         RecurringJournalTemplatesController,
         RecurringJournalTemplateLinesController,
         AuditLogController,
@@ -181,6 +187,20 @@ describe('Controller auth coverage (decision #24)', () => {
       path: '/recurring-journal-template-lines/eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee',
     },
     { method: 'GET', path: '/audit-log?company_id=cccccccc-cccc-cccc-cccc-cccccccccccc' },
+    {
+      method: 'POST',
+      path: '/journal-lines',
+      body: {
+        journal_entry_id: 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
+        line_number: 1,
+        account_id: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+      },
+    },
+    {
+      method: 'PATCH',
+      path: '/journal-lines/ffffffff-ffff-ffff-ffff-ffffffffffff',
+      body: { debit: 1 },
+    },
   ];
 
   it.each(previouslyUnguardedRoutes)(
@@ -201,6 +221,11 @@ describe('Controller auth coverage (decision #24)', () => {
     { method: 'GET', path: '/recurring-journal-templates' },
     { method: 'POST', path: '/recurring-journal-templates/run-due', body: {} },
     { method: 'GET', path: '/audit-log?company_id=cccccccc-cccc-cccc-cccc-cccccccccccc' },
+    {
+      method: 'PATCH',
+      path: '/journal-lines/ffffffff-ffff-ffff-ffff-ffffffffffff',
+      body: { debit: 1 },
+    },
   ] as const)(
     'authenticated $method $path reaches handler (not 401)',
     async ({ method, path, body }) => {

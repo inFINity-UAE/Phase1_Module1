@@ -15,13 +15,15 @@ import { UpdateRecurringJournalTemplateDto } from '../recurring-journal-template
 import { RunRecurringGenerationDto } from '../recurring-journal-templates/dto/run-recurring-generation.dto';
 import { CreateAccountDto } from '../accounts/dto/create-account.dto';
 import { UpdateAccountDto } from '../accounts/dto/update-account.dto';
+import { CreateJournalLineDto } from '../journal-entries/dto/create-journal-line.dto';
+import { UpdateJournalLineDto } from '../journal-entries/dto/update-journal-line.dto';
 import { QueryAuditLogDto } from '../audit-log/dto/query-audit-log.dto';
 import { AccountCategory } from './enums/account-category.enum';
 import { NormalBalance } from './enums/normal-balance.enum';
 import { RecurrenceFrequency } from './enums/recurrence-frequency.enum';
 
 /**
- * [feature-spec.md decisions #10/#11/#21/#24] Global ValidationPipe whitelist must reject
+ * [feature-spec.md decisions #10/#11/#21/#24/#27] Global ValidationPipe whitelist must reject
  * client-supplied identity/role fields on mutation DTOs — not silently strip them.
  */
 describe('DTO identity whitelist (forbidNonWhitelisted)', () => {
@@ -108,6 +110,14 @@ describe('DTO identity whitelist (forbidNonWhitelisted)', () => {
     normal_balance: NormalBalance.Debit,
   };
 
+  const validJournalLine: Record<string, unknown> = {
+    journal_entry_id: 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
+    line_number: 1,
+    account_id: accountA,
+    debit: 10,
+    credit: 0,
+  };
+
   it.each([
     ['created_by', CreateJournalEntryDto, validCreateJournal],
     ['actor_id', CreateJournalEntryDto, validCreateJournal],
@@ -137,6 +147,11 @@ describe('DTO identity whitelist (forbidNonWhitelisted)', () => {
     ['approved_by', PostJournalEntryDto, {}],
     ['actor_role', ApproveJournalEntryDto, {}],
     ['rejected_by', RejectJournalEntryDto, { rejection_reason: 'incomplete docs' }],
+    ['created_by', CreateJournalLineDto, validJournalLine],
+    ['actor_id', CreateJournalLineDto, validJournalLine],
+    ['updated_by', CreateJournalLineDto, validJournalLine],
+    ['created_by', UpdateJournalLineDto, { debit: 1 }],
+    ['actor_role', UpdateJournalLineDto, { debit: 1 }],
   ] as const)(
     'rejects spoofed %s on %s',
     async (field, dtoClass, validBody) => {

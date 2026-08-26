@@ -4,33 +4,29 @@ NestJS double-entry accounting engine (UAE) backed by Supabase/Postgres.
 
 ## Source of truth (priority order)
 
-1. docs/source-of-truth/Accounting Rules - inFINity.pdf
-2. docs/source-of-truth/schema.sql
-3. docs/source-of-truth/feature-spec.md
+1. `docs/source-of-truth/Accounting Rules - inFINity.pdf`
+2. `docs/source-of-truth/schema.sql`
+3. `docs/source-of-truth/feature-spec.md`
 
 ## Fresh Supabase setup
 
 Apply in the SQL Editor, in order:
 
-1. docs/source-of-truth/schema.sql - full schema, RPCs, grants
-2. docs/source-of-truth/seed_finalized_coa_demo_company_0002.sql - demo COA (...0002)
-3. Optional: docs/source-of-truth/verify_chart_of_accounts.sql - seed checks
-
-If the schema was applied before section 12 Data API grants existed, also run:
-
-- docs/source-of-truth/apply_data_api_grants.sql
+1. `docs/source-of-truth/schema.sql` - full schema, RPCs, grants (§12)
+2. `docs/source-of-truth/seed_finalized_coa_demo_company_0002.sql` - demo COA (...0002)
+3. Optional: `docs/source-of-truth/verify_chart_of_accounts.sql` - seed checks
 
 ## Local app
 
-`ash
+```bash
 cp .env.example .env.local   # set NEXT_PUBLIC_SUPABASE_URL + SUPABASE_SECRET_KEY
 npm install
 npm test
 npm run start:dev
-`
+```
 
 ## Regenerate COA seed from Excel
 
-`ash
+```bash
 python scripts/generate_coa_seed.py
-`
+```

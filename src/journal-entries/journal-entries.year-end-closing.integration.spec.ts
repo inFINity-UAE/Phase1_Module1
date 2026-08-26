@@ -167,8 +167,9 @@ async function resolveImbalanceProbeFiscalYear(
       narration: string,
       entryDate: string,
     ): Promise<string> {
+      // [feature-spec.md decision #28] draft → lines → post. Inserting lines
+      // onto an already-posted parent is rejected by trg_prevent_posted_line_update.
       const entryNumber = await nextEntryNumber();
-      const postedAt = new Date().toISOString();
 
       const { data: entry, error: entryError } = await supabase.client
         .from('journal_entries')
@@ -178,16 +179,15 @@ async function resolveImbalanceProbeFiscalYear(
           period_id: periodId,
           entry_date: entryDate,
           entry_type: JournalEntryType.Manual,
-          status: JournalEntryStatus.Posted,
+          status: JournalEntryStatus.Draft,
           narration,
           created_by: USER_ID,
-          posted_at: postedAt,
         })
         .select('id')
         .single();
 
       if (entryError || !entry) {
-        throw entryError ?? new Error('Failed to insert P&L entry');
+        throw entryError ?? new Error('Failed to insert draft P&L entry');
       }
 
       createdEntryIds.push(entry.id);
@@ -218,6 +218,16 @@ async function resolveImbalanceProbeFiscalYear(
 
       if (linesError) {
         throw linesError;
+      }
+
+      const { error: postError } = await supabase.client
+        .from('journal_entries')
+        .update({ status: JournalEntryStatus.Posted })
+        .eq('id', entry.id)
+        .eq('status', JournalEntryStatus.Draft);
+
+      if (postError) {
+        throw postError;
       }
 
       return entry.id;

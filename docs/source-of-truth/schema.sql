@@ -325,8 +325,8 @@ create trigger trg_enforce_journal_balance_on_post
   before update on journal_entries
   for each row execute function enforce_journal_balance_on_post();
 
--- Immutability: once posted, an entry's lines cannot be edited or deleted,
--- and the entry itself cannot be deleted — only reversed via a new entry.
+-- Immutability: once posted, an entry's lines cannot be added, edited, or
+-- deleted, and the entry itself cannot be deleted — only reversed via a new entry.
 create or replace function prevent_posted_line_mutation()
 returns trigger as $$
 declare
@@ -343,7 +343,7 @@ $$ language plpgsql
    set search_path = public, pg_temp;
 
 create trigger trg_prevent_posted_line_update
-  before update or delete on journal_lines
+  before insert or update or delete on journal_lines
   for each row execute function prevent_posted_line_mutation();
 
 create or replace function prevent_posted_entry_deletion()
@@ -1252,8 +1252,9 @@ create policy company_isolation_members on company_members
 -- only, not base TABLE access. This was discovered via the fresh-DB drift
 -- verification exercise (feature-spec.md §8 decision index) — exactly the
 -- kind of environment-default assumption that check exists to catch.
--- Keep in sync with the standalone apply_data_api_grants.sql for one-shot
--- re-apply on any other live/fresh project.
+-- One-shot re-apply on a live project that missed this block: run the
+-- entire §12 grant section below in the SQL Editor (do not maintain a
+-- duplicate standalone grants file).
 
 grant usage on schema public to service_role;
 

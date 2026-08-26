@@ -348,6 +348,88 @@ Module 1.6 RBAC territory or needs its own short design pass — flagged
 for the next security review rather than left silently unnoted.
 *(Decision #25)*
 
+### 5.8 Journal-lines controller — residual auth-guard gap after #24
+
+Decision #24 closed the broader unguarded-controller surface, but
+`JournalLinesController` (`/journal-lines` POST create, PATCH `:id`) is a
+separate Nest controller — registered in `JournalEntriesModule` alongside
+`JournalEntriesController`, not a route inside it — and was **not**
+included in that pass. It had no `SupabaseAuthGuard` at all, at either
+the controller or route level.
+
+**Audit outcome (same checklist as #21/#24):**
+- Guard: missing → fixed with controller-level
+  `@UseGuards(SupabaseAuthGuard)`.
+- DTO identity: `CreateJournalLineDto` / `UpdateJournalLineDto` never
+  accepted `created_by` / `updated_by` / actor fields — nothing to strip;
+  global `whitelist` + `forbidNonWhitelisted` already rejects any spoofed
+  field.
+- Posted-line mutation → clean API error: **OK for update/delete** —
+  `prevent_posted_line_mutation` raises `P0001`, mapped via
+  `handleDatabaseError` to a `BadRequestException`. `createLine` remains
+  a stub (`NotImplementedException`).
+
+**Flagged, not fixed in this pass:** `prevent_posted_line_mutation` only
+fires `BEFORE UPDATE OR DELETE` on `journal_lines` — it does **not** fire
+on `INSERT`. A new line inserted directly onto an already-`posted`
+journal entry is not currently blocked by that trigger. This is harmless
+today only because `createLine` is stubbed; it becomes a live gap the
+moment `createLine` is implemented without the trigger being extended
+first. No schema change made in this decision — flagged for a dedicated
+follow-up before `createLine` is built.
+
+**Verification:** full suite 3x consecutive clean (16 suites / 136 tests)
+on project `cuqnkorfhzydxwzkbjlv`. *(Decision #27)*
+
+### 5.9 Posted-line INSERT immutability — trigger extension (#28)
+
+Closed the gap §5.8 flagged. `trg_prevent_posted_line_update` fired only
+on `UPDATE`/`DELETE` — a direct INSERT onto an already-`posted` parent
+was not blocked. Closed **before** `createLine` is implemented, per §5.8's
+recommendation.
+
+**Schema change:** `prevent_posted_line_mutation()` itself is unchanged
+(already uses `coalesce(new.journal_entry_id, old.journal_entry_id)`,
+generic enough to cover INSERT with no rewrite). Trigger extended:
+```sql
+create trigger trg_prevent_posted_line_update
+  before insert or update or delete on journal_lines
+  for each row execute function prevent_posted_line_mutation();
+```
+Applied to both `schema.sql` and the live DB (`cuqnkorfhzydxwzkbjlv`);
+confirmed matching via `pg_get_triggerdef` — Postgres normalizes the
+event-list display order alphabetically (`INSERT OR DELETE OR UPDATE`),
+which is cosmetic only, not a drift.
+
+**Regression test:** direct PostgREST `journal_lines` insert (bypassing
+the stubbed `createLine` endpoint) against a `posted` parent, in
+`journal-entries.post.integration.spec.ts` — expects `P0001` with the
+same message as the existing update/delete rejection.
+
+**Incidental fix required:** several integration-test helpers seeded
+`posted` journal entries via "insert entry as posted → then insert
+lines" — a sequence the new trigger correctly makes illegal, since it
+was always relying on the same loophole this decision closes. Rewritten
+to the only valid sequence: create as `draft` → insert lines → post.
+
+**Flagged, not fixed in this pass:** a transient `JWT issued at future`
+auth error surfaced under parallel Jest workers during verification.
+Worked around for this pass via auth-retry logic plus running the
+verification suite with `--runInBand` (serial, not parallel) — this
+avoids the symptom, it does not fix the underlying clock-skew/token-
+issuance race. Normal parallel test runs may still intermittently hit
+this. Needs its own investigation (likely a small allowed-clock-skew
+tolerance on token issuance, or serializing auth-token acquisition in
+test setup) — not addressed here to avoid scope creep on a trigger fix.
+
+**Out of scope:** `createLine` implementation.
+
+**Verification:** full suite 3x consecutive clean (16 suites / 137 tests
+— 136 prior + the new INSERT-immutability regression test) on project
+`cuqnkorfhzydxwzkbjlv`, run serially (`--runInBand`) per the JWT note
+above. Live `pg_get_triggerdef` confirmed matching `schema.sql`.
+*(Decision #28)*
+
 ---
 
 ## 6. Concurrency — Advisory-Lock RPCs
@@ -445,6 +527,29 @@ data. This is the first time this project has had actual proof, not
 inference, that `schema.sql` and a live database match from a cold start.
 *(Decision #26)*
 
+### 7.2 Journal-lines controller auth audit — status
+
+**Closed 2026-08-25.** Same-day follow-up to §7.1: `JournalLinesController`
+was found to have no `SupabaseAuthGuard` coverage at all, missed by
+decision #24's pass because it's a separate controller from
+`JournalEntriesController`. Fixed with the identical controller-level
+guard pattern as #21/#24. Full suite (16 suites / 136 tests — 128 prior +
+new auth/whitelist coverage for `/journal-lines`) run 3x consecutive
+clean against `cuqnkorfhzydxwzkbjlv`. See §5.8 for the full audit
+breakdown and the flagged (not yet fixed) `prevent_posted_line_mutation`
+INSERT gap. *(Decision #27)*
+
+### 7.3 Posted-line INSERT trigger gap — status
+
+**Closed 2026-08-25.** Same-day follow-up to §7.2: the
+`prevent_posted_line_mutation` INSERT gap flagged in §5.8 is fixed —
+trigger extended to `BEFORE INSERT OR UPDATE OR DELETE`, applied to both
+`schema.sql` and the live DB, confirmed matching via `pg_get_triggerdef`.
+Full suite (16 suites / 137 tests — 136 prior + new INSERT-immutability
+regression test) run 3x consecutive clean, serially (`--runInBand`) to
+avoid a separately-flagged transient JWT clock-skew issue under parallel
+workers (see §5.9 — that issue itself remains open). *(Decision #28)*
+
 ---
 
 ## 8. Decision Log Index
@@ -480,3 +585,5 @@ topical section referenced.
 | 24 | 2026-08-24 | Auth-guard gap found broader than #21 covered — entire `accounts` and `audit-log` controllers, most `journal-entries` read routes, most `recurring-journal-templates` routes all unguarded; fix takes priority over stub completion | §5.6 |
 | 25 | 2026-08-24 | `companies` has no RLS policy — safe today (service_role-only grants) but documented as a latent gap, not fixed yet | §5.7 |
 | 26 | 2026-08-25 | Fresh-DB drift verification closed — 3x consecutive clean full suite (128 tests) on a fresh Supabase project | §7.1 |
+| 27 | 2026-08-25 | `JournalLinesController` had no auth guard after #24 — fixed with controller-level `SupabaseAuthGuard` (same pattern as #21); no identity-field DTO changes needed; `prevent_posted_line_mutation` INSERT gap flagged, not fixed | §5.8, §7.2 |
+| 28 | 2026-08-25 | `prevent_posted_line_mutation` extended to fire on INSERT, closing the gap #27 flagged; applied to `schema.sql` and live DB, confirmed matching; test helpers relying on the now-illegal "insert as posted" sequence rewritten to draft→lines→post; transient parallel-worker JWT clock-skew issue found and flagged (not fixed) | §5.9, §7.3 |

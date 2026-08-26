@@ -6,7 +6,7 @@ alwaysApply: true
 This project implements a UAE-compliant double-entry accounting engine.
 
 SOURCE OF TRUTH — in this priority order:
-1. /docs/source-of-truth/Accounting_Rules_-_inFINity.pdf
+1. /docs/source-of-truth/Accounting Rules - inFINity.pdf
 2. /docs/source-of-truth/schema.sql
 3. /docs/source-of-truth/feature-spec.md (Module 1.1.A feature list)
 

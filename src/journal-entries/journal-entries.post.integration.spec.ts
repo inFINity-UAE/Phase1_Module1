@@ -93,10 +93,11 @@ const USER_ID = INTEGRATION_USER_ID;
       amount: number,
       narration: string,
     ): Promise<string> {
+      // [feature-spec.md decision #28] draft → lines → post. Inserting lines
+      // onto an already-posted parent is rejected by trg_prevent_posted_line_update.
       const periodId = await getPeriodId();
       const [accA, accB] = await getTwoAssetAccounts();
       const entryNumber = await nextEntryNumber();
-      const postedAt = new Date().toISOString();
 
       const { data: entry, error: entryError } = await supabase.client
         .from('journal_entries')
@@ -106,16 +107,15 @@ const USER_ID = INTEGRATION_USER_ID;
           period_id: periodId,
           entry_date: '2026-01-15',
           entry_type: JournalEntryType.Manual,
-          status: JournalEntryStatus.Posted,
+          status: JournalEntryStatus.Draft,
           narration,
           created_by: USER_ID,
-          posted_at: postedAt,
         })
         .select('id')
         .single();
 
       if (entryError || !entry) {
-        throw entryError ?? new Error('Failed to insert posted entry');
+        throw entryError ?? new Error('Failed to insert draft entry');
       }
 
       createdEntryIds.push(entry.id);
@@ -141,6 +141,16 @@ const USER_ID = INTEGRATION_USER_ID;
         throw linesError;
       }
 
+      const { error: postError } = await supabase.client
+        .from('journal_entries')
+        .update({ status: JournalEntryStatus.Posted })
+        .eq('id', entry.id)
+        .eq('status', JournalEntryStatus.Draft);
+
+      if (postError) {
+        throw postError;
+      }
+
       return entry.id;
     }
 
@@ -164,6 +174,35 @@ const USER_ID = INTEGRATION_USER_ID;
       await expect(service.updateLine(lines.id, { debit: 999 })).rejects.toThrow(
         /Cannot modify lines of a posted journal entry/i,
       );
+    });
+
+    it('blocks inserting a line on a posted journal entry (DB trigger)', async () => {
+      const entryId = await insertPostedBalancedEntry(85, 'integration posted insert block');
+      const [, accB] = await getTwoAssetAccounts();
+      const { data: existingLines, error: countError } = await supabase.client
+        .from('journal_lines')
+        .select('line_number')
+        .eq('journal_entry_id', entryId)
+        .order('line_number', { ascending: false })
+        .limit(1);
+
+      if (countError || !existingLines?.length) {
+        throw countError ?? new Error('Existing lines not found');
+      }
+
+      const nextLineNumber = existingLines[0].line_number + 1;
+
+      const { error: insertError } = await supabase.client.from('journal_lines').insert({
+        journal_entry_id: entryId,
+        line_number: nextLineNumber,
+        account_id: accB,
+        debit: 0,
+        credit: 1,
+      });
+
+      expect(insertError).not.toBeNull();
+      expect(insertError?.code).toBe('P0001');
+      expect(insertError?.message).toMatch(/Cannot modify lines of a posted journal entry/i);
     });
 
     it('blocks deleting a line on a posted journal entry (DB trigger)', async () => {
