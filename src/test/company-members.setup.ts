@@ -4,6 +4,11 @@ import { ActorContext } from '../auth/actor-context';
 
 const TEST_USER_PASSWORD = 'infinity-test-user-password';
 
+/** Password used by ensureAuthUser — exported for authenticated-client RLS probes. */
+export function testUserPassword(): string {
+  return TEST_USER_PASSWORD;
+}
+
 function errorMessage(error: unknown): string {
   if (typeof error === 'object' && error !== null && 'message' in error) {
     return String((error as { message: unknown }).message);

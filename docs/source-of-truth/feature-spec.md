@@ -333,20 +333,16 @@ guard pattern as #21, across every controller listed above, before
 treating any remaining stub-endpoint work as the next priority.
 *(Decision #24)*
 
-### 5.7 `companies` table has no RLS policy — documented, not fixed
+### 5.7 `companies` table RLS — history
 
-`companies` itself has no row-level security policy (§8's RLS section
-covers every *other* multi-tenant table). This is currently safe only
-because `service_role` — which bypasses RLS entirely — is the sole role
-with grants on it (§5.1, §5.5). It's a **latent gap, not an active one**:
-if `anon` or `authenticated` are ever granted table access (accidentally,
-or for a legitimate future feature), `companies` would have zero tenant
-isolation, unlike every other table in this schema. Not fixed now,
-because a real fix means designing a `companies`-level RLS policy
-(plausibly membership-based via `company_members`), which is either
-Module 1.6 RBAC territory or needs its own short design pass — flagged
-for the next security review rather than left silently unnoted.
-*(Decision #25)*
+`companies` originally had no row-level security policy at all (§8's RLS
+pattern covers every *other* multi-tenant table). It was safe only
+because `service_role` — which bypasses RLS entirely — was the sole role
+with grants on it (§5.1, §5.5): a **latent gap**, not an active one, but
+one grant-configuration change away from a real cross-tenant leak.
+Documented rather than fixed at the time it was found, since a real fix
+needed a short design pass rather than a quick patch. *(Decision #25;
+closed by decision #29, §5.10.)*
 
 ### 5.8 Journal-lines controller — residual auth-guard gap after #24
 
@@ -429,6 +425,68 @@ test setup) — not addressed here to avoid scope creep on a trigger fix.
 `cuqnkorfhzydxwzkbjlv`, run serially (`--runInBand`) per the JWT note
 above. Live `pg_get_triggerdef` confirmed matching `schema.sql`.
 *(Decision #28)*
+
+### 5.10 `companies` RLS membership policy — closes §5.7 (#29)
+
+Closes the gap §5.7 documented. Added `company_isolation_companies`,
+membership-based via `company_members` / `auth.uid()` — deliberately
+**not** `current_setting('app.current_company_id')`, since that variable
+scopes an already-chosen company for a request and can't be used to
+isolate the `companies` table itself (the query against `companies` is
+what determines which company is in scope, so the same variable can't
+also gate it without being circular).
+
+**Policy DDL:**
+```sql
+create or replace function is_company_member(p_company_id uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public, pg_temp
+as $$
+  select exists (
+    select 1
+      from company_members
+     where company_id = p_company_id
+       and user_id = auth.uid()
+  );
+$$;
+
+alter table companies enable row level security;
+
+create policy company_isolation_companies on companies
+  using (is_company_member(id));
+
+grant select on public.companies to authenticated;
+```
+
+`is_company_member()` is `SECURITY DEFINER` specifically so the
+membership check itself isn't blocked by `company_isolation_members` (the
+existing RLS policy on `company_members`, left unchanged) — without this,
+the policy would need to read a table it doesn't have permission to read
+in order to decide permission, which doesn't resolve. Grant is
+**SELECT-only** to `authenticated`; `anon` remains fully ungated; all
+writes and every other table remain `service_role`-only per §5.1/§5.5 —
+this policy protects a hypothetical future state (if `anon`/`authenticated`
+ever get broader table access), not current backend behavior, since the
+Nest backend always queries as `service_role` and bypasses RLS entirely
+today.
+
+**Live apply:** required via Supabase SQL Editor (no automated migration
+runner in this project, consistent with #28's precedent) —
+`docs/source-of-truth/apply_companies_rls.sql`; `schema.sql` §11/§12
+updated to match.
+
+**Regression test:** `companies.rls.integration.spec.ts` — real JWTs, not
+service_role: `anon` → `42501`; `authenticated` → sees only their member
+company, not others; `service_role` → sees both (baseline behavior,
+unaffected).
+
+**Verification:** baseline 16 suites / 137 tests clean → post-apply 3x
+consecutive clean, **17 suites / 140 tests** (`--runInBand`), on project
+`cuqnkorfhzydxwzkbjlv`. Backend Nest paths confirmed unchanged.
+*(Decision #29)*
 
 ---
 
@@ -550,6 +608,17 @@ regression test) run 3x consecutive clean, serially (`--runInBand`) to
 avoid a separately-flagged transient JWT clock-skew issue under parallel
 workers (see §5.9 — that issue itself remains open). *(Decision #28)*
 
+### 7.4 `companies` RLS gap — status
+
+**Closed 2026-08-25.** The latent gap documented in §5.7/decision #25 —
+`companies` had no RLS policy at all — is fixed via
+`company_isolation_companies` (§5.10). Verified with real (non-
+service_role) JWTs: `anon` rejected with `42501`, `authenticated` scoped
+to member companies only, `service_role` unaffected. Full suite (17
+suites / 140 tests — 137 prior + new `companies.rls.integration.spec.ts`)
+run 3x consecutive clean, serially, on `cuqnkorfhzydxwzkbjlv`.
+*(Decision #29)*
+
 ---
 
 ## 8. Decision Log Index
@@ -587,3 +656,4 @@ topical section referenced.
 | 26 | 2026-08-25 | Fresh-DB drift verification closed — 3x consecutive clean full suite (128 tests) on a fresh Supabase project | §7.1 |
 | 27 | 2026-08-25 | `JournalLinesController` had no auth guard after #24 — fixed with controller-level `SupabaseAuthGuard` (same pattern as #21); no identity-field DTO changes needed; `prevent_posted_line_mutation` INSERT gap flagged, not fixed | §5.8, §7.2 |
 | 28 | 2026-08-25 | `prevent_posted_line_mutation` extended to fire on INSERT, closing the gap #27 flagged; applied to `schema.sql` and live DB, confirmed matching; test helpers relying on the now-illegal "insert as posted" sequence rewritten to draft→lines→post; transient parallel-worker JWT clock-skew issue found and flagged (not fixed) | §5.9, §7.3 |
+| 29 | 2026-08-25 | `companies` had no RLS at all (#25) — closed with membership-based `company_isolation_companies` policy via `company_members`/`auth.uid()`, SELECT-only grant to `authenticated`; verified with real anon/authenticated/service_role JWTs; backend paths unchanged | §5.10, §7.4 |

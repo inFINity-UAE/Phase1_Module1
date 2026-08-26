@@ -493,9 +493,10 @@ create trigger trg_log_journal_entry_change
 -- ============================================================================
 -- Assumes the app sets `request.jwt.claims.company_id` (Supabase convention)
 -- or an equivalent session variable per authenticated request.
--- [feature-spec.md decision #25] NOTE: `companies` itself has no RLS policy
--- below — see §12's grant block and decision #25 for why that's currently
--- safe but flagged as a latent gap, not an oversight.
+-- [feature-spec.md decision #29] `companies` RLS is membership-based (not
+-- `app.current_company_id`) and lives in §11 after `company_members` exists —
+-- a company-scoped session variable cannot isolate the table that establishes
+-- company scope in the first place.
 
 alter table accounts enable row level security;
 alter table journal_entries enable row level security;
@@ -1241,6 +1242,45 @@ alter table company_members enable row level security;
 create policy company_isolation_members on company_members
   using (company_id = (select current_setting('app.current_company_id', true))::uuid);
 
+-- [feature-spec.md decision #29] Membership-based RLS on `companies` itself.
+-- Unlike every other company_isolation_* policy, this must NOT use
+-- current_setting('app.current_company_id'): that variable is set AFTER the
+-- caller already knows which company they are acting as. Listing/acting on
+-- company rows is gated by actual company_members membership (auth.uid()).
+--
+-- is_company_member is SECURITY DEFINER so the exists-check can read
+-- company_members without being blocked by company_isolation_members (which
+-- still keys off app.current_company_id — a session variable that is unset
+-- when the query under evaluation IS the companies table). Do not weaken
+-- company_isolation_members; this helper is the scoped exception.
+create or replace function is_company_member(p_company_id uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public, pg_temp
+as $$
+  select exists (
+    select 1
+      from company_members
+     where company_id = p_company_id
+       and user_id = auth.uid()
+  );
+$$;
+
+revoke all on function is_company_member(uuid) from public;
+-- Roles subject to RLS must EXECUTE this helper when the companies policy
+-- is evaluated — an intentional exception to §5.1's service_role-only
+-- function grant checklist (decision #10 / #29).
+grant execute on function is_company_member(uuid) to anon;
+grant execute on function is_company_member(uuid) to authenticated;
+grant execute on function is_company_member(uuid) to service_role;
+
+alter table companies enable row level security;
+
+create policy company_isolation_companies on companies
+  using (is_company_member(id));
+
 -- ============================================================================
 -- 12. DATA API GRANTS (service_role / sb_secret_*)
 -- ============================================================================
@@ -1262,22 +1302,25 @@ grant select, insert, update, delete on all tables in schema public to service_r
 grant usage, select on all sequences in schema public to service_role;
 grant select on public.v_trial_balance to service_role;
 
+-- [feature-spec.md decision #29] SELECT-only for authenticated on companies
+-- so membership RLS is enforceable (and testable) when a user JWT hits the
+-- Data API. Writes stay service_role-only. anon remains ungated - no grant.
+-- All other tables remain service_role-only per section 5.1 / decision #10.
+grant select on public.companies to authenticated;
+
 alter default privileges in schema public
   grant select, insert, update, delete on tables to service_role;
 alter default privileges in schema public
   grant usage, select on sequences to service_role;
 
 -- ============================================================================
--- END OF SCHEMA — Module 1.1.A complete (all 14 features, Phase A/B/C).
+-- END OF SCHEMA - Module 1.1.A complete (all 14 features, Phase A/B/C).
 -- Next schema-affecting work belongs to a later module, not this file:
---   • journal_approvals (multi-approver audit trail, if ever needed beyond
+--   - journal_approvals (multi-approver audit trail, if ever needed beyond
 --     the current single-Owner-approval model)
---   • year_end_closing_runs (if a dedicated run-tracking table is ever
+--   - year_end_closing_runs (if a dedicated run-tracking table is ever
 --     needed beyond the audit_log + journal_entries.entry_type record)
---   • FTA-specific compliance tables (VAT 201 snapshots, CT computations) —
+--   - FTA-specific compliance tables (VAT 201 snapshots, CT computations) -
 --     out of scope for Module 1.1.A, belongs to whichever module handles
 --     VAT/CT filing
---   • companies-level RLS policy, if `anon`/`authenticated` are ever
---     granted table access in the future (see decision #25 — not needed
---     today since only service_role, which bypasses RLS, has grants)
 -- ============================================================================
