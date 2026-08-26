@@ -1,8 +1,13 @@
 import { Injectable } from '@nestjs/common';
 import { PeriodStatus } from '../common/enums/period-status.enum';
+import { JournalEntryStatus } from '../common/enums/journal-entry-status.enum';
 import { SupabaseService } from '../database/supabase.service';
 import { AccountingPeriod } from './entities/accounting-period.entity';
-import { AccountingPeriodsRepository } from './accounting-periods.repository';
+import {
+  AccountingPeriodsRepository,
+  CreateAccountingPeriodRecord,
+  UpdateAccountingPeriodRecord,
+} from './accounting-periods.repository';
 
 @Injectable()
 export class SupabaseAccountingPeriodsRepository implements AccountingPeriodsRepository {
@@ -20,6 +25,102 @@ export class SupabaseAccountingPeriodsRepository implements AccountingPeriodsRep
     }
 
     return data as AccountingPeriod | null;
+  }
+
+  async findByCompanyId(companyId: string): Promise<AccountingPeriod[]> {
+    const { data, error } = await this.supabase.client
+      .from('accounting_periods')
+      .select('*')
+      .eq('company_id', companyId)
+      .order('period_start', { ascending: true });
+
+    if (error) {
+      throw error;
+    }
+
+    return (data ?? []) as AccountingPeriod[];
+  }
+
+  async create(record: CreateAccountingPeriodRecord): Promise<AccountingPeriod> {
+    const { data, error } = await this.supabase.client
+      .from('accounting_periods')
+      .insert({
+        company_id: record.company_id,
+        period_start: record.period_start,
+        period_end: record.period_end,
+        fiscal_year: record.fiscal_year,
+        // status defaults to 'open' in schema.sql — do not set from client
+      })
+      .select()
+      .single();
+
+    if (error) {
+      throw error;
+    }
+
+    return data as AccountingPeriod;
+  }
+
+  async update(id: string, patch: UpdateAccountingPeriodRecord): Promise<AccountingPeriod> {
+    const { data, error } = await this.supabase.client
+      .from('accounting_periods')
+      .update(patch)
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (error) {
+      throw error;
+    }
+
+    return data as AccountingPeriod;
+  }
+
+  /**
+   * [feature-spec.md decision #30] Overlap = period_start < candidateEnd AND
+   * period_end > candidateStart. Schema only has unique(company_id, period_start,
+   * period_end) — exact duplicates — not a GiST/exclusion overlap constraint.
+   */
+  async hasOverlappingPeriod(
+    companyId: string,
+    periodStart: string,
+    periodEnd: string,
+    excludePeriodId?: string,
+  ): Promise<boolean> {
+    let query = this.supabase.client
+      .from('accounting_periods')
+      .select('id')
+      .eq('company_id', companyId)
+      .lt('period_start', periodEnd)
+      .gt('period_end', periodStart)
+      .limit(1);
+
+    if (excludePeriodId) {
+      query = query.neq('id', excludePeriodId);
+    }
+
+    const { data, error } = await query;
+
+    if (error) {
+      throw error;
+    }
+
+    return (data?.length ?? 0) > 0;
+  }
+
+  async hasPostedJournalActivity(periodId: string): Promise<boolean> {
+    const { data, error } = await this.supabase.client
+      .from('journal_entries')
+      .select('id')
+      .eq('period_id', periodId)
+      .eq('status', JournalEntryStatus.Posted)
+      .limit(1);
+
+    if (error) {
+      throw error;
+    }
+
+    return (data?.length ?? 0) > 0;
   }
 
   /**

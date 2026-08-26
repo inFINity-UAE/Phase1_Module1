@@ -10,6 +10,7 @@ import {
 } from '../journal-entries/dto/journal-entry-approval.dto';
 import { SoftCloseAccountingPeriodDto } from '../accounting-periods/dto/soft-close-accounting-period.dto';
 import { CreateAccountingPeriodDto } from '../accounting-periods/dto/create-accounting-period.dto';
+import { UpdateAccountingPeriodDto } from '../accounting-periods/dto/update-accounting-period.dto';
 import { CreateRecurringJournalTemplateDto } from '../recurring-journal-templates/dto/create-recurring-journal-template.dto';
 import { UpdateRecurringJournalTemplateDto } from '../recurring-journal-templates/dto/update-recurring-journal-template.dto';
 import { RunRecurringGenerationDto } from '../recurring-journal-templates/dto/run-recurring-generation.dto';
@@ -135,6 +136,10 @@ describe('DTO identity whitelist (forbidNonWhitelisted)', () => {
     ['closed_by', CreateAccountingPeriodDto, validPeriodCreate],
     ['soft_closed_by', CreateAccountingPeriodDto, validPeriodCreate],
     ['reopened_by', CreateAccountingPeriodDto, validPeriodCreate],
+    ['status', CreateAccountingPeriodDto, validPeriodCreate],
+    ['status', UpdateAccountingPeriodDto, { fiscal_year: 2027 }],
+    ['company_id', UpdateAccountingPeriodDto, { fiscal_year: 2027 }],
+    ['closed_by', UpdateAccountingPeriodDto, { fiscal_year: 2027 }],
     ['created_by', CreateRecurringJournalTemplateDto, validRecurring],
     ['actor_id', CreateRecurringJournalTemplateDto, validRecurring],
     ['created_by', UpdateRecurringJournalTemplateDto, { template_name: 'x' }],

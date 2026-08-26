@@ -3,6 +3,8 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { AddressInfo } from 'net';
 import { AccountsController } from '../accounts/accounts.controller';
 import { AccountsService } from '../accounts/accounts.service';
+import { AccountingPeriodsController } from '../accounting-periods/accounting-periods.controller';
+import { AccountingPeriodsService } from '../accounting-periods/accounting-periods.service';
 import { AuditLogController } from '../audit-log/audit-log.controller';
 import { AuditLogService } from '../audit-log/audit-log.service';
 import { SupabaseService } from '../database/supabase.service';
@@ -39,6 +41,14 @@ describe('Controller auth coverage (decision #24)', () => {
       update: jest.fn().mockResolvedValue({ id: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa' }),
       deactivate: jest.fn().mockResolvedValue({ id: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa' }),
       remove: jest.fn().mockResolvedValue(undefined),
+    };
+
+    const accountingPeriodsService = {
+      create: jest.fn().mockResolvedValue({ id: '22222222-2222-2222-2222-222222222222' }),
+      findAll: jest.fn().mockResolvedValue([]),
+      findOne: jest.fn().mockResolvedValue({ id: '22222222-2222-2222-2222-222222222222' }),
+      update: jest.fn().mockResolvedValue({ id: '22222222-2222-2222-2222-222222222222' }),
+      softClose: jest.fn().mockResolvedValue({ id: '22222222-2222-2222-2222-222222222222' }),
     };
 
     const journalEntriesService = {
@@ -87,6 +97,7 @@ describe('Controller auth coverage (decision #24)', () => {
     const module: TestingModule = await Test.createTestingModule({
       controllers: [
         AccountsController,
+        AccountingPeriodsController,
         JournalEntriesController,
         JournalLinesController,
         RecurringJournalTemplatesController,
@@ -97,6 +108,7 @@ describe('Controller auth coverage (decision #24)', () => {
         SupabaseAuthGuard,
         JournalEntryCompanyRoleGuard,
         { provide: AccountsService, useValue: accountsService },
+        { provide: AccountingPeriodsService, useValue: accountingPeriodsService },
         { provide: JournalEntriesService, useValue: journalEntriesService },
         { provide: RecurringJournalTemplatesService, useValue: recurringService },
         { provide: AuditLogService, useValue: auditLogService },
@@ -156,6 +168,22 @@ describe('Controller auth coverage (decision #24)', () => {
     { method: 'GET', path: '/accounts/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa' },
     { method: 'POST', path: '/accounts', body: {} },
     { method: 'PATCH', path: '/accounts/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa/deactivate' },
+    {
+      method: 'POST',
+      path: '/accounting-periods',
+      body: {
+        company_id: 'cccccccc-cccc-cccc-cccc-cccccccccccc',
+        period_start: '2026-01-01',
+        period_end: '2026-01-31',
+        fiscal_year: 2026,
+      },
+    },
+    { method: 'GET', path: '/accounting-periods?company_id=cccccccc-cccc-cccc-cccc-cccccccccccc' },
+    {
+      method: 'PATCH',
+      path: '/accounting-periods/22222222-2222-2222-2222-222222222222',
+      body: { fiscal_year: 2027 },
+    },
     { method: 'GET', path: '/journal-entries' },
     { method: 'GET', path: '/journal-entries/bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb' },
     { method: 'GET', path: '/journal-entries/bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb/attachments' },
@@ -214,6 +242,25 @@ describe('Controller auth coverage (decision #24)', () => {
 
   it.each([
     { method: 'GET', path: '/accounts' },
+    {
+      method: 'GET',
+      path: '/accounting-periods?company_id=cccccccc-cccc-cccc-cccc-cccccccccccc',
+    },
+    {
+      method: 'POST',
+      path: '/accounting-periods',
+      body: {
+        company_id: 'cccccccc-cccc-cccc-cccc-cccccccccccc',
+        period_start: '2026-01-01',
+        period_end: '2026-01-31',
+        fiscal_year: 2026,
+      },
+    },
+    {
+      method: 'PATCH',
+      path: '/accounting-periods/22222222-2222-2222-2222-222222222222',
+      body: { fiscal_year: 2027 },
+    },
     {
       method: 'GET',
       path: '/journal-entries/bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb/attachments',

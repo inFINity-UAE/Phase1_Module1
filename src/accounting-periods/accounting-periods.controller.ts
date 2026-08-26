@@ -1,4 +1,14 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  ParseUUIDPipe,
+  Patch,
+  Post,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
 import { AuthenticatedUser } from '../auth/authenticated-user';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { SupabaseAuthGuard } from '../auth/guards/supabase-auth.guard';
@@ -8,11 +18,11 @@ import { UpdateAccountingPeriodDto } from './dto/update-accounting-period.dto';
 import { SoftCloseAccountingPeriodDto } from './dto/soft-close-accounting-period.dto';
 
 /**
- * [feature-spec.md decisions #10/#11] Every route requires an authenticated
- * session. soft_closed_by / closed_by / reopened_by are never taken from the
- * body — soft-close uses @CurrentUser().id. Hard-close and reopen HTTP
- * endpoints are not built yet (schema columns reserved; reopen_* is only
- * written via journal post soft-closed override logging).
+ * [feature-spec.md decisions #10/#11/#21/#30] Every route requires an authenticated
+ * session (controller-level guard). soft_closed_by / closed_by / reopened_by are
+ * never taken from the body — soft-close uses @CurrentUser().id. Hard-close and
+ * reopen HTTP endpoints are not built yet. Create/list/update use company_id from
+ * body/query like accounts/journals (AuthenticatedUser has no company_id).
  */
 @Controller('accounting-periods')
 @UseGuards(SupabaseAuthGuard)
@@ -25,8 +35,8 @@ export class AccountingPeriodsController {
   }
 
   @Get()
-  findAll() {
-    return this.accountingPeriodsService.findAll();
+  findAll(@Query('company_id') companyId?: string) {
+    return this.accountingPeriodsService.findAll(companyId ?? '');
   }
 
   @Get(':id')

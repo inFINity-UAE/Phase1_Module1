@@ -193,6 +193,11 @@ describe('JournalEntriesService', () => {
 
     periodsRepository = {
       findById: jest.fn(),
+      findByCompanyId: jest.fn(),
+      create: jest.fn(),
+      update: jest.fn(),
+      hasOverlappingPeriod: jest.fn(),
+      hasPostedJournalActivity: jest.fn(),
       softClose: jest.fn(),
       logSoftClosedPostingOverride: jest.fn(),
     };

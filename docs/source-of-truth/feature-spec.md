@@ -193,6 +193,52 @@ double-transfer. A second `year_end_closing` entry for the same
 company + fiscal year is rejected outright, with no partial cleanup
 attempted. *(Decision #4; RPC enforcement in §6)*
 
+### 4.5 Period create / list / update (#30)
+
+`accounting_periods` columns, per `schema.sql`: `company_id`,
+`period_start`, `period_end`, `fiscal_year`, `status` (`open` /
+`soft_closed` / `closed`, default `open`), plus soft-close/close/reopen
+actor+timestamp columns and `reopen_reason` — there is no period
+label/number column.
+
+- **Create:** accepts `company_id`, `period_start`, `period_end`,
+  `fiscal_year` only; `status` is never client-settable, always the DB
+  default (`open`). Rejects overlapping date ranges for the same company.
+- **List:** requires `company_id` as a query param (matching the existing
+  accounts/journals list precedent — `AuthenticatedUser` carries no
+  implicit single company), returned in chronological order.
+- **Update:** editable fields are `period_start`, `period_end`,
+  `fiscal_year` only — `status` and `company_id` are rejected by DTO
+  whitelisting. Soft-close (§5.3) remains the **only** path for status
+  transitions; this endpoint can never open/close a period. Blocked
+  entirely if the period's status is not `open`, or if any `posted`
+  journal entry already references it.
+- **Hard-close, reopen, and the close-checklist feature remain out of
+  scope** — schema-reserved, unwired, unchanged by this decision.
+
+**Enforcement layer:** `schema.sql` has `unique(company_id, period_start,
+period_end)` (exact-match only) and `check(period_end > period_start)`,
+but **no overlap-exclusion constraint or trigger**. Both the overlap
+rejection and the posted-activity edit block are enforced in the service
+layer only, not the database — per this project's standing rule (§5.1
+lineage: don't add a schema/DB change without an explicit ask), this was
+deliberately left as an app-layer check rather than a new constraint.
+
+**Flagged, not fixed:** because overlap rejection is service-layer only,
+two concurrent `POST /accounting-periods` requests for the same company
+with overlapping dates are not guaranteed to be mutually exclusive — the
+same class of race §6's advisory-lock RPCs exist to prevent for entry
+numbering, opening balance, and year-end closing. Period creation is
+low-frequency and low-concurrency by nature, so this is a low-priority
+gap, not an urgent one — but it's a known, accepted state, not an
+oversight, and worth revisiting (likely a `tstzrange` exclusion
+constraint) if period creation ever becomes concurrent/automated.
+
+**Verification:** full suite 3x consecutive clean (18 suites / 164 tests
+— 137 prior post-#29, minus RLS-suite overlap accounted for, plus new
+periods coverage), `--runInBand`, on `cuqnkorfhzydxwzkbjlv`. No live-DB
+apply required — app-layer change only. *(Decision #30)*
+
 ---
 
 ## 5. Security & Access Control
@@ -619,6 +665,15 @@ suites / 140 tests — 137 prior + new `companies.rls.integration.spec.ts`)
 run 3x consecutive clean, serially, on `cuqnkorfhzydxwzkbjlv`.
 *(Decision #29)*
 
+### 7.5 Accounting periods CRUD — status
+
+**Closed 2026-08-25.** Create/list/update implemented for
+`AccountingPeriodsController` against the actual `accounting_periods`
+schema (no invented columns) — see §4.5 for full behavior, including the
+flagged (not fixed) concurrent-overlap race. App-layer change only, no
+live-DB apply needed. Full suite (18 suites / 164 tests) run 3x
+consecutive clean, serially, on `cuqnkorfhzydxwzkbjlv`. *(Decision #30)*
+
 ---
 
 ## 8. Decision Log Index
@@ -657,3 +712,4 @@ topical section referenced.
 | 27 | 2026-08-25 | `JournalLinesController` had no auth guard after #24 — fixed with controller-level `SupabaseAuthGuard` (same pattern as #21); no identity-field DTO changes needed; `prevent_posted_line_mutation` INSERT gap flagged, not fixed | §5.8, §7.2 |
 | 28 | 2026-08-25 | `prevent_posted_line_mutation` extended to fire on INSERT, closing the gap #27 flagged; applied to `schema.sql` and live DB, confirmed matching; test helpers relying on the now-illegal "insert as posted" sequence rewritten to draft→lines→post; transient parallel-worker JWT clock-skew issue found and flagged (not fixed) | §5.9, §7.3 |
 | 29 | 2026-08-25 | `companies` had no RLS at all (#25) — closed with membership-based `company_isolation_companies` policy via `company_members`/`auth.uid()`, SELECT-only grant to `authenticated`; verified with real anon/authenticated/service_role JWTs; backend paths unchanged | §5.10, §7.4 |
+| 30 | 2026-08-25 | Accounting-periods create/list/update implemented against actual schema (no period label/number column exists); overlap + posted-activity checks are service-layer only (no DB exclusion constraint), flagged as a low-priority concurrent-write race; soft-close remains the only status-transition path; app-layer only, no live-DB apply | §4.5, §7.5 |
