@@ -13,6 +13,25 @@ first logged, the section below states the *current* rule only — the
 superseded version and why it changed are preserved in Section 8, not
 repeated inline.
 
+### Known open items (quick reference)
+
+Everything below is a **known, flagged, accepted state** — not an
+oversight — but each is a real gap worth re-checking before it's assumed
+fixed by default. Kept in one place specifically so none of these repeat
+this project's own recurring failure mode: a flagged item quietly
+forgotten until rediscovered the hard way (see decision #22).
+
+| Gap | Why it's not fixed yet | Detail |
+|---|---|---|
+| No DB constraint blocking overlapping period date ranges | Service-layer only; low-frequency/low-concurrency use case | §4.5 |
+| No DB trigger blocking UPDATE of a posted journal entry header | Service-layer only; same shape as the period-overlap gap | §4.6 |
+| Transient `JWT issued at future` under parallel Jest workers | Worked around with `--runInBand` for verification; root cause (clock-skew tolerance) not investigated | §5.9 |
+| `journal-lines` `createLine` not implemented | Stubbed; the posted-line INSERT trigger (§5.9) is already in place so it's safe to build whenever prioritized | §5.8, §5.9 |
+
+Stub endpoints still outstanding (not gaps, just unbuilt): `accounts`
+update; journal-lines `createLine`; hard-close/reopen HTTP; close
+checklist (Rules §1.22).
+
 ---
 
 ## 1. Account Numbering Scheme (AUTHORITATIVE — supersedes any other document)
@@ -154,7 +173,7 @@ just be wiped, and §7 for the broader pattern this established.)*
 
 ---
 
-## 4. Journal Entry Lifecycle Rules
+## 4. Journal Entry & Period Lifecycle Rules
 
 These are hard rules resolving gaps not covered by the Accounting Rules
 PDF — treat as settled, not open questions.
@@ -238,6 +257,56 @@ constraint) if period creation ever becomes concurrent/automated.
 — 137 prior post-#29, minus RLS-suite overlap accounted for, plus new
 periods coverage), `--runInBand`, on `cuqnkorfhzydxwzkbjlv`. No live-DB
 apply required — app-layer change only. *(Decision #30)*
+
+### 4.6 Journal entry list + draft header update (#31)
+
+`journal_entries` columns, per `schema.sql`: `company_id`,
+`entry_number`, `period_id`, `entry_date`, `entry_type`, `status`
+(`draft` | `pending_approval` | `approved` | `rejected` | `posted` |
+`reversed`, default `draft`), `narration`, `reference_number`, reversal
+and recurring linkage, approval actor/timestamp columns, `created_by`,
+`posted_at`, `created_at`, `updated_at`.
+
+DB immutability today: `trg_prevent_posted_line_update` (lines only),
+`trg_prevent_posted_entry_deletion` (DELETE of posted headers), and
+`trg_enforce_journal_balance_on_post`. **There is no trigger blocking
+UPDATE of a posted (or otherwise non-draft) journal entry header.**
+
+- **List (`GET /journal-entries`):** requires `company_id` query param
+  (same pattern as accounting-periods, §4.5/#30). Optional filters:
+  `status`, `period_id`. Ordered `entry_date` DESC, then `entry_number`
+  DESC (most recent first). Matches existing `:id` / attachments GET
+  conventions (path params only; no pagination invented).
+- **Header update (`PATCH /journal-entries/:id`):** editable fields are
+  `narration`, `reference_number`, `entry_date`, `attachments` only.
+  `status`, `company_id`, `period_id`, lines, and all identity/actor
+  fields (`created_by`, `approved_by`, `rejected_by`, `posted_at`, …)
+  are rejected by DTO whitelisting + `forbidNonWhitelisted`. Status
+  transitions remain exclusively on post / approve / reject / reverse.
+  Allowed only while `status = 'draft'`; once posted (or beyond),
+  reversal is the only correction path (§4.2). `uploaded_by` for any
+  attachment replacement comes from `@CurrentUser()`, never the body.
+- **Out of scope:** `createLine`, line mutations, any other controller.
+
+**Enforcement layer:** draft-only header editability is service-layer
+(plus an optimistic `.eq('status','draft')` filter on the UPDATE itself).
+Per standing rule (§5.1 lineage: no schema/DB change without an explicit
+ask), no new header-immutability trigger was added.
+
+**Flagged, not fixed:** `schema.sql` does not prevent a direct UPDATE of
+a posted journal entry's header (narration/date/etc.) via PostgREST or a
+bypassed service path — the same class of "service-layer only" gap §4.5
+flagged for period overlap. Harmless for normal API use while the
+service-layer check holds; worth a dedicated `BEFORE UPDATE` trigger if
+defense-in-depth at the DB is wanted later.
+
+**Auth:** class-level `@UseGuards(SupabaseAuthGuard)` on
+`JournalEntriesController` (already in place per §5.6/#24) confirmed to
+cover both new routes.
+
+**Verification:** full suite 3x consecutive clean (19 suites / 180 tests),
+`--runInBand`, on `cuqnkorfhzydxwzkbjlv`. App-layer only — no live-DB
+apply. *(Decision #31)*
 
 ---
 
@@ -674,6 +743,16 @@ flagged (not fixed) concurrent-overlap race. App-layer change only, no
 live-DB apply needed. Full suite (18 suites / 164 tests) run 3x
 consecutive clean, serially, on `cuqnkorfhzydxwzkbjlv`. *(Decision #30)*
 
+### 7.6 Journal entries list + header update — status
+
+**Closed 2026-08-26.** List and draft-only header update implemented for
+`JournalEntriesController` against the actual `journal_entries` schema —
+see §4.6 for full behavior, including the flagged (not fixed) gap that no
+DB trigger blocks UPDATE of a posted header (mirrors §4.5's period-overlap
+flag). `createLine` remains untouched/out of scope. Full suite (19 suites
+/ 180 tests) run 3x consecutive clean, serially, on `cuqnkorfhzydxwzkbjlv`.
+*(Decision #31)*
+
 ---
 
 ## 8. Decision Log Index
@@ -713,3 +792,4 @@ topical section referenced.
 | 28 | 2026-08-25 | `prevent_posted_line_mutation` extended to fire on INSERT, closing the gap #27 flagged; applied to `schema.sql` and live DB, confirmed matching; test helpers relying on the now-illegal "insert as posted" sequence rewritten to draft→lines→post; transient parallel-worker JWT clock-skew issue found and flagged (not fixed) | §5.9, §7.3 |
 | 29 | 2026-08-25 | `companies` had no RLS at all (#25) — closed with membership-based `company_isolation_companies` policy via `company_members`/`auth.uid()`, SELECT-only grant to `authenticated`; verified with real anon/authenticated/service_role JWTs; backend paths unchanged | §5.10, §7.4 |
 | 30 | 2026-08-25 | Accounting-periods create/list/update implemented against actual schema (no period label/number column exists); overlap + posted-activity checks are service-layer only (no DB exclusion constraint), flagged as a low-priority concurrent-write race; soft-close remains the only status-transition path; app-layer only, no live-DB apply | §4.5, §7.5 |
+| 31 | 2026-08-26 | Journal-entries list + draft header PATCH; required `company_id` query (+ optional status/period_id); header fields only while draft; no status/identity side door; schema has no posted-header UPDATE trigger (flagged, not fixed); `createLine` still out of scope | §4.6, §7.6 |

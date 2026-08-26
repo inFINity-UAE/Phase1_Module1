@@ -36,6 +36,7 @@ import { AccountTrialBalance } from './entities/account-trial-balance.entity';
 import { JournalEntryWithDetails } from './entities/journal-entry-with-details.entity';
 import { JournalEntryReversalResult } from './entities/journal-entry-reversal-result.entity';
 import { JournalAttachment } from './entities/journal-attachment.entity';
+import { JournalEntry } from './entities/journal-entry.entity';
 import { JournalLine } from './entities/journal-line.entity';
 import {
   computeEntryTotal,
@@ -462,8 +463,24 @@ export class JournalEntriesService {
     }
   }
 
-  findAll(): JournalEntryWithDetails[] {
-    throw new NotImplementedException('Not implemented.');
+  /**
+   * [feature-spec.md decision #31] Company-scoped list (required company_id query
+   * param — same pattern as accounting-periods #30). Optional status / period_id
+   * filters. Most recent first.
+   */
+  async findAll(
+    companyId: string,
+    filters?: { status?: string; period_id?: string },
+  ): Promise<JournalEntry[]> {
+    if (!companyId) {
+      throw new BadRequestException('company_id query parameter is required');
+    }
+
+    try {
+      return await this.journalEntriesRepository.findByCompany(companyId, filters);
+    } catch (error) {
+      handleDatabaseError(error);
+    }
   }
 
   async findOne(id: string): Promise<JournalEntryWithDetails> {
@@ -490,8 +507,56 @@ export class JournalEntriesService {
     }
   }
 
-  update(_id: string, _dto: UpdateJournalEntryDto): JournalEntryWithDetails {
-    throw new NotImplementedException('Not implemented.');
+  /**
+   * [feature-spec.md decision #31] Draft header update only. schema.sql has no
+   * trigger blocking UPDATE of posted journal_entries headers (only line mutation
+   * and entry deletion) — draft-only is enforced here. Status / lines / identity
+   * fields are rejected by UpdateJournalEntryDto + forbidNonWhitelisted.
+   */
+  async update(
+    id: string,
+    dto: UpdateJournalEntryDto,
+    uploadedBy: string,
+  ): Promise<JournalEntryWithDetails> {
+    const existing = await this.findOne(id);
+
+    if (existing.entry.status !== JournalEntryStatus.Draft) {
+      throw new BadRequestException(
+        `Cannot update journal entry ${id} while status is '${existing.entry.status}' — ` +
+          'only draft headers are editable; use reverse for posted corrections',
+      );
+    }
+
+    const hasPatch =
+      dto.narration !== undefined ||
+      dto.reference_number !== undefined ||
+      dto.entry_date !== undefined ||
+      dto.attachments !== undefined;
+    if (!hasPatch) {
+      throw new BadRequestException('No updatable header fields provided');
+    }
+
+    try {
+      return await this.journalEntriesRepository.updateDraftHeader(id, {
+        ...(dto.narration !== undefined ? { narration: dto.narration } : {}),
+        ...(dto.reference_number !== undefined
+          ? { reference_number: dto.reference_number }
+          : {}),
+        ...(dto.entry_date !== undefined ? { entry_date: dto.entry_date } : {}),
+        ...(dto.attachments !== undefined ? { attachments: dto.attachments } : {}),
+        uploaded_by: uploadedBy,
+      });
+    } catch (error) {
+      if (
+        error instanceof Error &&
+        error.message === 'JOURNAL_ENTRY_HEADER_NOT_DRAFT'
+      ) {
+        throw new BadRequestException(
+          `Cannot update journal entry ${id} — only draft headers are editable; use reverse for posted corrections`,
+        );
+      }
+      handleDatabaseError(error);
+    }
   }
 
   createLine(_dto: CreateJournalLineDto) {

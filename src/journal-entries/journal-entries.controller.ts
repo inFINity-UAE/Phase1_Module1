@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { AuthenticatedUser } from '../auth/authenticated-user';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { JournalEntryCompanyRoleGuard } from '../auth/guards/journal-entry-company-role.guard';
@@ -15,9 +15,9 @@ import {
 } from './dto/journal-entry-approval.dto';
 
 /**
- * [feature-spec.md decision #24] Session required on every route (incl. previously
- * unguarded GET/list/attachments/PATCH). Ledger-mutating routes keep the same
- * CurrentUser / JournalEntryCompanyRoleGuard wiring as before (#10/#11/#21).
+ * [feature-spec.md decisions #24/#31] Session required on every route (incl. list
+ * and header PATCH). Ledger-mutating routes keep CurrentUser /
+ * JournalEntryCompanyRoleGuard wiring (#10/#11/#21).
  */
 @Controller('journal-entries')
 @UseGuards(SupabaseAuthGuard)
@@ -45,9 +45,19 @@ export class JournalEntriesController {
     return this.journalEntriesService.runYearEndClosing(dto, user.id);
   }
 
+  /**
+   * [feature-spec.md decision #31] Required company_id; optional status / period_id.
+   */
   @Get()
-  findAll() {
-    return this.journalEntriesService.findAll();
+  findAll(
+    @Query('company_id') companyId?: string,
+    @Query('status') status?: string,
+    @Query('period_id') periodId?: string,
+  ) {
+    return this.journalEntriesService.findAll(companyId ?? '', {
+      ...(status !== undefined ? { status } : {}),
+      ...(periodId !== undefined ? { period_id: periodId } : {}),
+    });
   }
 
   @Get(':id/attachments')
@@ -102,8 +112,16 @@ export class JournalEntriesController {
     return this.journalEntriesService.reverse(id, user.id);
   }
 
+  /**
+   * [feature-spec.md decision #31] Draft header update. uploaded_by for any
+   * replacement attachments comes from the session — never the body.
+   */
   @Patch(':id')
-  update(@Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateJournalEntryDto) {
-    return this.journalEntriesService.update(id, dto);
+  update(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdateJournalEntryDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.journalEntriesService.update(id, dto, user.id);
   }
 }

@@ -142,6 +142,121 @@ export class SupabaseJournalEntriesRepository implements JournalEntriesRepositor
     };
   }
 
+  /**
+   * [feature-spec.md decision #31] Company-scoped list — most recent first.
+   */
+  async findByCompany(
+    companyId: string,
+    filters?: { status?: string; period_id?: string },
+  ): Promise<JournalEntry[]> {
+    let query = this.supabase.client
+      .from('journal_entries')
+      .select('*')
+      .eq('company_id', companyId)
+      .order('entry_date', { ascending: false })
+      .order('entry_number', { ascending: false });
+
+    if (filters?.status) {
+      query = query.eq('status', filters.status);
+    }
+    if (filters?.period_id) {
+      query = query.eq('period_id', filters.period_id);
+    }
+
+    const { data, error } = await query;
+
+    if (error) {
+      throw error;
+    }
+
+    return (data ?? []) as JournalEntry[];
+  }
+
+  /**
+   * [feature-spec.md decision #31] Draft-only header update. Caller must
+   * already have verified status = draft — schema.sql has no header
+   * immutability trigger (only prevent_posted_line_mutation /
+   * prevent_posted_entry_deletion).
+   */
+  async updateDraftHeader(
+    id: string,
+    patch: {
+      narration?: string;
+      reference_number?: string | null;
+      entry_date?: string;
+      attachments?: Array<{
+        file_name: string;
+        file_url: string;
+        file_size_bytes?: number;
+      }>;
+      uploaded_by: string;
+    },
+  ): Promise<JournalEntryWithDetails> {
+    const headerPatch: Record<string, unknown> = {
+      updated_at: new Date().toISOString(),
+    };
+    if (patch.narration !== undefined) {
+      headerPatch.narration = patch.narration;
+    }
+    if (patch.reference_number !== undefined) {
+      headerPatch.reference_number = patch.reference_number;
+    }
+    if (patch.entry_date !== undefined) {
+      headerPatch.entry_date = patch.entry_date;
+    }
+
+    // Optimistic draft filter — service already checks status; this catches a
+    // concurrent status change between read and write (no header immutability trigger).
+    const { data: updatedRows, error: updateError } = await this.supabase.client
+      .from('journal_entries')
+      .update(headerPatch)
+      .eq('id', id)
+      .eq('status', JournalEntryStatus.Draft)
+      .select('id');
+
+    if (updateError) {
+      throw updateError;
+    }
+    if (!updatedRows?.length) {
+      throw new Error('JOURNAL_ENTRY_HEADER_NOT_DRAFT');
+    }
+
+    if (patch.attachments !== undefined) {
+      const { error: deleteError } = await this.supabase.client
+        .from('journal_attachments')
+        .delete()
+        .eq('journal_entry_id', id);
+
+      if (deleteError) {
+        throw deleteError;
+      }
+
+      if (patch.attachments.length > 0) {
+        const { error: insertError } = await this.supabase.client
+          .from('journal_attachments')
+          .insert(
+            patch.attachments.map((attachment) => ({
+              journal_entry_id: id,
+              file_name: attachment.file_name,
+              file_url: attachment.file_url,
+              file_size_bytes: attachment.file_size_bytes ?? null,
+              uploaded_by: patch.uploaded_by,
+            })),
+          );
+
+        if (insertError) {
+          throw insertError;
+        }
+      }
+    }
+
+    const refreshed = await this.findByIdWithDetails(id);
+    if (!refreshed) {
+      throw new Error(`Journal entry ${id} not found after header update`);
+    }
+    return refreshed;
+  }
+
   async findAttachmentsByEntryId(entryId: string): Promise<JournalAttachment[]> {
     const { data, error } = await this.supabase.client
       .from('journal_attachments')

@@ -52,17 +52,17 @@ describe('Controller auth coverage (decision #24)', () => {
     };
 
     const journalEntriesService = {
-      findAll: jest.fn().mockImplementation(() => {
-        throw new Error('Not implemented.');
-      }),
+      findAll: jest.fn().mockResolvedValue([]),
       findOne: jest.fn().mockResolvedValue({
         entry: { id: 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', company_id: 'cccccccc-cccc-cccc-cccc-cccccccccccc' },
         lines: [],
         attachments: [],
       }),
       getAttachments: jest.fn().mockResolvedValue([]),
-      update: jest.fn().mockImplementation(() => {
-        throw new Error('Not implemented.');
+      update: jest.fn().mockResolvedValue({
+        entry: { id: 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb' },
+        lines: [],
+        attachments: [],
       }),
       create: jest.fn().mockResolvedValue({ entry: { id: 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb' }, lines: [], attachments: [] }),
       createOpeningBalance: jest.fn(),
@@ -184,10 +184,17 @@ describe('Controller auth coverage (decision #24)', () => {
       path: '/accounting-periods/22222222-2222-2222-2222-222222222222',
       body: { fiscal_year: 2027 },
     },
-    { method: 'GET', path: '/journal-entries' },
+    {
+      method: 'GET',
+      path: '/journal-entries?company_id=cccccccc-cccc-cccc-cccc-cccccccccccc',
+    },
     { method: 'GET', path: '/journal-entries/bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb' },
     { method: 'GET', path: '/journal-entries/bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb/attachments' },
-    { method: 'PATCH', path: '/journal-entries/bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', body: {} },
+    {
+      method: 'PATCH',
+      path: '/journal-entries/bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
+      body: { narration: 'revised' },
+    },
     { method: 'GET', path: '/recurring-journal-templates' },
     { method: 'POST', path: '/recurring-journal-templates/run-due', body: {} },
     { method: 'PATCH', path: '/recurring-journal-templates/dddddddd-dddd-dddd-dddd-dddddddddddd', body: {} },
@@ -264,6 +271,15 @@ describe('Controller auth coverage (decision #24)', () => {
     {
       method: 'GET',
       path: '/journal-entries/bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb/attachments',
+    },
+    {
+      method: 'GET',
+      path: '/journal-entries?company_id=cccccccc-cccc-cccc-cccc-cccccccccccc',
+    },
+    {
+      method: 'PATCH',
+      path: '/journal-entries/bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
+      body: { narration: 'revised' },
     },
     { method: 'GET', path: '/recurring-journal-templates' },
     { method: 'POST', path: '/recurring-journal-templates/run-due', body: {} },

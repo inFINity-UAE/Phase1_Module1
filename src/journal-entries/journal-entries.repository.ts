@@ -24,6 +24,32 @@ export interface JournalEntriesRepository {
   getNextEntryNumber(companyId: string): Promise<number>;
   insertDraft(dto: CreateJournalEntryWithActor): Promise<JournalEntryWithDetails>;
   findByIdWithDetails(id: string): Promise<JournalEntryWithDetails | null>;
+  /**
+   * [feature-spec.md decision #31] Company-scoped list with optional status /
+   * period_id filters. Ordered entry_date DESC, entry_number DESC.
+   */
+  findByCompany(
+    companyId: string,
+    filters?: { status?: string; period_id?: string },
+  ): Promise<JournalEntry[]>;
+  /**
+   * [feature-spec.md decision #31] Draft header patch. When attachments is
+   * provided (including []), existing journal_attachments rows are replaced.
+   */
+  updateDraftHeader(
+    id: string,
+    patch: {
+      narration?: string;
+      reference_number?: string | null;
+      entry_date?: string;
+      attachments?: Array<{
+        file_name: string;
+        file_url: string;
+        file_size_bytes?: number;
+      }>;
+      uploaded_by: string;
+    },
+  ): Promise<JournalEntryWithDetails>;
   findAttachmentsByEntryId(entryId: string): Promise<JournalAttachment[]>;
   findPeriodById(id: string): Promise<AccountingPeriod | null>;
   findNextOpenPeriod(

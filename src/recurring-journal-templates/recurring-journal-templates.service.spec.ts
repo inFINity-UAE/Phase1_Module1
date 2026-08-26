@@ -168,6 +168,8 @@ describe('RecurringJournalTemplatesService', () => {
       getNextEntryNumber: jest.fn(),
       insertDraft: jest.fn(),
       findByIdWithDetails: jest.fn(),
+      findByCompany: jest.fn(),
+      updateDraftHeader: jest.fn(),
       findAttachmentsByEntryId: jest.fn(),
       findPeriodById: jest.fn(),
       findEarliestOpenPeriod: jest.fn(),

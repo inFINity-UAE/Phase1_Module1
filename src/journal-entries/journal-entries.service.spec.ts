@@ -166,6 +166,8 @@ describe('JournalEntriesService', () => {
       getNextEntryNumber: jest.fn(),
       insertDraft: jest.fn(),
       findByIdWithDetails: jest.fn(),
+      findByCompany: jest.fn(),
+      updateDraftHeader: jest.fn(),
       findAttachmentsByEntryId: jest.fn(),
       findPeriodById: jest.fn(),
       findNextOpenPeriod: jest.fn(),
@@ -1249,6 +1251,56 @@ describe('JournalEntriesService', () => {
       await expect(service.runYearEndClosing(yearEndDto, USER_ID)).rejects.toThrow(
         `A year-end closing entry already exists for fiscal year ${FISCAL_YEAR}`,
       );
+    });
+  });
+
+  describe('findAll / update (decision #31)', () => {
+    it('lists entries scoped to company_id with optional filters', async () => {
+      const rows = [draftDetails().entry];
+      repository.findByCompany.mockResolvedValue(rows);
+
+      const result = await service.findAll(COMPANY_ID, {
+        status: JournalEntryStatus.Draft,
+        period_id: PERIOD_ID,
+      });
+
+      expect(repository.findByCompany).toHaveBeenCalledWith(COMPANY_ID, {
+        status: JournalEntryStatus.Draft,
+        period_id: PERIOD_ID,
+      });
+      expect(result).toEqual(rows);
+    });
+
+    it('requires company_id for list', async () => {
+      await expect(service.findAll('')).rejects.toThrow(BadRequestException);
+      expect(repository.findByCompany).not.toHaveBeenCalled();
+    });
+
+    it('updates draft header fields', async () => {
+      const draft = draftDetails();
+      const updated = {
+        ...draft,
+        entry: { ...draft.entry, narration: 'revised' },
+      };
+      repository.findByIdWithDetails.mockResolvedValue(draft);
+      repository.updateDraftHeader.mockResolvedValue(updated);
+
+      const result = await service.update(ENTRY_ID, { narration: 'revised' }, USER_ID);
+
+      expect(repository.updateDraftHeader).toHaveBeenCalledWith(ENTRY_ID, {
+        narration: 'revised',
+        uploaded_by: USER_ID,
+      });
+      expect(result.entry.narration).toBe('revised');
+    });
+
+    it('rejects header update when status is not draft', async () => {
+      repository.findByIdWithDetails.mockResolvedValue(postedDetails());
+
+      await expect(
+        service.update(ENTRY_ID, { narration: 'nope' }, USER_ID),
+      ).rejects.toThrow(/only draft headers are editable/i);
+      expect(repository.updateDraftHeader).not.toHaveBeenCalled();
     });
   });
 });
