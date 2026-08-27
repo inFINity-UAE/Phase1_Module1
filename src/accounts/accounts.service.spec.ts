@@ -11,6 +11,7 @@ import { AccountCategory } from '../common/enums/account-category.enum';
 import { NormalBalance } from '../common/enums/normal-balance.enum';
 import { Account } from './entities/account.entity';
 import { CreateAccountDto } from './dto/create-account.dto';
+import { UpdateAccountDto } from './dto/update-account.dto';
 
 const COMPANY_ID = '00000000-0000-0000-0000-000000000002';
 const ACCOUNT_ID = '11111111-1111-1111-1111-111111111111';
@@ -50,6 +51,7 @@ describe('AccountsService', () => {
       insert: jest.fn(),
       findAll: jest.fn(),
       findById: jest.fn(),
+      update: jest.fn(),
       updateActive: jest.fn(),
       delete: jest.fn(),
     };
@@ -153,5 +155,49 @@ describe('AccountsService', () => {
     await expect(service.deactivate(ACCOUNT_ID)).rejects.toThrow(
       NotFoundException,
     );
+  });
+
+  it('updating account_name on a non-system account succeeds', async () => {
+    const active = sampleAccount();
+    const updated = sampleAccount({ account_name: 'Renamed Account' });
+    repository.findById.mockResolvedValue(active);
+    repository.update.mockResolvedValue(updated);
+
+    await expect(
+      service.update(ACCOUNT_ID, { account_name: 'Renamed Account' }),
+    ).resolves.toEqual(updated);
+    expect(repository.update).toHaveBeenCalledWith(ACCOUNT_ID, {
+      account_name: 'Renamed Account',
+    });
+  });
+
+  it('updating a system account fails', async () => {
+    repository.findById.mockResolvedValue(
+      sampleAccount({
+        account_number: '3100',
+        account_name: 'Retained Earnings',
+        is_system_account: true,
+      }),
+    );
+
+    await expect(
+      service.update(ACCOUNT_ID, { account_name: 'Renamed' }),
+    ).rejects.toThrow(BadRequestException);
+    await expect(
+      service.update(ACCOUNT_ID, { account_name: 'Renamed' }),
+    ).rejects.toThrow('is a system account and cannot be updated');
+    expect(repository.update).not.toHaveBeenCalled();
+  });
+
+  it('update throws BadRequestException when no fields provided', async () => {
+    repository.findById.mockResolvedValue(sampleAccount());
+
+    await expect(service.update(ACCOUNT_ID, {})).rejects.toThrow(
+      BadRequestException,
+    );
+    await expect(service.update(ACCOUNT_ID, {})).rejects.toThrow(
+      'No updatable fields provided',
+    );
+    expect(repository.update).not.toHaveBeenCalled();
   });
 });

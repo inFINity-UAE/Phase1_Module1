@@ -485,6 +485,13 @@ describe('JournalEntriesService', () => {
     );
   });
 
+  it('deleteLine removes a line on a draft parent (decision #34)', async () => {
+    repository.deleteLine.mockResolvedValue(undefined);
+
+    await expect(service.deleteLine(LINE_ID)).resolves.toBeUndefined();
+    expect(repository.deleteLine).toHaveBeenCalledWith(LINE_ID);
+  });
+
   it('[Rules §3.1] trial balance totals stay equal after posting balanced entries', async () => {
     repository.getTrialBalanceTotals
       .mockResolvedValueOnce({ total_debit: 1000, total_credit: 1000 })

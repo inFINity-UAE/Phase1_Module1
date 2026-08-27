@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { SupabaseService } from '../database/supabase.service';
 import { CreateAccountDto } from './dto/create-account.dto';
 import { Account } from './entities/account.entity';
-import { AccountsRepository } from './accounts.repository';
+import { AccountsRepository, UpdateAccountRecord } from './accounts.repository';
 
 @Injectable()
 export class SupabaseAccountsRepository implements AccountsRepository {
@@ -72,6 +72,21 @@ export class SupabaseAccountsRepository implements AccountsRepository {
     }
 
     return data as Account | null;
+  }
+
+  async update(id: string, patch: UpdateAccountRecord): Promise<Account> {
+    const { data, error } = await this.supabase.client
+      .from('accounts')
+      .update({ ...patch, updated_at: new Date().toISOString() })
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (error) {
+      throw error;
+    }
+
+    return data as Account;
   }
 
   async updateActive(id: string, isActive: boolean): Promise<Account> {

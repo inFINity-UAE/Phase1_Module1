@@ -80,6 +80,7 @@ describe('Controller auth coverage (decision #24)', () => {
         credit: 0,
       }),
       updateLine: jest.fn().mockResolvedValue({ id: 'ffffffff-ffff-ffff-ffff-ffffffffffff' }),
+      deleteLine: jest.fn().mockResolvedValue(undefined),
     };
 
     const recurringService = {
@@ -174,6 +175,11 @@ describe('Controller auth coverage (decision #24)', () => {
     { method: 'POST', path: '/accounts', body: {} },
     { method: 'PATCH', path: '/accounts/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa/deactivate' },
     {
+      method: 'PATCH',
+      path: '/accounts/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+      body: { account_name: 'Renamed' },
+    },
+    {
       method: 'POST',
       path: '/accounting-periods',
       body: {
@@ -243,6 +249,10 @@ describe('Controller auth coverage (decision #24)', () => {
       path: '/journal-lines/ffffffff-ffff-ffff-ffff-ffffffffffff',
       body: { debit: 1 },
     },
+    {
+      method: 'DELETE',
+      path: '/journal-lines/ffffffff-ffff-ffff-ffff-ffffffffffff',
+    },
   ];
 
   it.each(previouslyUnguardedRoutes)(
@@ -256,6 +266,11 @@ describe('Controller auth coverage (decision #24)', () => {
 
   it.each([
     { method: 'GET', path: '/accounts' },
+    {
+      method: 'PATCH',
+      path: '/accounts/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+      body: { account_name: 'Renamed' },
+    },
     {
       method: 'GET',
       path: '/accounting-periods?company_id=cccccccc-cccc-cccc-cccc-cccccccccccc',
@@ -306,6 +321,10 @@ describe('Controller auth coverage (decision #24)', () => {
         debit: 1,
         credit: 0,
       },
+    },
+    {
+      method: 'DELETE',
+      path: '/journal-lines/ffffffff-ffff-ffff-ffff-ffffffffffff',
     },
   ] as const)(
     'authenticated $method $path reaches handler (not 401)',

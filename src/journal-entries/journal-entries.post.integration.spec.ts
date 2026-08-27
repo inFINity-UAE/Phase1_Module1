@@ -20,6 +20,7 @@ import {
   ensurePostIntegrationCompanyReady,
   INTEGRATION_USER_ID,
 } from '../test/integration-company.setup';
+import { DEMO_COMPANY_ID, getAccountIdByNumber } from '../e2e/e2e-company.setup';
 
 const hasSupabase = Boolean(
   process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.SUPABASE_SECRET_KEY,
@@ -289,7 +290,136 @@ const USER_ID = INTEGRATION_USER_ID;
       ).rejects.toThrow(/Cannot modify lines of a posted journal entry/i);
     });
 
-    it('blocks deleting a line on a posted journal entry (DB trigger)', async () => {
+    it('createLine rejects inactive and cross-company account_id (decision #35)', async () => {
+      const periodId = await getPeriodId();
+      const [accA] = await getTwoAssetAccounts();
+      const inactiveId = await getAccountIdByNumber(supabase, companyId, '1050');
+      const { data: foreignAccount, error: foreignError } = await supabase.client
+        .from('accounts')
+        .select('id')
+        .eq('company_id', DEMO_COMPANY_ID)
+        .eq('is_active', true)
+        .limit(1)
+        .single();
+      if (foreignError || !foreignAccount) {
+        throw foreignError ?? new Error('Need an active demo-company account');
+      }
+
+      const entryNumber = await nextEntryNumber();
+      const { data: entry, error: entryError } = await supabase.client
+        .from('journal_entries')
+        .insert({
+          company_id: companyId,
+          entry_number: entryNumber,
+          period_id: periodId,
+          entry_date: '2026-01-15',
+          entry_type: JournalEntryType.Manual,
+          status: JournalEntryStatus.Draft,
+          narration: 'createLine account validation',
+          created_by: USER_ID,
+        })
+        .select('id')
+        .single();
+      if (entryError || !entry) {
+        throw entryError ?? new Error('Failed to insert draft entry');
+      }
+      createdEntryIds.push(entry.id);
+
+      await expect(
+        service.createLine({
+          journal_entry_id: entry.id,
+          line_number: 1,
+          account_id: inactiveId,
+          debit: 10,
+          credit: 0,
+        }),
+      ).rejects.toThrow(/inactive/i);
+
+      await expect(
+        service.createLine({
+          journal_entry_id: entry.id,
+          line_number: 1,
+          account_id: foreignAccount.id,
+          debit: 10,
+          credit: 0,
+        }),
+      ).rejects.toThrow(/different company/i);
+
+      const ok = await service.createLine({
+        journal_entry_id: entry.id,
+        line_number: 1,
+        account_id: accA,
+        debit: 10,
+        credit: 0,
+      });
+      expect(ok.account_id).toBe(accA);
+    });
+
+    it('insertDraft rejects inactive and cross-company account_id (decision #35)', async () => {
+      const periodId = await getPeriodId();
+      const [accA, accB] = await getTwoAssetAccounts();
+      const inactiveId = await getAccountIdByNumber(supabase, companyId, '1050');
+      const { data: foreignAccount, error: foreignError } = await supabase.client
+        .from('accounts')
+        .select('id')
+        .eq('company_id', DEMO_COMPANY_ID)
+        .eq('is_active', true)
+        .limit(1)
+        .single();
+      if (foreignError || !foreignAccount) {
+        throw foreignError ?? new Error('Need an active demo-company account');
+      }
+
+      await expect(
+        service.create(
+          {
+            company_id: companyId,
+            period_id: periodId,
+            entry_date: '2026-01-16',
+            narration: 'draft inactive account',
+            lines: [
+              { line_number: 1, account_id: inactiveId, debit: 10, credit: 0 },
+              { line_number: 2, account_id: accB, debit: 0, credit: 10 },
+            ],
+          },
+          USER_ID,
+        ),
+      ).rejects.toThrow(/inactive/i);
+
+      await expect(
+        service.create(
+          {
+            company_id: companyId,
+            period_id: periodId,
+            entry_date: '2026-01-16',
+            narration: 'draft cross-company account',
+            lines: [
+              { line_number: 1, account_id: foreignAccount.id, debit: 10, credit: 0 },
+              { line_number: 2, account_id: accB, debit: 0, credit: 10 },
+            ],
+          },
+          USER_ID,
+        ),
+      ).rejects.toThrow(/different company/i);
+
+      const created = await service.create(
+        {
+          company_id: companyId,
+          period_id: periodId,
+          entry_date: '2026-01-16',
+          narration: 'draft valid accounts',
+          lines: [
+            { line_number: 1, account_id: accA, debit: 10, credit: 0 },
+            { line_number: 2, account_id: accB, debit: 0, credit: 10 },
+          ],
+        },
+        USER_ID,
+      );
+      createdEntryIds.push(created.entry.id);
+      expect(created.lines).toHaveLength(2);
+    });
+
+    it('deleteLine rejects DELETE on a posted parent via trg_prevent_posted_line_update (#34)', async () => {
       const entryId = await insertPostedBalancedEntry(80, 'integration posted delete block');
       const { data: line, error } = await supabase.client
         .from('journal_lines')
@@ -307,6 +437,61 @@ const USER_ID = INTEGRATION_USER_ID;
       await expect(service.deleteLine(line.id)).rejects.toThrow(
         /Cannot modify lines of a posted journal entry/i,
       );
+    });
+
+    it('deleteLine removes a line from a draft parent (decision #34)', async () => {
+      const periodId = await getPeriodId();
+      const [accA, accB] = await getTwoAssetAccounts();
+      const entryNumber = await nextEntryNumber();
+
+      const { data: entry, error: entryError } = await supabase.client
+        .from('journal_entries')
+        .insert({
+          company_id: companyId,
+          entry_number: entryNumber,
+          period_id: periodId,
+          entry_date: '2026-01-15',
+          entry_type: JournalEntryType.Manual,
+          status: JournalEntryStatus.Draft,
+          narration: 'deleteLine draft parent',
+          created_by: USER_ID,
+        })
+        .select('id')
+        .single();
+
+      if (entryError || !entry) {
+        throw entryError ?? new Error('Failed to insert draft entry');
+      }
+      createdEntryIds.push(entry.id);
+
+      const lineA = await service.createLine({
+        journal_entry_id: entry.id,
+        line_number: 1,
+        account_id: accA,
+        debit: 10,
+        credit: 0,
+      });
+      await service.createLine({
+        journal_entry_id: entry.id,
+        line_number: 2,
+        account_id: accB,
+        debit: 0,
+        credit: 10,
+      });
+
+      await expect(service.deleteLine(lineA.id)).resolves.toBeUndefined();
+
+      const { data: remaining, error: remainingError } = await supabase.client
+        .from('journal_lines')
+        .select('id, line_number')
+        .eq('journal_entry_id', entry.id)
+        .order('line_number');
+
+      if (remainingError) {
+        throw remainingError;
+      }
+      expect(remaining).toHaveLength(1);
+      expect(remaining![0].line_number).toBe(2);
     });
 
     it('[Rules §3.1] v_trial_balance total debits equal total credits after balanced posted entries', async () => {

@@ -1,8 +1,8 @@
 import {
+  BadRequestException,
   Inject,
   Injectable,
   NotFoundException,
-  NotImplementedException,
 } from '@nestjs/common';
 import { handleDatabaseError } from '../common/errors/database-error.mapper';
 import { ACCOUNTS_REPOSITORY, AccountsRepository } from './accounts.repository';
@@ -49,8 +49,39 @@ export class AccountsService {
     }
   }
 
-  update(_id: string, _dto: UpdateAccountDto): Account {
-    throw new NotImplementedException('Not implemented.');
+  /**
+   * [feature-spec.md decision #36] Metadata-only update. Structural columns
+   * (account_number, category, normal_balance, hierarchy) are rejected by
+   * UpdateAccountDto + forbidNonWhitelisted. System accounts
+   * (is_system_account = true, e.g. 3100 Retained Earnings #16) are blocked
+   * here — schema.sql trg_prevent_account_deletion covers DELETE only, not UPDATE.
+   */
+  async update(id: string, dto: UpdateAccountDto): Promise<Account> {
+    const account = await this.findOne(id);
+
+    if (account.is_system_account) {
+      throw new BadRequestException(
+        `Account ${id} is a system account and cannot be updated`,
+      );
+    }
+
+    const hasPatch =
+      dto.account_name !== undefined ||
+      dto.sub_category !== undefined ||
+      dto.description !== undefined;
+    if (!hasPatch) {
+      throw new BadRequestException('No updatable fields provided');
+    }
+
+    try {
+      return await this.accountsRepository.update(id, {
+        ...(dto.account_name !== undefined ? { account_name: dto.account_name } : {}),
+        ...(dto.sub_category !== undefined ? { sub_category: dto.sub_category } : {}),
+        ...(dto.description !== undefined ? { description: dto.description } : {}),
+      });
+    } catch (error) {
+      handleDatabaseError(error);
+    }
   }
 
   /** [feature-spec] Deactivate — never hard-delete accounts with history. */

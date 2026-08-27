@@ -559,12 +559,11 @@ export class JournalEntriesService {
   }
 
   /**
-   * [feature-spec.md decision #32] Add a line to an existing entry.
+   * [feature-spec.md decision #32/#35] Add a line to an existing entry.
    * Balance is NOT required here — trg_enforce_journal_balance_on_post only
    * fires on transition to posted. Posted-parent INSERT is rejected by
-   * trg_prevent_posted_line_update (P0001 → 400); not re-checked in app code.
-   * Same-company / is_active account checks are not applied on entry create
-   * (insert_journal_entry_draft) either — matched here, not invented.
+   * trg_prevent_posted_line_update (P0001 → 400). Account must be active and
+   * same-company (#35) — shared assert with insert_journal_entry_draft.
    */
   async createLine(dto: CreateJournalLineDto): Promise<JournalLine> {
     // [schema.sql journal_lines CHECK] debit XOR credit, never both, never zero
@@ -596,6 +595,8 @@ export class JournalEntriesService {
   }
 
   async deleteLine(id: string): Promise<void> {
+    // [feature-spec.md decision #34] Posted-parent DELETE rejected by
+    // trg_prevent_posted_line_update (#28) — P0001 → 400 via handleDatabaseError.
     try {
       await this.journalEntriesRepository.deleteLine(id);
     } catch (error) {

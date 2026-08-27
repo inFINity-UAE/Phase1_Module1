@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, BadRequestException } from '@nestjs/common';
 import { PeriodStatus } from '../common/enums/period-status.enum';
 import { JournalEntryType } from '../common/enums/journal-entry-type.enum';
 import { JournalEntryStatus } from '../common/enums/journal-entry-status.enum';
@@ -28,6 +28,7 @@ import {
   CreateYearEndClosingWithActor,
   JournalEntriesRepository,
 } from './journal-entries.repository';
+import { assertAccountsUsableForCompany } from './journal-line-account.validation';
 
 @Injectable()
 export class SupabaseJournalEntriesRepository implements JournalEntriesRepository {
@@ -77,6 +78,28 @@ export class SupabaseJournalEntriesRepository implements JournalEntriesRepositor
     };
   }
 
+  private async assertAccountsUsableForCompany(
+    companyId: string,
+    accountIds: string[],
+  ): Promise<void> {
+    // [feature-spec.md decision #35] Shared by insert_journal_entry_draft + insertLine.
+    const uniqueIds = [...new Set(accountIds.filter(Boolean))];
+    if (uniqueIds.length === 0) {
+      return;
+    }
+
+    const { data, error } = await this.supabase.client
+      .from('accounts')
+      .select('id, company_id, is_active, account_number')
+      .in('id', uniqueIds);
+
+    if (error) {
+      throw error;
+    }
+
+    assertAccountsUsableForCompany(companyId, uniqueIds, data ?? []);
+  }
+
   private async insertJournalEntryDraftRpc(params: {
     p_company_id: string;
     p_period_id: string;
@@ -89,6 +112,12 @@ export class SupabaseJournalEntriesRepository implements JournalEntriesRepositor
     p_recurring_template_id?: string | null;
     p_attachments?: unknown;
   }): Promise<JournalEntryWithDetails> {
+    const lines = Array.isArray(params.p_lines) ? params.p_lines : [];
+    await this.assertAccountsUsableForCompany(
+      params.p_company_id,
+      lines.map((line) => String((line as { account_id?: string }).account_id ?? '')),
+    );
+
     const { data, error } = await this.supabase.client.rpc('insert_journal_entry_draft', {
       p_company_id: params.p_company_id,
       p_period_id: params.p_period_id,
@@ -800,6 +829,24 @@ export class SupabaseJournalEntriesRepository implements JournalEntriesRepositor
   async insertLine(dto: CreateJournalLineDto): Promise<JournalLine> {
     // [feature-spec.md decision #32] Posted-parent rejection is DB-only
     // (trg_prevent_posted_line_update). Debit/credit XOR is the table CHECK.
+    // [feature-spec.md decision #35] Same-company + active account check (shared helper).
+    const { data: parent, error: parentError } = await this.supabase.client
+      .from('journal_entries')
+      .select('company_id')
+      .eq('id', dto.journal_entry_id)
+      .maybeSingle();
+
+    if (parentError) {
+      throw parentError;
+    }
+    if (!parent) {
+      throw new BadRequestException(
+        `Journal entry ${dto.journal_entry_id} was not found — cannot add lines`,
+      );
+    }
+
+    await this.assertAccountsUsableForCompany(parent.company_id as string, [dto.account_id]);
+
     const { data, error } = await this.supabase.client
       .from('journal_lines')
       .insert({
