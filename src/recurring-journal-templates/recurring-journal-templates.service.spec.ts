@@ -185,6 +185,7 @@ describe('RecurringJournalTemplatesService', () => {
       findNextOpenPeriod: jest.fn(),
       postEntry: jest.fn(),
       reverseEntry: jest.fn(),
+      insertLine: jest.fn(),
       updateLine: jest.fn(),
       deleteLine: jest.fn(),
       getTrialBalanceTotals: jest.fn(),

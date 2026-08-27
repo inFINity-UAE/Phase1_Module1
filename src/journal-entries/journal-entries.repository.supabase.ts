@@ -9,6 +9,7 @@ import { CreateJournalEntryDto } from './dto/create-journal-entry.dto';
 import { CreateOpeningBalanceDto } from './dto/create-opening-balance.dto';
 import { CreateYearEndClosingDto } from './dto/create-year-end-closing.dto';
 import { UpdateJournalLineDto } from './dto/update-journal-line.dto';
+import { CreateJournalLineDto } from './dto/create-journal-line.dto';
 import { AccountCategory } from '../common/enums/account-category.enum';
 import { NormalBalance } from '../common/enums/normal-balance.enum';
 import { JournalEntry } from './entities/journal-entry.entity';
@@ -794,6 +795,30 @@ export class SupabaseJournalEntriesRepository implements JournalEntriesRepositor
         attachments: [],
       },
     };
+  }
+
+  async insertLine(dto: CreateJournalLineDto): Promise<JournalLine> {
+    // [feature-spec.md decision #32] Posted-parent rejection is DB-only
+    // (trg_prevent_posted_line_update). Debit/credit XOR is the table CHECK.
+    const { data, error } = await this.supabase.client
+      .from('journal_lines')
+      .insert({
+        journal_entry_id: dto.journal_entry_id,
+        line_number: dto.line_number,
+        account_id: dto.account_id,
+        debit: dto.debit ?? 0,
+        credit: dto.credit ?? 0,
+        description: dto.description ?? null,
+        cost_center: dto.cost_center ?? null,
+      })
+      .select()
+      .single();
+
+    if (error) {
+      throw error;
+    }
+
+    return data as JournalLine;
   }
 
   async updateLine(id: string, dto: UpdateJournalLineDto): Promise<JournalLine> {

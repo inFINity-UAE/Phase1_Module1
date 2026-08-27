@@ -26,11 +26,12 @@ forgotten until rediscovered the hard way (see decision #22).
 | No DB constraint blocking overlapping period date ranges | Service-layer only; low-frequency/low-concurrency use case | §4.5 |
 | No DB trigger blocking UPDATE of a posted journal entry header | Service-layer only; same shape as the period-overlap gap | §4.6 |
 | Transient `JWT issued at future` under parallel Jest workers | Worked around with `--runInBand` for verification; root cause (clock-skew tolerance) not investigated | §5.9 |
-| `journal-lines` `createLine` not implemented | Stubbed; the posted-line INSERT trigger (§5.9) is already in place so it's safe to build whenever prioritized | §5.8, §5.9 |
+| `createLine` doesn't validate `account_id` is same-company or active | Matches the existing identical gap in `insert_journal_entry_draft` — not a new inconsistency, but a real one | §4.7 |
+| No `deleteLine` route (service/repo exist, no controller route) | Never built | §4.7 |
 
 Stub endpoints still outstanding (not gaps, just unbuilt): `accounts`
-update; journal-lines `createLine`; hard-close/reopen HTTP; close
-checklist (Rules §1.22).
+update; `deleteLine`; hard-close/reopen HTTP; close checklist (Rules
+§1.22).
 
 ---
 
@@ -307,6 +308,48 @@ cover both new routes.
 **Verification:** full suite 3x consecutive clean (19 suites / 180 tests),
 `--runInBand`, on `cuqnkorfhzydxwzkbjlv`. App-layer only — no live-DB
 apply. *(Decision #31)*
+
+### 4.7 Journal line create — `POST /journal-lines` (#32)
+
+`journal_lines` columns, per `schema.sql`: `id`, `journal_entry_id`,
+`line_number`, `account_id`, `debit` / `credit` (`numeric(18,2)`, `>= 0`,
+with a check enforcing exactly one side positive — never both, never
+neither), optional `description` / `cost_center`, `created_at`. Unique
+`(journal_entry_id, line_number)`.
+
+`trg_enforce_journal_balance_on_post` fires only on transition to
+`posted` — a draft entry is allowed to be unbalanced while lines are
+still being added, so `createLine` does not need to check running
+balance. `trg_prevent_posted_line_update` (extended to cover INSERT by
+decision #28) rejects mutation only when the parent's status is
+`posted` specifically — not any non-draft status generally.
+
+- **Route:** `POST /journal-lines`, body carries `journal_entry_id`
+  (no path param); existing `CreateJournalLineDto`.
+- **DTO:** no identity/actor fields (confirmed already absent per #27's
+  audit) — whitelist rejects any spoofed field regardless.
+- **Posted-parent rejection:** the `#28` DB trigger error is surfaced
+  cleanly (400) via the existing `handleDatabaseError` path, not
+  re-implemented in the service — confirmed through `createLine` itself,
+  not only the raw-insert regression test #28 already had.
+- **Auth:** class-level `@UseGuards(SupabaseAuthGuard)` (#27) covers
+  the route.
+
+**Flagged, not fixed:** `createLine` does not validate that `account_id`
+belongs to the same company as the parent journal entry, or that the
+account is active (`is_active = true`) — only the FK constraint is
+enforced. This matches the existing behavior of
+`insert_journal_entry_draft`, which has the identical gap, so this isn't
+a new inconsistency — but both share the same underlying risk (a
+cross-company or deactivated account slipping onto a journal line) and
+would need to be fixed together if addressed at all.
+
+**Flagged, not built:** `deleteLine` has service/repository support but
+no controller route — there is currently no way to delete a journal line
+via the API at all (only create and update).
+
+**Verification:** full suite 3x consecutive clean (19 suites / 186 tests),
+`--runInBand`, on `cuqnkorfhzydxwzkbjlv`. *(Decision #32)*
 
 ---
 
@@ -753,6 +796,44 @@ flag). `createLine` remains untouched/out of scope. Full suite (19 suites
 / 180 tests) run 3x consecutive clean, serially, on `cuqnkorfhzydxwzkbjlv`.
 *(Decision #31)*
 
+### 7.7 Journal line create (`createLine`) — status
+
+**Closed 2026-08-26.** `POST /journal-lines` implemented against the
+actual `journal_lines` schema (debit/credit XOR check, unique
+`journal_entry_id`+`line_number`) — see §4.7 for full behavior,
+including two flagged-not-fixed items: no same-company/active-account
+validation on `account_id` (matches an existing identical gap in
+`insert_journal_entry_draft`), and no `deleteLine` route despite
+service/repo support existing. Confirmed the #28 posted-line INSERT
+trigger fires correctly through this endpoint specifically, not only via
+#28's original raw-insert regression test. Full suite (19 suites / 186
+tests) run 3x consecutive clean, serially, on `cuqnkorfhzydxwzkbjlv`.
+*(Decision #32)*
+
+### 7.8 COA-clone batch insert — test-setup performance (#33)
+
+**Closed 2026-08-26.** Pure performance fix, no product or test-behavior
+change. `ensureCompanyWithCoa` (`src/e2e/e2e-company.setup.ts`) inserted
+the ~183-account demo COA one row per PostgREST call (~183 sequential
+round-trips, ~53s per mint) — used by 8 suites' shared `beforeAll` minting
+plus advisory-lock's 7 per-test mints, 15 mints total in a full run,
+accounting for roughly 13 of the prior ~16-minute total wall-clock time.
+
+Replaced with a single batched `.insert([...])` of all 183 rows,
+pre-assigned UUIDs so `parent_account_id` resolves correctly and the same
+depth/`account_number` insertion order is preserved for
+`trg_enforce_account_hierarchy_depth`. 183 rows is well under PostgREST's
+practical per-call batch guidance (~500–1000), so no chunking was needed.
+No change to COA content, calling suites, `--runInBand`, the JWT retry
+logic (§5.9), or advisory-lock's actual concurrency-load test bodies —
+only its setup got faster.
+
+**Measured:** full-suite wall-clock **297s / 290s / 276s** across 3x
+consecutive `--runInBand` runs (down from the ~953s single-run baseline
+measured pre-fix), per-mint account insert **~549ms** (down from ~53s).
+All three runs: 19 suites / 180 tests clean on `cuqnkorfhzydxwzkbjlv`.
+*(Decision #33)*
+
 ---
 
 ## 8. Decision Log Index
@@ -793,3 +874,5 @@ topical section referenced.
 | 29 | 2026-08-25 | `companies` had no RLS at all (#25) — closed with membership-based `company_isolation_companies` policy via `company_members`/`auth.uid()`, SELECT-only grant to `authenticated`; verified with real anon/authenticated/service_role JWTs; backend paths unchanged | §5.10, §7.4 |
 | 30 | 2026-08-25 | Accounting-periods create/list/update implemented against actual schema (no period label/number column exists); overlap + posted-activity checks are service-layer only (no DB exclusion constraint), flagged as a low-priority concurrent-write race; soft-close remains the only status-transition path; app-layer only, no live-DB apply | §4.5, §7.5 |
 | 31 | 2026-08-26 | Journal-entries list + draft header PATCH; required `company_id` query (+ optional status/period_id); header fields only while draft; no status/identity side door; schema has no posted-header UPDATE trigger (flagged, not fixed); `createLine` still out of scope | §4.6, §7.6 |
+| 32 | 2026-08-26 | `createLine` (`POST /journal-lines`) implemented; debit/credit XOR + posted-parent rejection enforced via existing constraints/#28 trigger, surfaced cleanly; no same-company/active-account check on `account_id` (flagged, matches existing gap in `insert_journal_entry_draft`); `deleteLine` has service/repo support but no route (flagged, not built) | §4.7 |
+| 33 | 2026-08-26 | Test-setup only: `ensureCompanyWithCoa` COA clone changed from per-row inserts to one batched insert (~183 accounts); no product/behavior change; full-suite wall ~953s → ~276–297s (3x clean), per-mint insert ~53s → ~0.55s | §7.8 |

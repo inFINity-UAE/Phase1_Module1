@@ -2,6 +2,7 @@ import { CreateJournalEntryDto } from './dto/create-journal-entry.dto';
 import { CreateOpeningBalanceDto } from './dto/create-opening-balance.dto';
 import { CreateYearEndClosingDto } from './dto/create-year-end-closing.dto';
 import { UpdateJournalLineDto } from './dto/update-journal-line.dto';
+import { CreateJournalLineDto } from './dto/create-journal-line.dto';
 import { AccountingPeriod } from '../accounting-periods/entities/accounting-period.entity';
 import { CompanySettings } from '../company-settings/entities/company-settings.entity';
 import { AccountTrialBalance } from './entities/account-trial-balance.entity';
@@ -94,6 +95,11 @@ export interface JournalEntriesRepository {
   rejectEntry(id: string, rejectedBy: string, reason: string): Promise<JournalEntry>;
   postEntry(id: string): Promise<JournalEntry>;
   reverseEntry(originalId: string, createdBy: string): Promise<JournalEntryReversalResult>;
+  /**
+   * [feature-spec.md decision #32] Insert one journal_lines row. Posted parents
+   * are rejected by trg_prevent_posted_line_update (do not duplicate that check).
+   */
+  insertLine(dto: CreateJournalLineDto): Promise<JournalLine>;
   updateLine(id: string, dto: UpdateJournalLineDto): Promise<JournalLine>;
   deleteLine(id: string): Promise<void>;
   getTrialBalanceTotals(companyId: string): Promise<TrialBalanceTotals>;

@@ -205,6 +205,90 @@ const USER_ID = INTEGRATION_USER_ID;
       expect(insertError?.message).toMatch(/Cannot modify lines of a posted journal entry/i);
     });
 
+    it('createLine succeeds on a draft parent without requiring balance (decision #32)', async () => {
+      const periodId = await getPeriodId();
+      const [accA, accB] = await getTwoAssetAccounts();
+      const entryNumber = await nextEntryNumber();
+
+      const { data: entry, error: entryError } = await supabase.client
+        .from('journal_entries')
+        .insert({
+          company_id: companyId,
+          entry_number: entryNumber,
+          period_id: periodId,
+          entry_date: '2026-01-15',
+          entry_type: JournalEntryType.Manual,
+          status: JournalEntryStatus.Draft,
+          narration: 'createLine draft parent',
+          created_by: USER_ID,
+        })
+        .select('id')
+        .single();
+
+      if (entryError || !entry) {
+        throw entryError ?? new Error('Failed to insert draft entry');
+      }
+      createdEntryIds.push(entry.id);
+
+      // Single debit line — intentionally unbalanced while still draft
+      // (trg_enforce_journal_balance_on_post only fires on post).
+      const line = await service.createLine({
+        journal_entry_id: entry.id,
+        line_number: 1,
+        account_id: accA,
+        debit: 40,
+        credit: 0,
+        description: 'unbalanced draft line',
+      });
+
+      expect(line.journal_entry_id).toBe(entry.id);
+      expect(Number(line.debit)).toBe(40);
+      expect(Number(line.credit)).toBe(0);
+
+      const second = await service.createLine({
+        journal_entry_id: entry.id,
+        line_number: 2,
+        account_id: accB,
+        debit: 0,
+        credit: 15,
+      });
+      expect(second.line_number).toBe(2);
+    });
+
+    it('createLine rejects INSERT on a posted parent via trg_prevent_posted_line_update (#32)', async () => {
+      const entryId = await insertPostedBalancedEntry(90, 'createLine posted parent block');
+      const [, accB] = await getTwoAssetAccounts();
+      const { data: existingLines, error: countError } = await supabase.client
+        .from('journal_lines')
+        .select('line_number')
+        .eq('journal_entry_id', entryId)
+        .order('line_number', { ascending: false })
+        .limit(1);
+
+      if (countError || !existingLines?.length) {
+        throw countError ?? new Error('Existing lines not found');
+      }
+
+      await expect(
+        service.createLine({
+          journal_entry_id: entryId,
+          line_number: existingLines[0].line_number + 1,
+          account_id: accB,
+          debit: 0,
+          credit: 1,
+        }),
+      ).rejects.toThrow(BadRequestException);
+      await expect(
+        service.createLine({
+          journal_entry_id: entryId,
+          line_number: existingLines[0].line_number + 2,
+          account_id: accB,
+          debit: 0,
+          credit: 1,
+        }),
+      ).rejects.toThrow(/Cannot modify lines of a posted journal entry/i);
+    });
+
     it('blocks deleting a line on a posted journal entry (DB trigger)', async () => {
       const entryId = await insertPostedBalancedEntry(80, 'integration posted delete block');
       const { data: line, error } = await supabase.client

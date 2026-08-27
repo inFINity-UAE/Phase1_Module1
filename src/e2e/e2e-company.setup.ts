@@ -142,38 +142,51 @@ export async function ensureCompanyWithCoa(
   const demoIdToNumber = new Map(
     demoWithParents.map((row) => [row.id as string, row.account_number as string]),
   );
-  const numberToCompanyId = new Map<string, string>();
 
+  // Pre-assign UUIDs so parent_account_id can be resolved before insert.
+  // Rows stay ordered by depth then account_number (same as the select above)
+  // so trg_enforce_account_hierarchy_depth sees parents first within one statement.
+  // [feature-spec.md decision #33] Single batched insert — ~183 rows is well under
+  // PostgREST’s practical per-request guidance (chunk at 500–1000); no chunking needed.
+  const numberToCompanyId = new Map<string, string>();
   for (const account of demoAccounts) {
+    numberToCompanyId.set(account.account_number as string, randomUUID());
+  }
+
+  const rows = demoAccounts.map((account) => {
     const parentNumber = account.parent_account_id
       ? demoIdToNumber.get(account.parent_account_id as string)
       : null;
     const parentId = parentNumber ? numberToCompanyId.get(parentNumber) ?? null : null;
 
-    const { data: inserted, error: insertError } = await supabase.client
-      .from('accounts')
-      .insert({
-        company_id: companyId,
-        account_number: account.account_number,
-        account_name: account.account_name,
-        category: account.category,
-        sub_category: account.sub_category,
-        normal_balance: account.normal_balance,
-        parent_account_id: parentId,
-        depth: account.depth,
-        is_system_account: account.is_system_account,
-        is_active: account.is_active,
-        description: account.description,
-      })
-      .select('id, account_number')
-      .single();
+    return {
+      id: numberToCompanyId.get(account.account_number as string)!,
+      company_id: companyId,
+      account_number: account.account_number,
+      account_name: account.account_name,
+      category: account.category,
+      sub_category: account.sub_category,
+      normal_balance: account.normal_balance,
+      parent_account_id: parentId,
+      depth: account.depth,
+      is_system_account: account.is_system_account,
+      is_active: account.is_active,
+      description: account.description,
+    };
+  });
 
-    if (insertError || !inserted) {
-      throw insertError ?? new Error(`Failed to seed account ${account.account_number}`);
-    }
+  const cloneStartedAt = Date.now();
+  const { error: insertError } = await supabase.client.from('accounts').insert(rows);
 
-    numberToCompanyId.set(inserted.account_number as string, inserted.id as string);
+  if (insertError) {
+    throw insertError;
   }
+
+  // eslint-disable-next-line no-console
+  console.log(
+    `[coa-clone] inserted ${rows.length} accounts in ${Date.now() - cloneStartedAt}ms ` +
+      `(company_id=${companyId})`,
+  );
 
   if (companyId === DEMO_COMPANY_ID) {
     await ensureCompanyMember(

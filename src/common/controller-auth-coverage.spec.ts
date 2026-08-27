@@ -71,8 +71,13 @@ describe('Controller auth coverage (decision #24)', () => {
       approve: jest.fn(),
       reject: jest.fn(),
       reverse: jest.fn(),
-      createLine: jest.fn().mockImplementation(() => {
-        throw new Error('Not implemented.');
+      createLine: jest.fn().mockResolvedValue({
+        id: 'ffffffff-ffff-ffff-ffff-ffffffffffff',
+        journal_entry_id: 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
+        line_number: 1,
+        account_id: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+        debit: 1,
+        credit: 0,
       }),
       updateLine: jest.fn().mockResolvedValue({ id: 'ffffffff-ffff-ffff-ffff-ffffffffffff' }),
     };
@@ -229,6 +234,8 @@ describe('Controller auth coverage (decision #24)', () => {
         journal_entry_id: 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
         line_number: 1,
         account_id: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+        debit: 1,
+        credit: 0,
       },
     },
     {
@@ -288,6 +295,17 @@ describe('Controller auth coverage (decision #24)', () => {
       method: 'PATCH',
       path: '/journal-lines/ffffffff-ffff-ffff-ffff-ffffffffffff',
       body: { debit: 1 },
+    },
+    {
+      method: 'POST',
+      path: '/journal-lines',
+      body: {
+        journal_entry_id: 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
+        line_number: 1,
+        account_id: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+        debit: 1,
+        credit: 0,
+      },
     },
   ] as const)(
     'authenticated $method $path reaches handler (not 401)',

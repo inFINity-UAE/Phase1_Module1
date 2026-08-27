@@ -5,7 +5,6 @@ import {
   Injectable,
   InternalServerErrorException,
   NotFoundException,
-  NotImplementedException,
 } from '@nestjs/common';
 import {
   handleDatabaseError,
@@ -559,8 +558,33 @@ export class JournalEntriesService {
     }
   }
 
-  createLine(_dto: CreateJournalLineDto) {
-    throw new NotImplementedException('Not implemented.');
+  /**
+   * [feature-spec.md decision #32] Add a line to an existing entry.
+   * Balance is NOT required here — trg_enforce_journal_balance_on_post only
+   * fires on transition to posted. Posted-parent INSERT is rejected by
+   * trg_prevent_posted_line_update (P0001 → 400); not re-checked in app code.
+   * Same-company / is_active account checks are not applied on entry create
+   * (insert_journal_entry_draft) either — matched here, not invented.
+   */
+  async createLine(dto: CreateJournalLineDto): Promise<JournalLine> {
+    // [schema.sql journal_lines CHECK] debit XOR credit, never both, never zero
+    const debit = dto.debit ?? 0;
+    const credit = dto.credit ?? 0;
+    if (!((debit > 0 && credit === 0) || (credit > 0 && debit === 0))) {
+      throw new BadRequestException(
+        'Each journal line must have either a positive debit or a positive credit, not both or neither',
+      );
+    }
+
+    try {
+      return await this.journalEntriesRepository.insertLine({
+        ...dto,
+        debit,
+        credit,
+      });
+    } catch (error) {
+      handleDatabaseError(error);
+    }
   }
 
   async updateLine(id: string, dto: UpdateJournalLineDto): Promise<JournalLine> {

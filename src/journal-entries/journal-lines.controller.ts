@@ -5,9 +5,11 @@ import { CreateJournalLineDto } from './dto/create-journal-line.dto';
 import { UpdateJournalLineDto } from './dto/update-journal-line.dto';
 
 /**
- * [feature-spec.md decision #27] Session required on every route — controller-level
- * guard (same pattern as decisions #21 / #24). Line DTOs carry no actor identity;
- * posted-line mutations are rejected by prevent_posted_line_mutation (P0001 → 400).
+ * [feature-spec.md decisions #27/#32] Session required on every route —
+ * controller-level SupabaseAuthGuard. Line DTOs carry no actor identity;
+ * posted-line INSERT/UPDATE/DELETE rejected by prevent_posted_line_mutation
+ * (P0001 → 400). createLine implemented (#32); updateLine already built;
+ * deleteLine exists on the service but has no DELETE route here.
  */
 @Controller('journal-lines')
 @UseGuards(SupabaseAuthGuard)

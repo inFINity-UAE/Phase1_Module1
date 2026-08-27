@@ -188,6 +188,7 @@ describe('JournalEntriesService', () => {
       insertGeneratedFromTemplate: jest.fn(),
       postEntry: jest.fn(),
       reverseEntry: jest.fn(),
+      insertLine: jest.fn(),
       updateLine: jest.fn(),
       deleteLine: jest.fn(),
       getTrialBalanceTotals: jest.fn(),
@@ -412,6 +413,62 @@ describe('JournalEntriesService', () => {
     await expect(service.updateLine(LINE_ID, { debit: 999 })).rejects.toThrow(
       'Cannot modify lines of a posted journal entry',
     );
+  });
+
+  describe('createLine (decision #32)', () => {
+    const createDto = {
+      journal_entry_id: ENTRY_ID,
+      line_number: 3,
+      account_id: ACCOUNT_A,
+      debit: 25,
+      credit: 0,
+      description: 'added line',
+    };
+
+    it('inserts a line on a draft parent without requiring entry balance', async () => {
+      const created = {
+        id: LINE_ID,
+        journal_entry_id: ENTRY_ID,
+        line_number: 3,
+        account_id: ACCOUNT_A,
+        debit: 25,
+        credit: 0,
+        description: 'added line',
+        cost_center: null,
+        created_at: '2026-01-15T00:00:00.000Z',
+      };
+      repository.insertLine.mockResolvedValue(created);
+
+      const result = await service.createLine(createDto);
+
+      expect(repository.insertLine).toHaveBeenCalledWith(createDto);
+      expect(result).toEqual(created);
+    });
+
+    it('surfaces posted-parent INSERT rejection from trg_prevent_posted_line_update', async () => {
+      repository.insertLine.mockRejectedValue(
+        pgError(
+          'P0001',
+          'Cannot modify lines of a posted journal entry — reverse it instead',
+        ),
+      );
+
+      await expect(service.createLine(createDto)).rejects.toThrow(BadRequestException);
+      await expect(service.createLine(createDto)).rejects.toThrow(
+        /Cannot modify lines of a posted journal entry/i,
+      );
+    });
+
+    it('rejects a line that is neither debit nor credit (schema CHECK)', async () => {
+      await expect(
+        service.createLine({
+          journal_entry_id: ENTRY_ID,
+          line_number: 3,
+          account_id: ACCOUNT_A,
+        }),
+      ).rejects.toThrow(/positive debit or a positive credit/i);
+      expect(repository.insertLine).not.toHaveBeenCalled();
+    });
   });
 
   it('after posting, attempting to delete a line fails with a DB trigger error', async () => {
