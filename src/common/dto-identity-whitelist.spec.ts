@@ -155,6 +155,9 @@ describe('DTO identity whitelist (forbidNonWhitelisted)', () => {
     ['actor_id', RunRecurringGenerationDto, {}],
     ['actor_id', CreateAccountDto, validAccount],
     ['created_by', CreateAccountDto, validAccount],
+    ['is_system_account', CreateAccountDto, validAccount],
+    ['locked_at', CreateAccountDto, validAccount],
+    ['locked_reason', CreateAccountDto, validAccount],
     ['actor_role', UpdateAccountDto, { account_name: 'Renamed' }],
     ['account_number', UpdateAccountDto, { account_name: 'Renamed' }],
     ['category', UpdateAccountDto, { account_name: 'Renamed' }],
@@ -201,6 +204,18 @@ describe('DTO identity whitelist (forbidNonWhitelisted)', () => {
     const result = await pipe.transform({}, meta(SoftCloseAccountingPeriodDto));
     expect(result).toEqual({});
     expect(result).not.toHaveProperty('closed_by');
+  });
+
+  it('accepts create account without system/lock fields', async () => {
+    const result = await pipe.transform(validAccount, meta(CreateAccountDto));
+    expect(result).toMatchObject({
+      company_id: companyId,
+      account_number: '1999',
+      account_name: 'Test',
+    });
+    expect(result).not.toHaveProperty('is_system_account');
+    expect(result).not.toHaveProperty('locked_at');
+    expect(result).not.toHaveProperty('locked_reason');
   });
 
   it('audit query actor_id remains a filter (not acting identity)', async () => {

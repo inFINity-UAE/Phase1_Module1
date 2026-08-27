@@ -36,4 +36,91 @@ export class SupabaseCompanyMembersRepository implements CompanyMembersRepositor
 
     return (data?.company_id as string | undefined) ?? null;
   }
+
+  async findCompanyIdByJournalLineId(lineId: string): Promise<string | null> {
+    const { data, error } = await this.supabase.client
+      .from('journal_lines')
+      .select('journal_entry_id, journal_entries!inner(company_id)')
+      .eq('id', lineId)
+      .maybeSingle();
+
+    if (error) {
+      throw error;
+    }
+
+    const parent = data?.journal_entries as { company_id?: string } | { company_id?: string }[] | null;
+    if (!parent) {
+      return null;
+    }
+    if (Array.isArray(parent)) {
+      return parent[0]?.company_id ?? null;
+    }
+    return parent.company_id ?? null;
+  }
+
+  async findCompanyIdByAccountId(accountId: string): Promise<string | null> {
+    const { data, error } = await this.supabase.client
+      .from('accounts')
+      .select('company_id')
+      .eq('id', accountId)
+      .maybeSingle();
+
+    if (error) {
+      throw error;
+    }
+
+    return (data?.company_id as string | undefined) ?? null;
+  }
+
+  async findCompanyIdByAccountingPeriodId(periodId: string): Promise<string | null> {
+    const { data, error } = await this.supabase.client
+      .from('accounting_periods')
+      .select('company_id')
+      .eq('id', periodId)
+      .maybeSingle();
+
+    if (error) {
+      throw error;
+    }
+
+    return (data?.company_id as string | undefined) ?? null;
+  }
+
+  async findCompanyIdByRecurringTemplateId(templateId: string): Promise<string | null> {
+    const { data, error } = await this.supabase.client
+      .from('recurring_journal_templates')
+      .select('company_id')
+      .eq('id', templateId)
+      .maybeSingle();
+
+    if (error) {
+      throw error;
+    }
+
+    return (data?.company_id as string | undefined) ?? null;
+  }
+
+  async findCompanyIdByRecurringTemplateLineId(lineId: string): Promise<string | null> {
+    const { data, error } = await this.supabase.client
+      .from('recurring_journal_template_lines')
+      .select('template_id, recurring_journal_templates!inner(company_id)')
+      .eq('id', lineId)
+      .maybeSingle();
+
+    if (error) {
+      throw error;
+    }
+
+    const parent = data?.recurring_journal_templates as
+      | { company_id?: string }
+      | { company_id?: string }[]
+      | null;
+    if (!parent) {
+      return null;
+    }
+    if (Array.isArray(parent)) {
+      return parent[0]?.company_id ?? null;
+    }
+    return parent.company_id ?? null;
+  }
 }

@@ -26,7 +26,7 @@ export class AccountsService {
     }
   }
 
-  async findAll(companyId?: string): Promise<Account[]> {
+  async findAll(companyId: string): Promise<Account[]> {
     try {
       return await this.accountsRepository.findAll(companyId);
     } catch (error) {

@@ -33,7 +33,10 @@ export interface RecurringJournalTemplatesRepository {
     dto: UpdateRecurringJournalTemplateLineDto,
   ): Promise<RecurringJournalTemplateLine>;
   deleteLine(id: string): Promise<void>;
-  findDueTemplates(asOfDate: string): Promise<RecurringJournalTemplateWithLines[]>;
+  findDueTemplates(
+    asOfDate: string,
+    companyId: string,
+  ): Promise<RecurringJournalTemplateWithLines[]>;
   findOpenPeriodForDate(
     companyId: string,
     date: string,

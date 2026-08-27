@@ -17,22 +17,28 @@ import {
 } from '../recurring-journal-templates/recurring-journal-templates.controller';
 import { RecurringJournalTemplatesService } from '../recurring-journal-templates/recurring-journal-templates.service';
 import { CompanyMembersService } from '../company-members/company-members.service';
-import { JournalEntryCompanyRoleGuard } from '../auth/guards/journal-entry-company-role.guard';
+import { CompanyMembershipGuard } from '../auth/guards/company-membership.guard';
 import { SupabaseAuthGuard } from '../auth/guards/supabase-auth.guard';
+import { CompanyRole } from './enums/company-role.enum';
 
 /**
- * [feature-spec.md decisions #24/#27] Controllers reject unauthenticated requests (401)
- * and still succeed for a verified Bearer session — same bar as #21.
+ * [feature-spec.md decisions #24/#27/#41] Controllers reject unauthenticated
+ * requests (401) and succeed for a verified Bearer session with membership.
  */
 describe('Controller auth coverage (decision #24)', () => {
   let app: INestApplication;
   let baseUrl: string;
   let getUser: jest.Mock;
+  let resolveRole: jest.Mock;
+  let resolveCompanyIdForResource: jest.Mock;
 
   const sessionUserId = '00000000-0000-0000-0000-0000000000a2';
+  const companyId = 'cccccccc-cccc-cccc-cccc-cccccccccccc';
 
   beforeAll(async () => {
     getUser = jest.fn();
+    resolveRole = jest.fn().mockResolvedValue(CompanyRole.Owner);
+    resolveCompanyIdForResource = jest.fn().mockResolvedValue(companyId);
 
     const accountsService = {
       findAll: jest.fn().mockResolvedValue([]),
@@ -54,7 +60,7 @@ describe('Controller auth coverage (decision #24)', () => {
     const journalEntriesService = {
       findAll: jest.fn().mockResolvedValue([]),
       findOne: jest.fn().mockResolvedValue({
-        entry: { id: 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', company_id: 'cccccccc-cccc-cccc-cccc-cccccccccccc' },
+        entry: { id: 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', company_id: companyId },
         lines: [],
         attachments: [],
       }),
@@ -64,7 +70,11 @@ describe('Controller auth coverage (decision #24)', () => {
         lines: [],
         attachments: [],
       }),
-      create: jest.fn().mockResolvedValue({ entry: { id: 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb' }, lines: [], attachments: [] }),
+      create: jest.fn().mockResolvedValue({
+        entry: { id: 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb' },
+        lines: [],
+        attachments: [],
+      }),
       createOpeningBalance: jest.fn(),
       runYearEndClosing: jest.fn(),
       post: jest.fn(),
@@ -90,7 +100,9 @@ describe('Controller auth coverage (decision #24)', () => {
       update: jest.fn().mockResolvedValue({ id: 'dddddddd-dddd-dddd-dddd-dddddddddddd' }),
       remove: jest.fn().mockResolvedValue(undefined),
       addLine: jest.fn().mockResolvedValue({ id: 'eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee' }),
-      generateTemplate: jest.fn().mockResolvedValue({ template_id: 'dddddddd-dddd-dddd-dddd-dddddddddddd' }),
+      generateTemplate: jest.fn().mockResolvedValue({
+        template_id: 'dddddddd-dddd-dddd-dddd-dddddddddddd',
+      }),
       runDueGenerations: jest.fn().mockResolvedValue([]),
       updateLine: jest.fn().mockResolvedValue({ id: 'eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee' }),
       removeLine: jest.fn().mockResolvedValue(undefined),
@@ -112,7 +124,7 @@ describe('Controller auth coverage (decision #24)', () => {
       ],
       providers: [
         SupabaseAuthGuard,
-        JournalEntryCompanyRoleGuard,
+        CompanyMembershipGuard,
         { provide: AccountsService, useValue: accountsService },
         { provide: AccountingPeriodsService, useValue: accountingPeriodsService },
         { provide: JournalEntriesService, useValue: journalEntriesService },
@@ -129,7 +141,9 @@ describe('Controller auth coverage (decision #24)', () => {
         {
           provide: CompanyMembersService,
           useValue: {
-            getMembership: jest.fn().mockResolvedValue({ role: 'owner' }),
+            resolveRole,
+            resolveCompanyIdForResource,
+            resolveRoleForJournalEntry: jest.fn(),
           },
         },
       ],
@@ -148,6 +162,8 @@ describe('Controller auth coverage (decision #24)', () => {
 
   beforeEach(() => {
     getUser.mockReset();
+    resolveRole.mockReset().mockResolvedValue(CompanyRole.Owner);
+    resolveCompanyIdForResource.mockReset().mockResolvedValue(companyId);
   });
 
   async function request(
@@ -170,9 +186,13 @@ describe('Controller auth coverage (decision #24)', () => {
   }
 
   const previouslyUnguardedRoutes: Array<{ method: string; path: string; body?: unknown }> = [
-    { method: 'GET', path: '/accounts' },
+    { method: 'GET', path: `/accounts?company_id=${companyId}` },
     { method: 'GET', path: '/accounts/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa' },
-    { method: 'POST', path: '/accounts', body: {} },
+    {
+      method: 'POST',
+      path: '/accounts',
+      body: { company_id: companyId, account_number: '1999', account_name: 'X', category: 'asset', normal_balance: 'debit' },
+    },
     { method: 'PATCH', path: '/accounts/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa/deactivate' },
     {
       method: 'PATCH',
@@ -183,22 +203,19 @@ describe('Controller auth coverage (decision #24)', () => {
       method: 'POST',
       path: '/accounting-periods',
       body: {
-        company_id: 'cccccccc-cccc-cccc-cccc-cccccccccccc',
+        company_id: companyId,
         period_start: '2026-01-01',
         period_end: '2026-01-31',
         fiscal_year: 2026,
       },
     },
-    { method: 'GET', path: '/accounting-periods?company_id=cccccccc-cccc-cccc-cccc-cccccccccccc' },
+    { method: 'GET', path: `/accounting-periods?company_id=${companyId}` },
     {
       method: 'PATCH',
       path: '/accounting-periods/22222222-2222-2222-2222-222222222222',
       body: { fiscal_year: 2027 },
     },
-    {
-      method: 'GET',
-      path: '/journal-entries?company_id=cccccccc-cccc-cccc-cccc-cccccccccccc',
-    },
+    { method: 'GET', path: `/journal-entries?company_id=${companyId}` },
     { method: 'GET', path: '/journal-entries/bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb' },
     { method: 'GET', path: '/journal-entries/bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb/attachments' },
     {
@@ -206,8 +223,8 @@ describe('Controller auth coverage (decision #24)', () => {
       path: '/journal-entries/bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
       body: { narration: 'revised' },
     },
-    { method: 'GET', path: '/recurring-journal-templates' },
-    { method: 'POST', path: '/recurring-journal-templates/run-due', body: {} },
+    { method: 'GET', path: `/recurring-journal-templates?company_id=${companyId}` },
+    { method: 'POST', path: '/recurring-journal-templates/run-due', body: { company_id: companyId } },
     { method: 'PATCH', path: '/recurring-journal-templates/dddddddd-dddd-dddd-dddd-dddddddddddd', body: {} },
     {
       method: 'DELETE',
@@ -221,7 +238,12 @@ describe('Controller auth coverage (decision #24)', () => {
     {
       method: 'POST',
       path: '/recurring-journal-templates/dddddddd-dddd-dddd-dddd-dddddddddddd/lines',
-      body: {},
+      body: {
+        line_number: 1,
+        account_id: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+        debit: 1,
+        credit: 0,
+      },
     },
     {
       method: 'PATCH',
@@ -232,7 +254,7 @@ describe('Controller auth coverage (decision #24)', () => {
       method: 'DELETE',
       path: '/recurring-journal-template-lines/eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee',
     },
-    { method: 'GET', path: '/audit-log?company_id=cccccccc-cccc-cccc-cccc-cccccccccccc' },
+    { method: 'GET', path: `/audit-log?company_id=${companyId}` },
     {
       method: 'POST',
       path: '/journal-lines',
@@ -265,7 +287,7 @@ describe('Controller auth coverage (decision #24)', () => {
   );
 
   it.each([
-    { method: 'GET', path: '/accounts' },
+    { method: 'GET', path: `/accounts?company_id=${companyId}` },
     {
       method: 'PATCH',
       path: '/accounts/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
@@ -273,13 +295,13 @@ describe('Controller auth coverage (decision #24)', () => {
     },
     {
       method: 'GET',
-      path: '/accounting-periods?company_id=cccccccc-cccc-cccc-cccc-cccccccccccc',
+      path: `/accounting-periods?company_id=${companyId}`,
     },
     {
       method: 'POST',
       path: '/accounting-periods',
       body: {
-        company_id: 'cccccccc-cccc-cccc-cccc-cccccccccccc',
+        company_id: companyId,
         period_start: '2026-01-01',
         period_end: '2026-01-31',
         fiscal_year: 2026,
@@ -296,16 +318,20 @@ describe('Controller auth coverage (decision #24)', () => {
     },
     {
       method: 'GET',
-      path: '/journal-entries?company_id=cccccccc-cccc-cccc-cccc-cccccccccccc',
+      path: `/journal-entries?company_id=${companyId}`,
     },
     {
       method: 'PATCH',
       path: '/journal-entries/bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
       body: { narration: 'revised' },
     },
-    { method: 'GET', path: '/recurring-journal-templates' },
-    { method: 'POST', path: '/recurring-journal-templates/run-due', body: {} },
-    { method: 'GET', path: '/audit-log?company_id=cccccccc-cccc-cccc-cccc-cccccccccccc' },
+    { method: 'GET', path: `/recurring-journal-templates?company_id=${companyId}` },
+    {
+      method: 'POST',
+      path: '/recurring-journal-templates/run-due',
+      body: { company_id: companyId },
+    },
+    { method: 'GET', path: `/audit-log?company_id=${companyId}` },
     {
       method: 'PATCH',
       path: '/journal-lines/ffffffff-ffff-ffff-ffff-ffffffffffff',
@@ -327,7 +353,7 @@ describe('Controller auth coverage (decision #24)', () => {
       path: '/journal-lines/ffffffff-ffff-ffff-ffff-ffffffffffff',
     },
   ] as const)(
-    'authenticated $method $path reaches handler (not 401)',
+    'authenticated $method $path reaches handler (not 401/403)',
     async ({ method, path, body }) => {
       getUser.mockResolvedValue({
         data: { user: { id: sessionUserId } },
@@ -338,6 +364,7 @@ describe('Controller auth coverage (decision #24)', () => {
       expect(result.status).not.toBe(401);
       expect(result.status).not.toBe(403);
       expect(getUser).toHaveBeenCalledWith('valid-session-token');
+      expect(resolveRole).toHaveBeenCalled();
     },
   );
 

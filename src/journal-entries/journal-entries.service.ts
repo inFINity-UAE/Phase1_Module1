@@ -210,9 +210,16 @@ export class JournalEntriesService {
     id: string,
     userId: string,
     dto: PostJournalEntryDto = {},
+    /**
+     * [feature-spec.md decision #41] Role from CompanyMembershipGuard when
+     * present — avoids a second company_members lookup on HTTP post.
+     */
+    role?: CompanyRole,
   ): Promise<JournalEntryWithDetails> {
-    const { role } = await this.companyMembersService.resolveRoleForJournalEntry(userId, id);
-    const actor: ActorContext = { id: userId, role };
+    const actorRole =
+      role ??
+      (await this.companyMembersService.resolveRoleForJournalEntry(userId, id)).role;
+    const actor: ActorContext = { id: userId, role: actorRole };
 
     const existing = await this.findOne(id);
 
@@ -262,9 +269,13 @@ export class JournalEntriesService {
     id: string,
     userId: string,
     dto: ApproveJournalEntryDto = {},
+    /** [feature-spec.md decision #41] Prefer role already resolved by the guard. */
+    role?: CompanyRole,
   ): Promise<JournalEntryWithDetails> {
-    const { role } = await this.companyMembersService.resolveRoleForJournalEntry(userId, id);
-    const actor: ActorContext = { id: userId, role };
+    const actorRole =
+      role ??
+      (await this.companyMembersService.resolveRoleForJournalEntry(userId, id)).role;
+    const actor: ActorContext = { id: userId, role: actorRole };
     this.assertApprovalActor(actor.role, 'approve');
 
     const existing = await this.findOne(id);
@@ -305,9 +316,13 @@ export class JournalEntriesService {
     id: string,
     userId: string,
     dto: RejectJournalEntryDto,
+    /** [feature-spec.md decision #41] Prefer role already resolved by the guard. */
+    role?: CompanyRole,
   ): Promise<JournalEntryWithDetails> {
-    const { role } = await this.companyMembersService.resolveRoleForJournalEntry(userId, id);
-    const actor: ActorContext = { id: userId, role };
+    const actorRole =
+      role ??
+      (await this.companyMembersService.resolveRoleForJournalEntry(userId, id)).role;
+    const actor: ActorContext = { id: userId, role: actorRole };
     this.assertApprovalActor(actor.role, 'reject');
 
     const existing = await this.findOne(id);

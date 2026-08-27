@@ -57,7 +57,7 @@ export class RecurringJournalTemplatesService {
     }
   }
 
-  async findAll(companyId?: string): Promise<RecurringJournalTemplateWithLines[]> {
+  async findAll(companyId: string): Promise<RecurringJournalTemplateWithLines[]> {
     try {
       return await this.templatesRepository.findAll(companyId);
     } catch (error) {
@@ -135,12 +135,19 @@ export class RecurringJournalTemplatesService {
   /**
    * [feature-spec] Generation job for due recurring templates.
    * [Rules §1.3] auto_post=false → draft for review; auto_post=true → post with balance check.
+   * [feature-spec.md decision #41] Scoped to one company_id — no cross-tenant batch.
    */
-  async runDueGenerations(asOfDate?: string): Promise<RecurringGenerationResult[]> {
+  async runDueGenerations(
+    companyId: string,
+    asOfDate?: string,
+  ): Promise<RecurringGenerationResult[]> {
     const runDate = asOfDate ?? new Date().toISOString().slice(0, 10);
 
     try {
-      const dueTemplates = await this.templatesRepository.findDueTemplates(runDate);
+      const dueTemplates = await this.templatesRepository.findDueTemplates(
+        runDate,
+        companyId,
+      );
       const results: RecurringGenerationResult[] = [];
 
       for (const templateWithLines of dueTemplates) {

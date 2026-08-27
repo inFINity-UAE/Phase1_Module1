@@ -12,7 +12,12 @@ import { AccountCategory } from '../../common/enums/account-category.enum';
 import { NormalBalance } from '../../common/enums/normal-balance.enum';
 import { IsPostgresUuid } from '../../common/validators/is-postgres-uuid';
 
-/** Writable columns of public.accounts. Required = NOT NULL with no default. [schema.sql] */
+/**
+ * Client-writable columns for custom account create.
+ * [feature-spec.md §7.16 finding #2 / decision #42] is_system_account,
+ * locked_at, and locked_reason are system-controlled only — not on this DTO
+ * (forbidNonWhitelisted rejects them with 400).
+ */
 export class CreateAccountDto {
   @IsPostgresUuid()
   company_id!: string;
@@ -46,19 +51,7 @@ export class CreateAccountDto {
 
   @IsOptional()
   @IsBoolean()
-  is_system_account?: boolean;
-
-  @IsOptional()
-  @IsBoolean()
   is_active?: boolean;
-
-  @IsOptional()
-  @IsString()
-  locked_at?: string;
-
-  @IsOptional()
-  @IsString()
-  locked_reason?: string;
 
   @IsOptional()
   @IsString()

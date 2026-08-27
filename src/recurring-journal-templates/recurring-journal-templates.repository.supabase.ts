@@ -236,10 +236,14 @@ export class SupabaseRecurringJournalTemplatesRepository
     }
   }
 
-  async findDueTemplates(asOfDate: string): Promise<RecurringJournalTemplateWithLines[]> {
+  async findDueTemplates(
+    asOfDate: string,
+    companyId: string,
+  ): Promise<RecurringJournalTemplateWithLines[]> {
     const { data: templates, error } = await this.supabase.client
       .from('recurring_journal_templates')
       .select('*')
+      .eq('company_id', companyId)
       .eq('is_active', true)
       .lte('next_run_date', asOfDate)
       .order('next_run_date');

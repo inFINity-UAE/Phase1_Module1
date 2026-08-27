@@ -9,6 +9,8 @@ export class SupabaseAccountsRepository implements AccountsRepository {
   constructor(private readonly supabase: SupabaseService) {}
 
   async insert(dto: CreateAccountDto): Promise<Account> {
+    // [feature-spec.md §7.16 finding #2 / decision #42] System flags are never
+    // taken from the client DTO — seed/locking paths set them explicitly.
     const row: Record<string, unknown> = {
       company_id: dto.company_id,
       account_number: dto.account_number,
@@ -17,10 +19,10 @@ export class SupabaseAccountsRepository implements AccountsRepository {
       sub_category: dto.sub_category ?? null,
       normal_balance: dto.normal_balance,
       parent_account_id: dto.parent_account_id ?? null,
-      is_system_account: dto.is_system_account ?? false,
+      is_system_account: false,
       is_active: dto.is_active ?? true,
-      locked_at: dto.locked_at ?? null,
-      locked_reason: dto.locked_reason ?? null,
+      locked_at: null,
+      locked_reason: null,
       description: dto.description ?? null,
     };
 

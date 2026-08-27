@@ -21,12 +21,23 @@ fixed by default. Kept in one place specifically so none of these repeat
 this project's own recurring failure mode: a flagged item quietly
 forgotten until rediscovered the hard way (see decision #22).
 
+**Closed 2026-08-27 by decision #41:** Nest company-membership enforcement
+on every tenant-scoped route (was the critical §7.16 finding #1). See §5.11.
+**Closed 2026-08-27 by decision #42:** `CreateAccountDto` no longer
+accepts `is_system_account`/`locked_at`/`locked_reason` from the client
+(was §7.16 finding #2). See §4.12.
+
 | Gap | Why it's not fixed yet | Detail |
 |---|---|---|
 | Accounts: no service-layer block on UPDATE to `is_system_account` accounts at the DB level | `trg_prevent_account_deletion` is DELETE-only; UPDATE protection is service-layer only (#36) | §4.10 |
+| `UpdateRecurringJournalTemplateDto` can reassign `company_id` via `PartialType` | Found by the 2026-08-27 audit | §7.16 finding #3 |
+| Recurring-template line inserts skip `assertAccountsUsableForCompany` (5th call site) | Same class of gap #35/#39 fixed for 4 other call sites; this one wasn't covered | §7.16 finding #4 |
+| `accounts.parent_account_id` not validated as same-company | Found by the same audit | §7.16 finding #5 |
+| `trg_enforce_journal_balance_on_post` is UPDATE-only — INSERT as `posted` bypasses it | Same shape as the pre-#28 posted-line INSERT gap | §7.16 finding #6 |
+| Trigger helper functions lack the §5.1 EXECUTE-revoke checklist | Found by the same audit | §7.16 finding #7 |
+| `getAccountTrialBalance` has a service method but no HTTP route | Found by the same audit | §7.16 finding #8 |
 
-This is currently the **only** open item in Module 1.1.A — everything
-else flagged across decisions #21–#39 has been closed and verified.
+Findings #3–#8 remain queued (#1 closed by #41, #2 closed by #42).
 
 **Note on test execution:** `--runInBand` was required from decision #28
 through #36 due to a JWT clock-skew issue — that issue is now closed
@@ -465,10 +476,12 @@ already covered exactly what these two paths needed:
 Same 400 error shape as #35's original two call sites, for consistency.
 `createLine` and `insert_journal_entry_draft` untouched.
 
-This closes the last remaining item from §4.9's original flag list.
-Combined with #35, all four client write paths onto `journal_lines`
-(`createLine`, draft-insert, opening-balance, `updateLine`) now enforce
-the same same-company + active-account check.
+This closes the last remaining item from §4.9's original flag list at
+the time. **A comprehensive later audit (2026-08-27, see the Known Open
+Items note at the top of this document) found a fifth call site —
+recurring-template line inserts — that also skips this check; that is a
+new, separate finding, not a regression of this decision, and remains
+open pending a future decision.**
 
 **Verification:** full suite 3x consecutive clean (21 suites / 218
 tests), parallel mode, on `cuqnkorfhzydxwzkbjlv` (~113–119s per run).
@@ -502,9 +515,44 @@ here.
 - **Auth:** class-level `@UseGuards(SupabaseAuthGuard)` (#24) already
   covers the route.
 
+**Note:** the same comprehensive audit that found the fifth
+`account_id`-validation call site (§4.9) also found that
+`CreateAccountDto` (the create path, not this update path) accepted
+`is_system_account`, `locked_at`, and `locked_reason` from the client —
+a separate finding, closed below in §4.12.
+
 **Verification:** full suite 3x consecutive clean (20 suites / 206 tests),
 `--runInBand`, on `cuqnkorfhzydxwzkbjlv` (3 runs: ~286s, ~292s, ~284s).
 *(Decision #36)*
+
+---
+
+### 4.12 Account creation — system-controlled fields locked down (#42)
+
+`§7.16` finding #2: `CreateAccountDto` accepted `is_system_account`,
+`locked_at`, and `locked_reason` directly from the client — all three are
+meant to be system-controlled, not client-chosen:
+
+- `is_system_account` is set once at seed time (e.g. `3100 Retained
+  Earnings`, decision #16) — never settable via a client create request.
+- `locked_at` / `locked_reason` belong to the account-locking mechanism
+  (deactivation on transaction history) — not freely chosen at creation.
+
+**Fixed:** all three fields removed from `CreateAccountDto`'s type
+definition — the global `whitelist`/`forbidNonWhitelisted` pipe
+(decisions #10/#21) now rejects any request including them with 400,
+same pattern as every prior DTO-spoofing fix in this project. Defense in
+depth added at the repository layer too: the insert now hardcodes
+`is_system_account = false`, `locked_at = null`, `locked_reason = null`
+rather than reading them from the DTO even as a fallback — confirmed the
+service method never read these fields in the first place, so this is
+belt-and-suspenders, not a behavior change.
+
+**Verification:** targeted suite (3 new cases: reject
+`is_system_account`/`locked_at`/`locked_reason` → 400; accept without
+them; repository defaults confirmed `false`/`null`) plus the broader
+`dto-identity-whitelist` + `accounts.service.spec` suites — 3 suites / 68
+tests passed. *(Decision #42)*
 
 ---
 
@@ -548,6 +596,14 @@ authenticated request's own session context — never from a client-supplied
 field in the request body — since `service_role` bypasses RLS and the
 backend is the only remaining safety net for tenant isolation.
 *(Decision #10)*
+
+**This "backend is the only remaining safety net" principle is currently
+violated on most routes — see the Known Open Items note at the top of
+this document.** Identity/actor spoofing has been swept repeatedly
+(§5.3, §5.6, #27), but *membership* — whether the authenticated user
+belongs to the `company_id` being acted on at all — has only ever been
+verified as a side effect of the post/approve/reject role checks. This
+is being treated as this project's top-priority open item.
 
 ### 5.2 Roles — minimal, not full RBAC
 
@@ -645,6 +701,11 @@ this gets the same treatment — fix with the identical controller-level-
 guard pattern as #21, across every controller listed above, before
 treating any remaining stub-endpoint work as the next priority.
 *(Decision #24)*
+
+**Note:** this decision fixed *authentication* (is there a valid
+session?), which is necessary but not sufficient — it does not verify
+*membership* (does that session belong to the company being acted on?).
+See the top-of-document note and §5.1's update.
 
 ### 5.7 `companies` table RLS — history
 
@@ -844,7 +905,7 @@ also gate it without being circular).
 
 **Policy DDL:**
 ```sql
-create or replace function is_company_member(p_company_id uuid)
+create or replace function private.is_company_member(p_company_id uuid)
 returns boolean
 language sql
 stable
@@ -862,12 +923,12 @@ $$;
 alter table companies enable row level security;
 
 create policy company_isolation_companies on companies
-  using (is_company_member(id));
+  using (private.is_company_member(id));
 
 grant select on public.companies to authenticated;
 ```
 
-`is_company_member()` is `SECURITY DEFINER` specifically so the
+`private.is_company_member()` is `SECURITY DEFINER` specifically so the
 membership check itself isn't blocked by `company_isolation_members` (the
 existing RLS policy on `company_members`, left unchanged) — without this,
 the policy would need to read a table it doesn't have permission to read
@@ -879,10 +940,30 @@ ever get broader table access), not current backend behavior, since the
 Nest backend always queries as `service_role` and bypasses RLS entirely
 today.
 
+**Security Advisor hardening (decision #40):** the helper lives in schema
+`private` (not PostgREST-exposed), so it cannot be called via
+`/rest/v1/rpc/is_company_member`. `EXECUTE` is granted to `authenticated`
+(required for RLS evaluation) and `service_role`; **revoked from `anon`**.
+`btree_gist` (and other extensions) install into schema `extensions`, not
+`public` (lint 0014). `schema.sql` also **drops** any leftover
+`public.is_company_member` and **relocates** `btree_gist` out of `public`
+before `CREATE EXTENSION IF NOT EXISTS` — that statement is a no-op when
+the extension already exists in another schema, which is why a schema-only
+apply could still leave Advisor warnings until
+`apply_security_advisor_lints.sql` ran.
+
 **Live apply:** required via Supabase SQL Editor (no automated migration
 runner in this project, consistent with #28's precedent) —
-`docs/source-of-truth/apply_companies_rls.sql`; `schema.sql` §11/§12
-updated to match.
+`docs/source-of-truth/apply_companies_rls.sql` for the original #29
+policy; if Advisor still reports 0014/0028/0029 after an older apply, run
+`docs/source-of-truth/apply_security_advisor_lints.sql`. Current
+`schema.sql` §11/§12 already match #40.
+
+**Note — decision #40's RLS policy alone did NOT close Nest membership
+enforcement.** That gap is closed by decision #41 (§5.11): Nest routes
+now verify `company_members` before every tenant-scoped handler.
+Companies RLS (#29/#40) and Nest membership (#41) are complementary —
+RLS for direct Data API access; #41 for `service_role` backend routes.
 
 **Regression test:** `companies.rls.integration.spec.ts` — real JWTs, not
 service_role: `anon` → `42501`; `authenticated` → sees only their member
@@ -893,6 +974,53 @@ unaffected).
 consecutive clean, **17 suites / 140 tests** (`--runInBand`), on project
 `cuqnkorfhzydxwzkbjlv`. Backend Nest paths confirmed unchanged.
 *(Decision #29)*
+
+### 5.11 Nest company-membership enforcement on every tenant route (#41)
+
+**Problem.** §5.1 makes the Nest backend (running as `service_role`,
+bypassing RLS) the only tenant-isolation safety net. Until #41,
+membership was verified only on journal post/approve/reject — as a side
+effect of `JournalEntryCompanyRoleGuard` / `resolveRoleForJournalEntry`.
+Every other route trusted a caller-supplied `company_id` (body/query) or
+a parent resource id without confirming the authenticated user belonged
+to that company. That was a real cross-tenant access gap (gap-audit
+§7.16 finding #1).
+
+**Mechanism.** One shared guard, not per-route patches:
+
+- `@RequireCompanyMembership({ type, … })` metadata on every HTTP handler
+- `CompanyMembershipGuard` (after `SupabaseAuthGuard`) resolves
+  `company_id` then calls `CompanyMembersService.resolveRole` — **403**
+  when the user is not a member (never 404 for non-membership)
+- Resolution shapes:
+  - `body` / `query` — direct `company_id`
+  - `param` + resource — account, accounting_period, journal_entry,
+    journal_line, recurring_template, recurring_template_line
+  - `body_ref` — e.g. `journal_entry_id` on `POST /journal-lines`
+- Fail-closed: missing metadata → 500 (completeness test asserts every
+  handler declares the decorator)
+- Attaches `request.user.role` so post/approve/reject **reuse** the
+  resolved role (no second `company_members` lookup). Legacy
+  `JournalEntryCompanyRoleGuard` removed.
+
+**API tightening required by the gate:**
+
+- `GET /accounts` and `GET /recurring-journal-templates` now **require**
+  `company_id` (same bar as periods/journals)
+- `POST /recurring-journal-templates/run-due` requires body `company_id`
+  and only generates for that company (no cross-tenant batch)
+
+**Routes covered (all handlers on these controllers):**
+accounts (6), accounting-periods (5), journal-entries (11),
+journal-lines (3), recurring-journal-templates (8),
+recurring-journal-template-lines (2), audit-log (1).
+
+**Tests:** `company-membership.guard.integration.spec.ts` — reflector
+completeness + live JWT non-member **403** on every shape + member
+success; `controller-auth-coverage.spec.ts` updated for the new guard.
+
+**Out of scope for #41:** audit findings #2–#8 (separate prompts).
+*(Decision #41)*
 
 ---
 
@@ -1139,9 +1267,78 @@ tests) run 3x consecutive clean, in genuine parallel mode, on
 **Closed 2026-08-27.** `create_opening_balance_entry` and `updateLine`
 (when changing `account_id`) now reuse `assertAccountsUsableForCompany`
 unchanged — see §4.9's closure note. This was the last of §4.9's
-originally flagged call sites. Full suite (21 suites / 218 tests) run
-3x consecutive clean, in genuine parallel mode, on `cuqnkorfhzydxwzkbjlv`
-(~113–119s per run). *(Decision #39)*
+*originally* flagged call sites (a later, separate audit found a fifth
+site — see the Known Open Items note at the top of this document). Full
+suite (21 suites / 218 tests) run 3x consecutive clean, in genuine
+parallel mode, on `cuqnkorfhzydxwzkbjlv` (~113–119s per run).
+*(Decision #39)*
+
+### 7.15 Security Advisor lints (extension_in_public / SECURITY DEFINER RPC) — status
+
+**Closed 2026-08-27.** Supabase Security Advisor WARN on fresh apply:
+`btree_gist` in `public` (0014), and `public.is_company_member` executable
+by `anon`/`authenticated` as SECURITY DEFINER via PostgREST RPC
+(0028/0029). Fix: extensions install into schema `extensions`; membership
+helper moved to `private.is_company_member` (not API-exposed); EXECUTE
+revoked from `anon`, kept for `authenticated` + `service_role` so #29 RLS
+still evaluates. `schema.sql` also relocates a public `btree_gist` and
+drops leftover `public.is_company_member` (IF NOT EXISTS / CREATE OR
+REPLACE cannot move objects across schemas). Live one-shot for older DBs:
+`docs/source-of-truth/apply_security_advisor_lints.sql`. Fresh project
+`hilaeuvltstgedlpgjcw` verified 3x consecutive clean in parallel mode
+(21 suites / 218 tests). See §5.10. *(Decision #40)*
+
+**Note:** this decision addressed Supabase Security Advisor lints
+(schema hygiene for extensions and a specific RPC's exposure surface) —
+it is unrelated to, and does not address, the company-membership
+enforcement gap described at the top of this document. Do not treat #40
+as having closed that item.
+
+### 7.16 Comprehensive gap audit — 8 new findings, 1 critical
+
+**2026-08-27, no code changed — reporting only.** A systematic sweep
+across auth-guard coverage, identity/actor-field spoofing,
+service-layer-only enforcement, cross-call-site validation consistency,
+missing routes, RLS coverage, grant hygiene, and trigger completeness —
+the same categories decisions #21–#40 had each individually addressed —
+found 8 new findings not previously in this document, ranked by risk:
+
+| Rank | Risk | Finding | Status |
+|---|---|---|---|
+| 1 | **Security — critical** | Company membership not verified on Nest routes except post/approve/reject | **Closed by decision #41 (§5.11)** |
+| 2 | Security | `CreateAccountDto` accepts `is_system_account`, `locked_at`, `locked_reason` from the client | **Closed by decision #42 (§4.12)** |
+| 3 | Security | `UpdateRecurringJournalTemplateDto` can reassign `company_id` via `PartialType` | Open |
+| 4 | Integrity | Recurring-template line inserts skip `assertAccountsUsableForCompany` (5th call site, §4.9) | Open |
+| 5 | Integrity | `accounts.parent_account_id` not validated as same-company | Open |
+| 6 | Integrity | `trg_enforce_journal_balance_on_post` is UPDATE-only — INSERT as `posted` bypasses it | Open |
+| 7 | Hygiene | Trigger helper functions lack §5.1 EXECUTE-revoke checklist | Open |
+| 8 | Completeness | `getAccountTrialBalance` has a service method but no HTTP route | Open |
+
+**Already confirmed solid by this same audit (0 new findings):** all 7
+controllers have auth guards; all 11 tables + the trial-balance view have
+correct RLS coverage; classic `*_by` identity-spoofing fields are clean
+everywhere; `deleteLine` is routed (#34).
+
+Findings 1–2 closed (#41, #42). Findings 3–8 remain queued.
+
+### 7.17 Nest company-membership enforcement — status
+
+**Closed 2026-08-27.** Shared `CompanyMembershipGuard` +
+`@RequireCompanyMembership` on every tenant-scoped handler; post/approve/
+reject reuse guard-resolved role (no duplicate lookup). See §5.11.
+Verified: completeness reflector test + non-member 403 on all route
+shapes + member success; full suite 3x consecutive clean in parallel mode
+on `hilaeuvltstgedlpgjcw`. *(Decision #41)*
+
+### 7.18 `CreateAccountDto` system-field lockdown — status
+
+**Closed 2026-08-27.** §7.16 finding #2. `is_system_account`, `locked_at`,
+`locked_reason` removed from `CreateAccountDto`; repository insert
+hardcodes system defaults rather than reading them even as a fallback.
+Verified: 3 targeted cases (reject all three fields with 400; accept
+without them; confirm repository defaults) plus `dto-identity-whitelist` +
+`accounts.service.spec` — 3 suites / 68 tests passed. See §4.12.
+*(Decision #42)*
 
 ---
 
@@ -1190,4 +1387,7 @@ topical section referenced.
 | 36 | 2026-08-27 | `PATCH /accounts/:id` implemented — metadata fields only (`account_name`, `sub_category`, `description`); structural/identity/hierarchy fields rejected by DTO; system-account UPDATE protection is service-layer only, no DB trigger (flagged) | §4.10, §7.11 |
 | 37 | 2026-08-27 | Closed §5.9 JWT clock-skew via a shared fetch-level retry wrapper on `SupabaseService`'s secret-key client (matches only `PGRST303`/"JWT issued at future"; 5 attempts, `250ms*attempt`); no legacy `service_role` key swap; `ensureAuthUser`'s old retry removed as redundant; `--runInBand` no longer required — verified in genuine parallel mode, ~953s baseline → ~105s | §5.9, §7.12 |
 | 38 | 2026-08-27 | DB-level defense-in-depth added for the two remaining service-layer-only gaps: `accounting_periods_company_daterange_excl` (btree_gist exclusion constraint, closes #30's period-overlap flag) and `trg_prevent_nondraft_header_mutation` (BEFORE UPDATE trigger, closes #31's posted-header flag); both confirmed live; existing service-layer checks retained; verified in parallel mode | §4.11, §7.13 |
-| 39 | 2026-08-27 | Closed §4.9's remaining flagged call sites: `create_opening_balance_entry` and `updateLine` (when `account_id` changes) now reuse `assertAccountsUsableForCompany` unchanged; same 400 shape as #35; `createLine`/draft-insert untouched | §4.9, §7.14 |
+| 39 | 2026-08-27 | Closed §4.9's *originally flagged* call sites: `create_opening_balance_entry` and `updateLine` (when `account_id` changes) now reuse `assertAccountsUsableForCompany` unchanged; same 400 shape as #35; `createLine`/draft-insert untouched. **Note:** a later audit found a 5th call site (recurring-template lines) not covered here — see §7.16 finding #4 | §4.9, §7.14 |
+| 40 | 2026-08-27 | Security Advisor: move `btree_gist` (and other extensions) to schema `extensions`; move `is_company_member` to `private` (drop public RPC surface); revoke EXECUTE from `anon`. **Unrelated to the membership-enforcement gap found in the same day's later audit (§7.16) — does not close it.** | §5.10, §7.15 |
+| 41 | 2026-08-27 | Closed Nest cross-tenant membership gap (audit §7.16 finding #1): shared CompanyMembershipGuard + @RequireCompanyMembership on every tenant-scoped route; post/approve/reject reuse guard-resolved role (no duplicate lookup); accounts/recurring list + run-due require company_id; 403 for non-members | §5.11, §7.17 |
+| 42 | 2026-08-27 | Closed §7.16 finding #2: `CreateAccountDto` no longer accepts `is_system_account`/`locked_at`/`locked_reason` from the client; repository insert hardcodes system defaults as defense in depth | §4.12, §7.18 |

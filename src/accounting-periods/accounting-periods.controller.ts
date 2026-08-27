@@ -11,6 +11,8 @@ import {
 } from '@nestjs/common';
 import { AuthenticatedUser } from '../auth/authenticated-user';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { RequireCompanyMembership } from '../auth/decorators/require-company-membership.decorator';
+import { CompanyMembershipGuard } from '../auth/guards/company-membership.guard';
 import { SupabaseAuthGuard } from '../auth/guards/supabase-auth.guard';
 import { AccountingPeriodsService } from './accounting-periods.service';
 import { CreateAccountingPeriodDto } from './dto/create-accounting-period.dto';
@@ -18,37 +20,38 @@ import { UpdateAccountingPeriodDto } from './dto/update-accounting-period.dto';
 import { SoftCloseAccountingPeriodDto } from './dto/soft-close-accounting-period.dto';
 
 /**
- * [feature-spec.md decisions #10/#11/#21/#30] Every route requires an authenticated
- * session (controller-level guard). soft_closed_by / closed_by / reopened_by are
- * never taken from the body — soft-close uses @CurrentUser().id. Hard-close and
- * reopen HTTP endpoints are not built yet. Create/list/update use company_id from
- * body/query like accounts/journals (AuthenticatedUser has no company_id).
+ * [feature-spec.md decisions #10/#11/#21/#30/#41] Session + membership on every
+ * route. soft_closed_by from @CurrentUser().id — never body.
  */
 @Controller('accounting-periods')
-@UseGuards(SupabaseAuthGuard)
+@UseGuards(SupabaseAuthGuard, CompanyMembershipGuard)
 export class AccountingPeriodsController {
   constructor(private readonly accountingPeriodsService: AccountingPeriodsService) {}
 
   @Post()
+  @RequireCompanyMembership({ type: 'body' })
   create(@Body() dto: CreateAccountingPeriodDto) {
     return this.accountingPeriodsService.create(dto);
   }
 
   @Get()
-  findAll(@Query('company_id') companyId?: string) {
-    return this.accountingPeriodsService.findAll(companyId ?? '');
+  @RequireCompanyMembership({ type: 'query' })
+  findAll(@Query('company_id') companyId: string) {
+    return this.accountingPeriodsService.findAll(companyId);
   }
 
   @Get(':id')
+  @RequireCompanyMembership({ type: 'param', resource: 'accounting_period' })
   findOne(@Param('id', ParseUUIDPipe) id: string) {
     return this.accountingPeriodsService.findOne(id);
   }
 
   /**
-   * [feature-spec.md decisions #10/#11] soft_closed_by is the authenticated
-   * session user — never a client body field.
+   * [feature-spec.md decisions #10/#11/#41] soft_closed_by from session;
+   * membership from period row.
    */
   @Post(':id/soft-close')
+  @RequireCompanyMembership({ type: 'param', resource: 'accounting_period' })
   softClose(
     @Param('id', ParseUUIDPipe) id: string,
     @CurrentUser() user: AuthenticatedUser,
@@ -58,6 +61,7 @@ export class AccountingPeriodsController {
   }
 
   @Patch(':id')
+  @RequireCompanyMembership({ type: 'param', resource: 'accounting_period' })
   update(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateAccountingPeriodDto,
