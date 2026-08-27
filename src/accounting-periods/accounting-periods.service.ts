@@ -23,9 +23,9 @@ export class AccountingPeriodsService {
   ) {}
 
   /**
-   * [feature-spec.md decision #30] Create open period. Overlap rejected in-app —
-   * schema.sql has unique(company_id, period_start, period_end) only (exact match),
-   * not an exclusion/overlap constraint. No schema change without an explicit ask.
+   * [feature-spec.md decision #30 / #38] Create open period. Overlap rejected
+   * in-app for a clean 409; DB exclusion constraint
+   * `accounting_periods_company_daterange_excl` is the concurrent-write backstop.
    */
   async create(dto: CreateAccountingPeriodDto): Promise<AccountingPeriod> {
     this.assertValidDateRange(dto.period_start, dto.period_end);

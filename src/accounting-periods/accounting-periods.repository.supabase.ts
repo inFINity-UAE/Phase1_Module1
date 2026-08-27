@@ -77,9 +77,9 @@ export class SupabaseAccountingPeriodsRepository implements AccountingPeriodsRep
   }
 
   /**
-   * [feature-spec.md decision #30] Overlap = period_start < candidateEnd AND
-   * period_end > candidateStart. Schema only has unique(company_id, period_start,
-   * period_end) — exact duplicates — not a GiST/exclusion overlap constraint.
+   * [feature-spec.md decision #30 / #38] Overlap = period_start < candidateEnd AND
+   * period_end > candidateStart. DB backstop: accounting_periods_company_daterange_excl
+   * (half-open daterange). This query remains the normal-path check for a clean 409.
    */
   async hasOverlappingPeriod(
     companyId: string,

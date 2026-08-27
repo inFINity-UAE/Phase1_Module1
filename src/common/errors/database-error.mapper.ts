@@ -38,6 +38,16 @@ export function mapDatabaseError(error: PostgrestError): never {
     throw new ConflictException(message);
   }
 
+  // Exclusion constraint — [feature-spec.md decision #38] overlapping periods
+  if (code === '23P01') {
+    if (message.includes('accounting_periods_company_daterange_excl')) {
+      throw new ConflictException(
+        'Accounting period overlaps an existing period for this company',
+      );
+    }
+    throw new ConflictException(message);
+  }
+
   throw new InternalServerErrorException(message);
 }
 

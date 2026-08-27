@@ -28,6 +28,8 @@
 
 create extension if not exists "uuid-ossp";
 create extension if not exists pgcrypto;
+-- Required for uuid equality in GiST exclusion constraints (period overlap).
+create extension if not exists btree_gist;
 
 -- ============================================================================
 -- 0. ENUMS
@@ -218,6 +220,18 @@ create table accounting_periods (
   check (period_end > period_start)
 );
 
+-- [feature-spec.md decision #38] Overlap backstop matching service-layer predicate
+-- (period_start < other.end AND period_end > other.start). Half-open daterange
+-- '[)' encodes that predicate so adjacent periods that only share an endpoint
+-- (e.g. Jan 1–31 and Feb 1–28) are allowed; true overlaps are rejected.
+-- Requires btree_gist (uuid = operator on GiST).
+alter table accounting_periods
+  add constraint accounting_periods_company_daterange_excl
+  exclude using gist (
+    company_id with =,
+    daterange(period_start, period_end, '[)') with &&
+  );
+
 create index idx_periods_company on accounting_periods(company_id);
 
 -- ============================================================================
@@ -360,6 +374,35 @@ $$ language plpgsql
 create trigger trg_prevent_posted_entry_deletion
   before delete on journal_entries
   for each row execute function prevent_posted_entry_deletion();
+
+-- [feature-spec.md decision #38] Header immutability after draft.
+-- Header columns (PATCH /journal-entries/:id / §4.6): narration,
+-- reference_number, entry_date. Attachments live on journal_attachments
+-- (separate table — not this trigger). Workflow columns that
+-- post/approve/reject/reverse/RPCs legitimately update when status is
+-- not draft (status, posted_at, approved_*, rejected_*, reversed_by_*,
+-- requires_approval, updated_at, …) are allowed.
+create or replace function prevent_nondraft_header_mutation()
+returns trigger as $$
+begin
+  if old.status = 'draft' then
+    return new;
+  end if;
+
+  if new.narration is distinct from old.narration
+     or new.reference_number is distinct from old.reference_number
+     or new.entry_date is distinct from old.entry_date then
+    raise exception 'Cannot modify header of a non-draft journal entry — reverse it instead';
+  end if;
+
+  return new;
+end;
+$$ language plpgsql
+   set search_path = public, pg_temp;
+
+create trigger trg_prevent_nondraft_header_mutation
+  before update on journal_entries
+  for each row execute function prevent_nondraft_header_mutation();
 
 -- ============================================================================
 -- 5. ATTACHMENTS

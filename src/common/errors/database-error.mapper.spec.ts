@@ -42,4 +42,29 @@ describe('mapDatabaseError', () => {
       );
     }
   });
+
+  it('maps period overlap exclusion (23P01) to ConflictException', () => {
+    expect(() =>
+      mapDatabaseError(
+        pgError(
+          '23P01',
+          'conflicting key value violates exclusion constraint "accounting_periods_company_daterange_excl"',
+        ),
+      ),
+    ).toThrow(ConflictException);
+
+    try {
+      mapDatabaseError(
+        pgError(
+          '23P01',
+          'conflicting key value violates exclusion constraint "accounting_periods_company_daterange_excl"',
+        ),
+      );
+    } catch (error) {
+      expect(error).toBeInstanceOf(ConflictException);
+      expect((error as ConflictException).message).toBe(
+        'Accounting period overlaps an existing period for this company',
+      );
+    }
+  });
 });

@@ -23,8 +23,8 @@ export interface AccountingPeriodsRepository {
   /**
    * True when another period for the same company overlaps [periodStart, periodEnd)
    * using the standard interval test: start < otherEnd AND end > otherStart.
-   * [schema.sql] has unique(company_id, period_start, period_end) only — no
-   * overlap exclusion constraint; this is the application-layer check.
+   * [feature-spec.md #38] DB exclusion constraint is the concurrent-write backstop;
+   * this remains the normal-path application-layer check.
    */
   hasOverlappingPeriod(
     companyId: string,

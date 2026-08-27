@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import { createJwtClockSkewRetryFetch } from './supabase-jwt-clock-skew-retry';
 
 @Injectable()
 export class SupabaseService {
@@ -15,6 +16,10 @@ export class SupabaseService {
       );
     }
 
-    this.client = createClient(url, secretKey);
+    // [feature-spec.md §5.9 / decision #37] Fetch-level retry covers Auth Admin
+    // + PostgREST + any future call on this secret-key client.
+    this.client = createClient(url, secretKey, {
+      global: { fetch: createJwtClockSkewRetryFetch() },
+    });
   }
 }

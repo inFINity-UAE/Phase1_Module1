@@ -98,6 +98,54 @@ const hasSupabase = Boolean(
       ).rejects.toThrow(ConflictException);
     });
 
+    it('blocks overlapping period insert at the DB even when service check is bypassed (#38)', async () => {
+      const base = await service.create({
+        company_id: companyId,
+        period_start: '2094-01-01',
+        period_end: '2094-01-31',
+        fiscal_year: 2094,
+      });
+      createdPeriodIds.push(base.id);
+
+      // Direct PostgREST insert — bypasses AccountingPeriodsService overlap check.
+      const { data, error } = await supabase.client
+        .from('accounting_periods')
+        .insert({
+          company_id: companyId,
+          period_start: '2094-01-15',
+          period_end: '2094-02-15',
+          fiscal_year: 2094,
+        })
+        .select('id')
+        .maybeSingle();
+
+      expect(data).toBeNull();
+      expect(error).not.toBeNull();
+      // Postgres exclusion violation
+      expect(error?.code).toBe('23P01');
+      expect(error?.message).toMatch(/accounting_periods_company_daterange_excl/i);
+    });
+
+    it('allows adjacent periods that only share an endpoint (matches service predicate)', async () => {
+      const a = await service.create({
+        company_id: companyId,
+        period_start: '2095-01-01',
+        period_end: '2095-01-31',
+        fiscal_year: 2095,
+      });
+      createdPeriodIds.push(a.id);
+
+      const b = await service.create({
+        company_id: companyId,
+        period_start: '2095-02-01',
+        period_end: '2095-02-28',
+        fiscal_year: 2095,
+      });
+      createdPeriodIds.push(b.id);
+
+      expect(b.id).toBeTruthy();
+    });
+
     it('updates editable fields on an unused open period', async () => {
       const created = await service.create({
         company_id: companyId,

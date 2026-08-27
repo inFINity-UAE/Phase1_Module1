@@ -235,8 +235,8 @@ export class SupabaseJournalEntriesRepository implements JournalEntriesRepositor
       headerPatch.entry_date = patch.entry_date;
     }
 
-    // Optimistic draft filter — service already checks status; this catches a
-    // concurrent status change between read and write (no header immutability trigger).
+    // Optimistic draft filter — service already checks status; DB trigger
+    // trg_prevent_nondraft_header_mutation (#38) is the PostgREST backstop.
     const { data: updatedRows, error: updateError } = await this.supabase.client
       .from('journal_entries')
       .update(headerPatch)

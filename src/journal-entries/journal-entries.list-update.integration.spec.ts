@@ -176,5 +176,53 @@ const USER_ID = INTEGRATION_USER_ID;
         service.update(id, { narration: 'should-fail' }, USER_ID),
       ).rejects.toThrow(/only draft headers are editable/i);
     });
+
+    it('blocks direct PostgREST header UPDATE on a posted entry (DB trigger #38)', async () => {
+      const id = await insertDraft('posted-header-immutable');
+      const { data: accounts } = await supabase.client
+        .from('accounts')
+        .select('id')
+        .eq('company_id', companyId)
+        .eq('category', 'asset')
+        .limit(2);
+      if (!accounts || accounts.length < 2) {
+        throw new Error('Need two asset accounts');
+      }
+      await supabase.client.from('journal_lines').insert([
+        {
+          journal_entry_id: id,
+          line_number: 1,
+          account_id: accounts[0].id,
+          debit: 10,
+          credit: 0,
+        },
+        {
+          journal_entry_id: id,
+          line_number: 2,
+          account_id: accounts[1].id,
+          debit: 0,
+          credit: 10,
+        },
+      ]);
+      const { error: postError } = await supabase.client
+        .from('journal_entries')
+        .update({ status: JournalEntryStatus.Posted, posted_at: new Date().toISOString() })
+        .eq('id', id);
+      if (postError) {
+        throw postError;
+      }
+
+      // Bypass JournalEntriesService — raw header mutation on posted row.
+      const { error: updateError } = await supabase.client
+        .from('journal_entries')
+        .update({ narration: 'tampered-via-postgrest' })
+        .eq('id', id);
+
+      expect(updateError).not.toBeNull();
+      expect(updateError?.code).toBe('P0001');
+      expect(updateError?.message).toMatch(
+        /Cannot modify header of a non-draft journal entry/i,
+      );
+    });
   },
 );

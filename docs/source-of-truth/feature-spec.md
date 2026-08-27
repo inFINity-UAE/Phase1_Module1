@@ -23,15 +23,18 @@ forgotten until rediscovered the hard way (see decision #22).
 
 | Gap | Why it's not fixed yet | Detail |
 |---|---|---|
-| No DB constraint blocking overlapping period date ranges | Service-layer only; low-frequency/low-concurrency use case | §4.5 |
-| No DB trigger blocking UPDATE of a posted journal entry header | Service-layer only; same shape as the period-overlap gap | §4.6 |
-| Transient `JWT issued at future` under parallel Jest workers | Worked around with `--runInBand` for verification; root cause (clock-skew tolerance) not investigated | §5.9 |
-| `createLine` doesn't validate `account_id` is same-company or active | Matches the existing identical gap in `insert_journal_entry_draft` — not a new inconsistency, but a real one | §4.7 |
-| No `deleteLine` route (service/repo exist, no controller route) | Never built | §4.7 |
+| `create_opening_balance_entry` doesn't validate `account_id` is same-company or active | Same class of gap #35 fixed for `createLine`/draft-insert, but this RPC is separate and wasn't in scope for that pass | §4.9 |
+| `updateLine` doesn't validate `account_id` is same-company or active when changing it | Same reasoning as above — flagged, not fixed | §4.9 |
+| Accounts: no service-layer block on UPDATE to `is_system_account` accounts at the DB level | `trg_prevent_account_deletion` is DELETE-only; UPDATE protection is service-layer only (#36) | §4.10 |
 
-Stub endpoints still outstanding (not gaps, just unbuilt): `accounts`
-update; `deleteLine`; hard-close/reopen HTTP; close checklist (Rules
-§1.22).
+**Note on test execution:** `--runInBand` was required from decision #28
+through #36 due to a JWT clock-skew issue — that issue is now closed
+(decision #37, §5.9/§7.12). Any verification numbers logged before #37
+that mention `--runInBand` reflect the requirement *at the time*, not a
+constraint still in effect today.
+
+Stub endpoints still outstanding (not gaps, just unbuilt): hard-close/
+reopen HTTP; close checklist (Rules §1.22).
 
 ---
 
@@ -253,6 +256,8 @@ low-frequency and low-concurrency by nature, so this is a low-priority
 gap, not an urgent one — but it's a known, accepted state, not an
 oversight, and worth revisiting (likely a `tstzrange` exclusion
 constraint) if period creation ever becomes concurrent/automated.
+**Closed by decision #38 (§4.11) — see there for the exclusion
+constraint added.**
 
 **Verification:** full suite 3x consecutive clean (18 suites / 164 tests
 — 137 prior post-#29, minus RLS-suite overlap accounted for, plus new
@@ -299,7 +304,8 @@ a posted journal entry's header (narration/date/etc.) via PostgREST or a
 bypassed service path — the same class of "service-layer only" gap §4.5
 flagged for period overlap. Harmless for normal API use while the
 service-layer check holds; worth a dedicated `BEFORE UPDATE` trigger if
-defense-in-depth at the DB is wanted later.
+defense-in-depth at the DB is wanted later. **Closed by decision #38
+(§4.11) — see there for the trigger added.**
 
 **Auth:** class-level `@UseGuards(SupabaseAuthGuard)` on
 `JournalEntriesController` (already in place per §5.6/#24) confirmed to
@@ -308,6 +314,46 @@ cover both new routes.
 **Verification:** full suite 3x consecutive clean (19 suites / 180 tests),
 `--runInBand`, on `cuqnkorfhzydxwzkbjlv`. App-layer only — no live-DB
 apply. *(Decision #31)*
+
+### 4.11 DB-level defense-in-depth: period overlap + posted-header immutability (#38)
+
+Closes both flagged service-layer-only gaps at once, since they share
+the same shape: §4.5's period-overlap check and §4.6's posted-header
+UPDATE check now have a DB backstop, not just an application-layer
+check. Both service-layer checks are retained unchanged — the DB
+constraints are a backstop for anything that bypasses the service layer
+(a direct PostgREST call, a bug, a future code path that forgets the
+check), not a replacement for the normal-path 400/409 the service layer
+already produces.
+
+**Accounting periods:** an exclusion constraint,
+`accounting_periods_company_daterange_excl`, using the `btree_gist`
+extension (enabled as part of this change) to prevent overlapping
+`(period_start, period_end)` ranges for the same `company_id` at the DB
+level. A direct overlapping INSERT now fails with Postgres error
+`23P01`, confirmed via a live probe, independent of whether the service
+layer's check is bypassed.
+
+**Journal entries:** a new trigger,
+`trg_prevent_nondraft_header_mutation`, `BEFORE UPDATE` on
+`journal_entries`, rejecting header-field mutation (`narration`,
+`reference_number`, `entry_date`, attachments) whenever `status !=
+'draft'` — mirroring the existing `trg_prevent_posted_line_update` (#28)
+error style for consistency. Legitimate system-driven transitions
+(`status`, `approved_by`, `posted_at`, and the rest of the
+approve/reject/post/reverse flow) are unaffected — the trigger only
+blocks unauthorized header edits after draft, not the state-machine
+transitions those flows already perform correctly.
+
+**Live apply:** both changes required a live-DB apply (no automated
+migration runner, per #28/#29's precedent) — confirmed live via a
+direct probe (exclusion constraint returns `23P01` on overlap) and via
+`pg_get_triggerdef` matching `schema.sql` for the new trigger.
+
+**Verification:** full suite 3x consecutive clean (21 suites / 216
+tests), run in genuine parallel mode (`--maxWorkers=50%`, no
+`--runInBand` — no longer required since #37) — **~122s / ~115s / ~115s**
+per run, on `cuqnkorfhzydxwzkbjlv`. *(Decision #38)*
 
 ### 4.7 Journal line create — `POST /journal-lines` (#32)
 
@@ -342,14 +388,99 @@ enforced. This matches the existing behavior of
 `insert_journal_entry_draft`, which has the identical gap, so this isn't
 a new inconsistency — but both share the same underlying risk (a
 cross-company or deactivated account slipping onto a journal line) and
-would need to be fixed together if addressed at all.
+would need to be fixed together if addressed at all — **closed for both
+`createLine` and `insert_journal_entry_draft` by decision #35 (§4.9)**;
+`create_opening_balance_entry` and `updateLine` remain flagged (see §4.9).
 
-**Flagged, not built:** `deleteLine` has service/repository support but
-no controller route — there is currently no way to delete a journal line
-via the API at all (only create and update).
+**`deleteLine` route:** was missing at the time of this decision — closed
+by decision #34 (§4.8).
 
 **Verification:** full suite 3x consecutive clean (19 suites / 186 tests),
 `--runInBand`, on `cuqnkorfhzydxwzkbjlv`. *(Decision #32)*
+
+### 4.8 Journal line delete — `DELETE /journal-lines/:id` (#34)
+
+Closes the gap §4.7 flagged: `deleteLine` already existed on the service
+and repository (raw `.delete().eq('id', id)`, with `handleDatabaseError`
+mapping `P0001` → 400) but had no HTTP route.
+
+- **Route:** `DELETE /journal-lines/:id` on `JournalLinesController`,
+  wired to the existing `deleteLine` method (204 on success).
+- **Posted parent:** `trg_prevent_posted_line_update` (#28, `BEFORE
+  INSERT OR UPDATE OR DELETE`) rejects DELETE when the parent's status
+  is `posted`; surfaced as 400 — same pattern as `createLine` (#32).
+  Confirmed through the service path this new route calls, not only via
+  the raw trigger.
+- **Auth:** class-level `@UseGuards(SupabaseAuthGuard)` (#27) covers
+  the route.
+- **Out of scope:** `createLine` / `updateLine` unchanged.
+
+**Verification:** full suite 3x consecutive clean (19 suites / 190 tests),
+`--runInBand`, on `cuqnkorfhzydxwzkbjlv`. *(Decision #34)*
+
+### 4.9 Journal line `account_id` company + active checks (#35)
+
+Closes the gap §4.7/#32 flagged, for the two client write paths that
+accept an arbitrary `account_id` onto `journal_lines`:
+
+1. `createLine` → `insertLine`
+2. `insert_journal_entry_draft` (via `insertDraft` and
+   `insertGeneratedFromTemplate`)
+
+Rejects with **400** when the referenced account doesn't exist, its
+`company_id` differs from the parent entry/company, or `is_active =
+false`. The underlying FK constraint is unchanged — this is an
+additional application-level check, not a schema change.
+
+**Implementation:** a single shared helper,
+`assertAccountsUsableForCompany` (`journal-line-account.validation.ts`),
+called from the journal-entries repository on both write paths (before
+the draft RPC call, and before the line INSERT) — one rule
+implementation, not duplicated logic, and no `AccountsModule` refactor
+required.
+
+**Flagged, not fixed in this pass:** `create_opening_balance_entry` has
+the identical class of gap (it also accepts client-supplied
+`p_lines.account_id` values) but is a separate RPC and was out of scope
+here. `updateLine` can still change a line's `account_id` without these
+checks. Year-end and reversal line inserts are unaffected — they copy
+system-resolved accounts, not raw client-supplied IDs, so they were
+never exposed to this gap.
+
+**Verification:** full suite 3x consecutive clean (20 suites / 196 tests),
+`--runInBand`, on `cuqnkorfhzydxwzkbjlv`. *(Decision #35)*
+
+### 4.10 Accounts update — `PATCH /accounts/:id` (#36)
+
+`accounts` columns and their editability, per `schema.sql`:
+
+| Column(s) | Editable via this PATCH? | Why |
+|---|---|---|
+| `account_name`, `sub_category`, `description` | Yes | Descriptive metadata only |
+| `account_number`, `category`, `normal_balance` | No | Structural — changing these would corrupt the account-numbering scheme (§1) and historical reporting |
+| `parent_account_id`, `depth` | No | Hierarchy identity |
+| `is_system_account`, `company_id` | No | Identity / protection flags |
+| `is_active` | No | Handled by the existing dedicated deactivate route, not this endpoint |
+
+`cost_center` lives on `journal_lines`, not `accounts` — not applicable
+here.
+
+- **DTO:** a purpose-built `UpdateAccountDto` (not `PartialType(CreateAccountDto)`)
+  whitelisting only the three editable fields above — structural fields
+  are rejected outright by the DTO itself, not just by service logic.
+- **System accounts:** `trg_prevent_account_deletion` is **DELETE-only**
+  at the DB level — it does not block UPDATE. System-account protection
+  on UPDATE (e.g. preventing `3100 Retained Earnings`'s metadata from
+  being edited) is enforced at the **service layer only**. Flagged, not
+  a DB-level guarantee — consistent with this project's existing
+  service-layer-only gaps (period overlap §4.5, posted-header update
+  §4.6).
+- **Auth:** class-level `@UseGuards(SupabaseAuthGuard)` (#24) already
+  covers the route.
+
+**Verification:** full suite 3x consecutive clean (20 suites / 206 tests),
+`--runInBand`, on `cuqnkorfhzydxwzkbjlv` (3 runs: ~286s, ~292s, ~284s).
+*(Decision #36)*
 
 ---
 
@@ -583,6 +714,99 @@ test setup) — not addressed here to avoid scope creep on a trigger fix.
 `cuqnkorfhzydxwzkbjlv`, run serially (`--runInBand`) per the JWT note
 above. Live `pg_get_triggerdef` confirmed matching `schema.sql`.
 *(Decision #28)*
+
+**§5.9 update (2026-08-27) — root cause investigated; fix not yet
+applied.** No new decision number; this updates the open item rather
+than closing it.
+
+Reproduced under parallel Jest (`--maxWorkers=50%`):
+`companies.rls.integration.spec.ts`'s `beforeAll` failed all 3 tests with
+`JWT issued at future` (~8s suite abort). The flake is genuinely
+intermittent — 12 consecutive full parallel runs in the same session
+passed clean (20 suites / 206 tests each). A standalone 96-job concurrent
+admin+insert stress test did not reproduce it in isolation.
+
+**Ruled out:** cross-worker token caching/reuse (each worker creates its
+own client, no shared session), and `withAuthRetry` itself introducing
+the race (it only retries — it doesn't mint or share tokens). Local
+clock was ~+0.7s ahead of a reference time source and Windows Time
+service was found stopped, but sampled `iat` values on real access
+tokens were within 0–1s of local time — not consistent with a
+meaningful local NTP-drift explanation.
+
+**Root cause:** this project's `SUPABASE_SECRET_KEY` is an opaque
+`sb_secret_…` key, not a legacy `service_role` JWT. Supabase's hosted API
+Gateway verifies that opaque key and mints a short-lived JWT (`iat ≈
+now`) per request, forwarded to GoTrue/PostgREST for validation. When the
+gateway's issuing clock is briefly ahead of the validating service's
+clock, the request is rejected with the classic `PGRST303`/"JWT issued
+at future" error. Parallel Jest workers raise concurrent token-minting
+volume across edge nodes, which matches the parallel-only, intermittent
+nature of the symptom. This is a gateway-vs-validator clock relationship,
+not a client-side (laptop) clock problem.
+
+One related, previously-unflagged detail: `ensureAuthUser`'s retry logic
+only wraps Auth Admin calls. `companies.insert` / `company_members.upsert`
+(PostgREST, same `sb_secret` key path) are not retried — so a gateway-skew
+failure on those specific calls isn't covered by the existing workaround
+even though Auth Admin is.
+
+**Recommended fix, not yet applied (pick one, needs a decision):**
+1. *Preferred* — switch the backend/test `SUPABASE_SECRET_KEY` to the
+   legacy `service_role` JWT (Dashboard → API Keys → Legacy), which has
+   an `iat` far in the past and so never enters the short-lived
+   gateway-minted-token path. Requires adding that legacy key to
+   `.env.local`, which isn't present today.
+2. *Fallback, workaround only* — broaden `withAuthRetry` to also wrap
+   the untested PostgREST setup writes (`companies` insert,
+   `company_members` upsert), not just Auth Admin. Reduces the failure
+   window without addressing the underlying cause.
+3. *Hygiene, not sufficient alone* — start the Windows Time service /
+   enable automatic NTP sync. Helps client-side auth correctness in
+   general but does not touch the gateway↔validator skew that's the
+   actual cause here.
+
+**Status: closed by decision #37.** See below.
+
+**§5.9 closure (2026-08-27, decision #37).** Fixed with a shared
+fetch-level retry wrapper on `SupabaseService`'s `global.fetch` — the
+single client constructed with `SUPABASE_SECRET_KEY` — rather than a
+per-call-site patch or a switch to the legacy `service_role` JWT
+(explicitly rejected: that key type is on Supabase's own deprecation
+path, and depending on it would trade this flagged issue for a future
+one).
+
+Because the wrapper sits at the client's `fetch` level rather than
+wrapping individual calls, Auth Admin, PostgREST, and any future call
+made through this client are covered automatically — not just the
+specific calls known to fail today. `ensureAuthUser`'s bespoke retry
+logic (the original #28 workaround) was removed as redundant once this
+wrapper existed, so there's now exactly one retry implementation, not
+two doing the same job.
+
+**Match criteria (narrow, by design):** only `/JWT issued at future/i`
+or a PostgREST `code === 'PGRST303'` response — nothing else retries.
+This was a deliberate constraint so the wrapper can't mask unrelated
+bugs by silently retrying arbitrary failures.
+
+**Backoff:** 5 attempts, `250ms * attempt` — reused from the removed
+`ensureAuthUser` helper's existing parameters rather than inventing new
+timing.
+
+**Verification — the actual proof this is fixed, not just re-hidden:**
+full suite run 3x consecutive **without** `--runInBand` (genuine parallel
+workers, the condition that originally triggered the flake):
+
+| Run | Result | Wall |
+|---|---|---|
+| 1 | 21 suites / 212 tests | ~113s |
+| 2 | 21 suites / 212 tests | ~106s |
+| 3 | 21 suites / 212 tests | ~104s |
+
+`--runInBand` is no longer required for this project's tests. Combined
+with #33's batch-insert fix, full-suite wall-clock time has gone from
+the original ~953s baseline to ~105s — roughly a 9x improvement.
+*(Decision #37)*
 
 ### 5.10 `companies` RLS membership policy — closes §5.7 (#29)
 
@@ -834,6 +1058,58 @@ measured pre-fix), per-mint account insert **~549ms** (down from ~53s).
 All three runs: 19 suites / 180 tests clean on `cuqnkorfhzydxwzkbjlv`.
 *(Decision #33)*
 
+### 7.9 Journal line delete — status
+
+**Closed 2026-08-27.** `DELETE /journal-lines/:id` implemented, wired to
+the pre-existing `deleteLine` service method — see §4.8. Confirmed the
+#28 posted-line trigger correctly blocks deletion of a line on a posted
+parent through this route specifically. Full suite (19 suites / 190
+tests) run 3x consecutive clean, serially, on `cuqnkorfhzydxwzkbjlv`.
+*(Decision #34)*
+
+### 7.10 Journal line `account_id` validation — status
+
+**Closed 2026-08-27.** Same-company + active-account checks added for
+both `createLine` and `insert_journal_entry_draft` via one shared
+helper — see §4.9, including the two remaining flagged call sites
+(`create_opening_balance_entry`, `updateLine`). Full suite (20 suites /
+196 tests) run 3x consecutive clean, serially, on `cuqnkorfhzydxwzkbjlv`.
+*(Decision #35)*
+
+### 7.11 Accounts update — status
+
+**Closed 2026-08-27.** `PATCH /accounts/:id` implemented with a
+purpose-built whitelist DTO (metadata fields only) — see §4.10 for the
+full editable/non-editable column breakdown, and the flagged gap that
+system-account UPDATE protection is service-layer only (no DB trigger,
+unlike the DELETE-only `trg_prevent_account_deletion`). Full suite (20
+suites / 206 tests) run 3x consecutive clean, serially, on
+`cuqnkorfhzydxwzkbjlv` (~284–292s per run). *(Decision #36)*
+
+### 7.12 JWT clock-skew — closed
+
+**Closed 2026-08-27.** Root-caused in the §5.9 update earlier this same
+day, fixed same day: a shared fetch-level retry wrapper on
+`SupabaseService`'s secret-key client, narrowly matching only
+`PGRST303`/"JWT issued at future" — see §5.9's closure note for full
+detail. `ensureAuthUser`'s old bespoke retry was removed as redundant.
+**`--runInBand` is no longer required.** Verified with 3x consecutive
+clean full-suite runs in genuine parallel mode (21 suites / 212 tests,
+~104–113s each) — down from the ~953s single-run baseline this whole
+investigation started from (roughly 9x faster, combined with #33).
+*(Decision #37)*
+
+### 7.13 DB-level defense-in-depth: period overlap + posted-header immutability — status
+
+**Closed 2026-08-27.** Both remaining service-layer-only gaps from §4.5
+(#30) and §4.6 (#31) now have a DB backstop — see §4.11 for full detail:
+a `btree_gist` exclusion constraint on `accounting_periods` and a new
+`trg_prevent_nondraft_header_mutation` trigger on `journal_entries`.
+Both confirmed live (exclusion returns `23P01` on overlap;
+`pg_get_triggerdef` matches `schema.sql`). Full suite (21 suites / 216
+tests) run 3x consecutive clean, in genuine parallel mode, on
+`cuqnkorfhzydxwzkbjlv` (~115–122s per run). *(Decision #38)*
+
 ---
 
 ## 8. Decision Log Index
@@ -876,3 +1152,8 @@ topical section referenced.
 | 31 | 2026-08-26 | Journal-entries list + draft header PATCH; required `company_id` query (+ optional status/period_id); header fields only while draft; no status/identity side door; schema has no posted-header UPDATE trigger (flagged, not fixed); `createLine` still out of scope | §4.6, §7.6 |
 | 32 | 2026-08-26 | `createLine` (`POST /journal-lines`) implemented; debit/credit XOR + posted-parent rejection enforced via existing constraints/#28 trigger, surfaced cleanly; no same-company/active-account check on `account_id` (flagged, matches existing gap in `insert_journal_entry_draft`); `deleteLine` has service/repo support but no route (flagged, not built) | §4.7 |
 | 33 | 2026-08-26 | Test-setup only: `ensureCompanyWithCoa` COA clone changed from per-row inserts to one batched insert (~183 accounts); no product/behavior change; full-suite wall ~953s → ~276–297s (3x clean), per-mint insert ~53s → ~0.55s | §7.8 |
+| 34 | 2026-08-27 | `DELETE /journal-lines/:id` wired to existing `deleteLine` method; posted-parent DELETE blocked by #28 trigger as 400; closes the route gap #32 flagged | §4.8, §7.9 |
+| 35 | 2026-08-27 | Shared same-company + `is_active` validation added for `createLine` and `insert_journal_entry_draft` account_id; `create_opening_balance_entry` and `updateLine` account_id left flagged, not in scope; FK unchanged | §4.9, §7.10 |
+| 36 | 2026-08-27 | `PATCH /accounts/:id` implemented — metadata fields only (`account_name`, `sub_category`, `description`); structural/identity/hierarchy fields rejected by DTO; system-account UPDATE protection is service-layer only, no DB trigger (flagged) | §4.10, §7.11 |
+| 37 | 2026-08-27 | Closed §5.9 JWT clock-skew via a shared fetch-level retry wrapper on `SupabaseService`'s secret-key client (matches only `PGRST303`/"JWT issued at future"; 5 attempts, `250ms*attempt`); no legacy `service_role` key swap; `ensureAuthUser`'s old retry removed as redundant; `--runInBand` no longer required — verified in genuine parallel mode, ~953s baseline → ~105s | §5.9, §7.12 |
+| 38 | 2026-08-27 | DB-level defense-in-depth added for the two remaining service-layer-only gaps: `accounting_periods_company_daterange_excl` (btree_gist exclusion constraint, closes #30's period-overlap flag) and `trg_prevent_nondraft_header_mutation` (BEFORE UPDATE trigger, closes #31's posted-header flag); both confirmed live; existing service-layer checks retained; verified in parallel mode | §4.11, §7.13 |
