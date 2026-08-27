@@ -82,7 +82,8 @@ export class SupabaseJournalEntriesRepository implements JournalEntriesRepositor
     companyId: string,
     accountIds: string[],
   ): Promise<void> {
-    // [feature-spec.md decision #35] Shared by insert_journal_entry_draft + insertLine.
+    // [feature-spec.md decisions #35 / #39] Shared by insert_journal_entry_draft,
+    // insertLine, createOpeningBalanceEntry, and updateLine (when account_id changes).
     const uniqueIds = [...new Set(accountIds.filter(Boolean))];
     if (uniqueIds.length === 0) {
       return;
@@ -571,6 +572,12 @@ export class SupabaseJournalEntriesRepository implements JournalEntriesRepositor
   async createOpeningBalanceEntry(
     dto: CreateOpeningBalanceWithActor,
   ): Promise<JournalEntryWithDetails> {
+    // [feature-spec.md decision #39] Same helper as createLine / draft insert (#35).
+    await this.assertAccountsUsableForCompany(
+      dto.company_id,
+      dto.lines.map((line) => line.account_id),
+    );
+
     const { data, error } = await this.supabase.client.rpc('create_opening_balance_entry', {
       p_company_id: dto.company_id,
       p_fiscal_year: dto.fiscal_year,
@@ -876,6 +883,43 @@ export class SupabaseJournalEntriesRepository implements JournalEntriesRepositor
     if (dto.credit !== undefined) payload.credit = dto.credit;
     if (dto.description !== undefined) payload.description = dto.description;
     if (dto.cost_center !== undefined) payload.cost_center = dto.cost_center;
+
+    // [feature-spec.md decision #39] Only when account_id is actually changing.
+    if (dto.account_id !== undefined) {
+      const { data: line, error: lineError } = await this.supabase.client
+        .from('journal_lines')
+        .select('journal_entry_id')
+        .eq('id', id)
+        .maybeSingle();
+
+      if (lineError) {
+        throw lineError;
+      }
+      if (!line) {
+        throw new BadRequestException(
+          `Journal line ${id} was not found — cannot update`,
+        );
+      }
+
+      const { data: parent, error: parentError } = await this.supabase.client
+        .from('journal_entries')
+        .select('company_id')
+        .eq('id', line.journal_entry_id as string)
+        .maybeSingle();
+
+      if (parentError) {
+        throw parentError;
+      }
+      if (!parent) {
+        throw new BadRequestException(
+          `Journal entry ${line.journal_entry_id as string} was not found — cannot update lines`,
+        );
+      }
+
+      await this.assertAccountsUsableForCompany(parent.company_id as string, [
+        dto.account_id,
+      ]);
+    }
 
     const { data, error } = await this.supabase.client
       .from('journal_lines')

@@ -23,9 +23,10 @@ forgotten until rediscovered the hard way (see decision #22).
 
 | Gap | Why it's not fixed yet | Detail |
 |---|---|---|
-| `create_opening_balance_entry` doesn't validate `account_id` is same-company or active | Same class of gap #35 fixed for `createLine`/draft-insert, but this RPC is separate and wasn't in scope for that pass | §4.9 |
-| `updateLine` doesn't validate `account_id` is same-company or active when changing it | Same reasoning as above — flagged, not fixed | §4.9 |
 | Accounts: no service-layer block on UPDATE to `is_system_account` accounts at the DB level | `trg_prevent_account_deletion` is DELETE-only; UPDATE protection is service-layer only (#36) | §4.10 |
+
+This is currently the **only** open item in Module 1.1.A — everything
+else flagged across decisions #21–#39 has been closed and verified.
 
 **Note on test execution:** `--runInBand` was required from decision #28
 through #36 due to a JWT clock-skew issue — that issue is now closed
@@ -445,10 +446,33 @@ the identical class of gap (it also accepts client-supplied
 here. `updateLine` can still change a line's `account_id` without these
 checks. Year-end and reversal line inserts are unaffected — they copy
 system-resolved accounts, not raw client-supplied IDs, so they were
-never exposed to this gap.
+never exposed to this gap. **Both closed by decision #39 below.**
 
 **Verification:** full suite 3x consecutive clean (20 suites / 196 tests),
 `--runInBand`, on `cuqnkorfhzydxwzkbjlv`. *(Decision #35)*
+
+**§4.9 closure (2026-08-27, decision #39).** Closed the two remaining
+call sites flagged above, reusing `assertAccountsUsableForCompany`
+unchanged — no new validation logic written, since the existing helper
+already covered exactly what these two paths needed:
+
+- `create_opening_balance_entry` now validates every line's `account_id`
+  before the RPC proceeds to insert.
+- `updateLine` validates only when the update payload actually includes
+  a new `account_id` — an update that doesn't touch `account_id` doesn't
+  pay the extra check.
+
+Same 400 error shape as #35's original two call sites, for consistency.
+`createLine` and `insert_journal_entry_draft` untouched.
+
+This closes the last remaining item from §4.9's original flag list.
+Combined with #35, all four client write paths onto `journal_lines`
+(`createLine`, draft-insert, opening-balance, `updateLine`) now enforce
+the same same-company + active-account check.
+
+**Verification:** full suite 3x consecutive clean (21 suites / 218
+tests), parallel mode, on `cuqnkorfhzydxwzkbjlv` (~113–119s per run).
+*(Decision #39)*
 
 ### 4.10 Accounts update — `PATCH /accounts/:id` (#36)
 
@@ -1110,6 +1134,15 @@ Both confirmed live (exclusion returns `23P01` on overlap;
 tests) run 3x consecutive clean, in genuine parallel mode, on
 `cuqnkorfhzydxwzkbjlv` (~115–122s per run). *(Decision #38)*
 
+### 7.14 Remaining `account_id` validation gaps — status
+
+**Closed 2026-08-27.** `create_opening_balance_entry` and `updateLine`
+(when changing `account_id`) now reuse `assertAccountsUsableForCompany`
+unchanged — see §4.9's closure note. This was the last of §4.9's
+originally flagged call sites. Full suite (21 suites / 218 tests) run
+3x consecutive clean, in genuine parallel mode, on `cuqnkorfhzydxwzkbjlv`
+(~113–119s per run). *(Decision #39)*
+
 ---
 
 ## 8. Decision Log Index
@@ -1157,3 +1190,4 @@ topical section referenced.
 | 36 | 2026-08-27 | `PATCH /accounts/:id` implemented — metadata fields only (`account_name`, `sub_category`, `description`); structural/identity/hierarchy fields rejected by DTO; system-account UPDATE protection is service-layer only, no DB trigger (flagged) | §4.10, §7.11 |
 | 37 | 2026-08-27 | Closed §5.9 JWT clock-skew via a shared fetch-level retry wrapper on `SupabaseService`'s secret-key client (matches only `PGRST303`/"JWT issued at future"; 5 attempts, `250ms*attempt`); no legacy `service_role` key swap; `ensureAuthUser`'s old retry removed as redundant; `--runInBand` no longer required — verified in genuine parallel mode, ~953s baseline → ~105s | §5.9, §7.12 |
 | 38 | 2026-08-27 | DB-level defense-in-depth added for the two remaining service-layer-only gaps: `accounting_periods_company_daterange_excl` (btree_gist exclusion constraint, closes #30's period-overlap flag) and `trg_prevent_nondraft_header_mutation` (BEFORE UPDATE trigger, closes #31's posted-header flag); both confirmed live; existing service-layer checks retained; verified in parallel mode | §4.11, §7.13 |
+| 39 | 2026-08-27 | Closed §4.9's remaining flagged call sites: `create_opening_balance_entry` and `updateLine` (when `account_id` changes) now reuse `assertAccountsUsableForCompany` unchanged; same 400 shape as #35; `createLine`/draft-insert untouched | §4.9, §7.14 |

@@ -419,6 +419,112 @@ const USER_ID = INTEGRATION_USER_ID;
       expect(created.lines).toHaveLength(2);
     });
 
+    it('createOpeningBalance rejects inactive and cross-company account_id (decision #39)', async () => {
+      const [accA, accB] = await getTwoAssetAccounts();
+      const inactiveId = await getAccountIdByNumber(supabase, companyId, '1050');
+      const { data: foreignAccount, error: foreignError } = await supabase.client
+        .from('accounts')
+        .select('id')
+        .eq('company_id', DEMO_COMPANY_ID)
+        .eq('is_active', true)
+        .limit(1)
+        .single();
+      if (foreignError || !foreignAccount) {
+        throw foreignError ?? new Error('Need an active demo-company account');
+      }
+
+      await expect(
+        service.createOpeningBalance(
+          {
+            company_id: companyId,
+            fiscal_year: 2026,
+            entry_date: '2026-01-01',
+            narration: 'ob inactive account',
+            lines: [
+              { line_number: 1, account_id: inactiveId, debit: 100, credit: 0 },
+              { line_number: 2, account_id: accB, debit: 0, credit: 100 },
+            ],
+          },
+          USER_ID,
+        ),
+      ).rejects.toThrow(/inactive/i);
+
+      await expect(
+        service.createOpeningBalance(
+          {
+            company_id: companyId,
+            fiscal_year: 2026,
+            entry_date: '2026-01-01',
+            narration: 'ob cross-company account',
+            lines: [
+              { line_number: 1, account_id: foreignAccount.id, debit: 100, credit: 0 },
+              { line_number: 2, account_id: accA, debit: 0, credit: 100 },
+            ],
+          },
+          USER_ID,
+        ),
+      ).rejects.toThrow(/different company/i);
+    });
+
+    it('updateLine rejects inactive and cross-company account_id; skips check when account_id omitted (#39)', async () => {
+      const periodId = await getPeriodId();
+      const [accA, accB] = await getTwoAssetAccounts();
+      const inactiveId = await getAccountIdByNumber(supabase, companyId, '1050');
+      const { data: foreignAccount, error: foreignError } = await supabase.client
+        .from('accounts')
+        .select('id')
+        .eq('company_id', DEMO_COMPANY_ID)
+        .eq('is_active', true)
+        .limit(1)
+        .single();
+      if (foreignError || !foreignAccount) {
+        throw foreignError ?? new Error('Need an active demo-company account');
+      }
+
+      const entryNumber = await nextEntryNumber();
+      const { data: entry, error: entryError } = await supabase.client
+        .from('journal_entries')
+        .insert({
+          company_id: companyId,
+          entry_number: entryNumber,
+          period_id: periodId,
+          entry_date: '2026-01-17',
+          entry_type: JournalEntryType.Manual,
+          status: JournalEntryStatus.Draft,
+          narration: 'updateLine account validation',
+          created_by: USER_ID,
+        })
+        .select('id')
+        .single();
+      if (entryError || !entry) {
+        throw entryError ?? new Error('Failed to insert draft entry');
+      }
+      createdEntryIds.push(entry.id);
+
+      const line = await service.createLine({
+        journal_entry_id: entry.id,
+        line_number: 1,
+        account_id: accA,
+        debit: 10,
+        credit: 0,
+      });
+
+      await expect(
+        service.updateLine(line.id, { account_id: inactiveId }),
+      ).rejects.toThrow(/inactive/i);
+
+      await expect(
+        service.updateLine(line.id, { account_id: foreignAccount.id }),
+      ).rejects.toThrow(/different company/i);
+
+      const amountOnly = await service.updateLine(line.id, { debit: 25 });
+      expect(amountOnly.account_id).toBe(accA);
+      expect(Number(amountOnly.debit)).toBe(25);
+
+      const switched = await service.updateLine(line.id, { account_id: accB });
+      expect(switched.account_id).toBe(accB);
+    });
+
     it('deleteLine rejects DELETE on a posted parent via trg_prevent_posted_line_update (#34)', async () => {
       const entryId = await insertPostedBalancedEntry(80, 'integration posted delete block');
       const { data: line, error } = await supabase.client
