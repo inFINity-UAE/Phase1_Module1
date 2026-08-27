@@ -16,6 +16,12 @@ Apply in the SQL Editor, in order:
 2. `docs/source-of-truth/seed_finalized_coa_demo_company_0002.sql` - demo COA (...0002)
 3. Optional: `docs/source-of-truth/verify_chart_of_accounts.sql` - seed checks
 
+Current `schema.sql` forces `btree_gist` into `extensions` and puts
+`is_company_member` in `private` (and drops any leftover
+`public.is_company_member`). If Advisor still warns on a DB that was
+applied from an older schema revision, run
+`docs/source-of-truth/apply_security_advisor_lints.sql` once.
+
 ## Local app
 
 ```bash

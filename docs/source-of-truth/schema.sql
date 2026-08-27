@@ -26,10 +26,34 @@
 --     projects, see feature-spec.md §5.5 / decision #23.
 -- ============================================================================
 
-create extension if not exists "uuid-ossp";
-create extension if not exists pgcrypto;
+-- Extensions live in `extensions` (Supabase default), not `public` —
+-- avoids Security Advisor lint 0014_extension_in_public.
+--
+-- Important: `CREATE EXTENSION IF NOT EXISTS … WITH SCHEMA extensions` is a
+-- no-op when the extension already exists in ANY schema. A prior apply that
+-- used `create extension btree_gist` (no schema) — or any install that landed
+-- in `public` — will leave lint 0014 forever unless we relocate first.
+create schema if not exists extensions;
+create extension if not exists "uuid-ossp" with schema extensions;
+create extension if not exists pgcrypto with schema extensions;
+
 -- Required for uuid equality in GiST exclusion constraints (period overlap).
-create extension if not exists btree_gist;
+-- btree_gist is often non-relocatable; drop + recreate in `extensions`.
+-- CASCADE only matters on re-apply (drops accounting_periods exclusion);
+-- the constraint is created later in this file on a fresh run.
+do $$
+begin
+  if exists (
+    select 1
+      from pg_extension e
+      join pg_namespace n on n.oid = e.extnamespace
+     where e.extname = 'btree_gist'
+       and n.nspname <> 'extensions'
+  ) then
+    drop extension btree_gist cascade;
+  end if;
+end $$;
+create extension if not exists btree_gist with schema extensions;
 
 -- ============================================================================
 -- 0. ENUMS
@@ -1296,7 +1320,16 @@ create policy company_isolation_members on company_members
 -- still keys off app.current_company_id — a session variable that is unset
 -- when the query under evaluation IS the companies table). Do not weaken
 -- company_isolation_members; this helper is the scoped exception.
-create or replace function is_company_member(p_company_id uuid)
+--
+-- Lives in schema `private` (not PostgREST-exposed) so it cannot be called
+-- via /rest/v1/rpc — Security Advisor lints 0028/0029. Authenticated still
+-- needs EXECUTE for RLS policy evaluation on companies SELECT (#29).
+-- anon does NOT get EXECUTE: anon has no SELECT grant on companies.
+create schema if not exists private;
+revoke all on schema private from public;
+grant usage on schema private to authenticated, service_role;
+
+create or replace function private.is_company_member(p_company_id uuid)
 returns boolean
 language sql
 stable
@@ -1311,18 +1344,22 @@ as $$
   );
 $$;
 
-revoke all on function is_company_member(uuid) from public;
--- Roles subject to RLS must EXECUTE this helper when the companies policy
--- is evaluated — an intentional exception to §5.1's service_role-only
--- function grant checklist (decision #10 / #29).
-grant execute on function is_company_member(uuid) to anon;
-grant execute on function is_company_member(uuid) to authenticated;
-grant execute on function is_company_member(uuid) to service_role;
+revoke all on function private.is_company_member(uuid) from public;
+revoke all on function private.is_company_member(uuid) from anon;
+grant execute on function private.is_company_member(uuid) to authenticated;
+grant execute on function private.is_company_member(uuid) to service_role;
+
+-- Drop the old PostgREST-exposed RPC if a prior schema apply created it in
+-- `public` (Advisor lints 0028/0029). CREATE OR REPLACE cannot move a
+-- function across schemas, so without this drop a fresh-looking re-apply
+-- still leaves `public.is_company_member` callable at /rest/v1/rpc/.
+drop function if exists public.is_company_member(uuid);
 
 alter table companies enable row level security;
 
+drop policy if exists company_isolation_companies on companies;
 create policy company_isolation_companies on companies
-  using (is_company_member(id));
+  using (private.is_company_member(id));
 
 -- ============================================================================
 -- 12. DATA API GRANTS (service_role / sb_secret_*)
