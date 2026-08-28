@@ -9,12 +9,19 @@ import { ACCOUNTS_REPOSITORY, AccountsRepository } from './accounts.repository';
 import { CreateAccountDto } from './dto/create-account.dto';
 import { UpdateAccountDto } from './dto/update-account.dto';
 import { Account } from './entities/account.entity';
+import { AccountTrialBalance } from '../journal-entries/entities/account-trial-balance.entity';
+import {
+  JOURNAL_ENTRIES_REPOSITORY,
+  JournalEntriesRepository,
+} from '../journal-entries/journal-entries.repository';
 
 @Injectable()
 export class AccountsService {
   constructor(
     @Inject(ACCOUNTS_REPOSITORY)
     private readonly accountsRepository: AccountsRepository,
+    @Inject(JOURNAL_ENTRIES_REPOSITORY)
+    private readonly journalEntriesRepository: JournalEntriesRepository,
   ) {}
 
   /** [feature-spec] Custom account creation — DB triggers enforce numbering and depth. */
@@ -100,6 +107,31 @@ export class AccountsService {
     try {
       await this.accountsRepository.delete(id);
     } catch (error) {
+      handleDatabaseError(error);
+    }
+  }
+
+  /**
+   * [feature-spec.md decision #47] Single-account row from v_trial_balance.
+   * company_id comes from the account row (guard already verified membership).
+   */
+  async getTrialBalance(accountId: string): Promise<AccountTrialBalance> {
+    const account = await this.findOne(accountId);
+    try {
+      const row = await this.journalEntriesRepository.getAccountTrialBalance(
+        account.company_id,
+        accountId,
+      );
+      if (!row) {
+        throw new NotFoundException(
+          `Trial balance for account ${accountId} not found`,
+        );
+      }
+      return row;
+    } catch (error) {
+      if (error instanceof NotFoundException) {
+        throw error;
+      }
       handleDatabaseError(error);
     }
   }

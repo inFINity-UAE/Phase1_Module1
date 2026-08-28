@@ -20,6 +20,10 @@ If an existing live DB was applied before decision #45, also run
 `docs/source-of-truth/apply_account_parent_same_company.sql` once (extends
 `enforce_account_hierarchy_depth` with same-company parent check).
 
+If an existing live DB was applied before decision #46, also run
+`docs/source-of-truth/apply_journal_balance_on_post_insert.sql` once
+(extends `trg_enforce_journal_balance_on_post` to fire on INSERT).
+
 Current `schema.sql` forces `btree_gist` into `extensions` and puts
 `is_company_member` in `private` (and drops any leftover
 `public.is_company_member`). If Advisor still warns on a DB that was

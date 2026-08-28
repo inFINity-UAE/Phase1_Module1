@@ -343,36 +343,48 @@ create index idx_journal_lines_account on journal_lines(account_id);
 
 -- Reject imbalanced entries: enforced whenever an entry is moved to 'posted'.
 -- (Draft entries may be temporarily unbalanced while being built in the UI.)
+-- [feature-spec.md decision #46 / §7.16 finding #6] Also fires on INSERT so a
+-- row inserted directly with status = 'posted' cannot bypass posting rules.
 create or replace function enforce_journal_balance_on_post()
 returns trigger as $$
 declare
   total_debit  numeric(18,2);
   total_credit numeric(18,2);
 begin
-  if new.status = 'posted' and (old.status is distinct from 'posted') then
-    select coalesce(sum(debit), 0), coalesce(sum(credit), 0)
-      into total_debit, total_credit
-      from journal_lines
-      where journal_entry_id = new.id;
-
-    if total_debit <> total_credit then
-      raise exception 'Journal entry % is unbalanced: debit % <> credit % — posting rejected',
-        new.entry_number, total_debit, total_credit;
+  if new.status = 'posted' then
+    -- INSERT-as-posted is forbidden outright (draft→lines→UPDATE only; #38 pattern).
+    -- Never reference OLD on INSERT — OLD is unassigned on INSERT triggers.
+    if tg_op = 'INSERT' then
+      raise exception 'Journal entry % cannot be inserted directly as posted — create as draft, add lines, then UPDATE to posted',
+        new.entry_number;
     end if;
 
-    if total_debit = 0 then
-      raise exception 'Journal entry % has no lines — posting rejected', new.entry_number;
-    end if;
+    if old.status is distinct from 'posted' then
+      select coalesce(sum(debit), 0), coalesce(sum(credit), 0)
+        into total_debit, total_credit
+        from journal_lines
+        where journal_entry_id = new.id;
 
-    new.posted_at := now();
+      if total_debit <> total_credit then
+        raise exception 'Journal entry % is unbalanced: debit % <> credit % — posting rejected',
+          new.entry_number, total_debit, total_credit;
+      end if;
+
+      if total_debit = 0 then
+        raise exception 'Journal entry % has no lines — posting rejected', new.entry_number;
+      end if;
+
+      new.posted_at := now();
+    end if;
   end if;
   return new;
 end;
 $$ language plpgsql
    set search_path = public, pg_temp;
 
+drop trigger if exists trg_enforce_journal_balance_on_post on journal_entries;
 create trigger trg_enforce_journal_balance_on_post
-  before update on journal_entries
+  before insert or update on journal_entries
   for each row execute function enforce_journal_balance_on_post();
 
 -- Immutability: once posted, an entry's lines cannot be added, edited, or
@@ -566,6 +578,55 @@ $$ language plpgsql
 create trigger trg_log_journal_entry_change
   after insert or update on journal_entries
   for each row execute function log_journal_entry_change();
+
+-- [feature-spec.md decision #48 / §7.16 finding #7] §5.1 EXECUTE-revoke checklist
+-- on trigger helpers (hygiene — not PostgREST RPCs; triggers fire via engine).
+-- Empirical proof: scripts/trigger-execute-empirical-test.mjs (PGlite).
+
+revoke all on function enforce_account_number_category() from public;
+revoke all on function enforce_account_number_category() from authenticated;
+revoke all on function enforce_account_number_category() from anon;
+grant execute on function enforce_account_number_category() to service_role;
+
+revoke all on function enforce_account_hierarchy_depth() from public;
+revoke all on function enforce_account_hierarchy_depth() from authenticated;
+revoke all on function enforce_account_hierarchy_depth() from anon;
+grant execute on function enforce_account_hierarchy_depth() to service_role;
+
+revoke all on function prevent_account_deletion() from public;
+revoke all on function prevent_account_deletion() from authenticated;
+revoke all on function prevent_account_deletion() from anon;
+grant execute on function prevent_account_deletion() to service_role;
+
+revoke all on function enforce_journal_balance_on_post() from public;
+revoke all on function enforce_journal_balance_on_post() from authenticated;
+revoke all on function enforce_journal_balance_on_post() from anon;
+grant execute on function enforce_journal_balance_on_post() to service_role;
+
+revoke all on function prevent_posted_line_mutation() from public;
+revoke all on function prevent_posted_line_mutation() from authenticated;
+revoke all on function prevent_posted_line_mutation() from anon;
+grant execute on function prevent_posted_line_mutation() to service_role;
+
+revoke all on function prevent_posted_entry_deletion() from public;
+revoke all on function prevent_posted_entry_deletion() from authenticated;
+revoke all on function prevent_posted_entry_deletion() from anon;
+grant execute on function prevent_posted_entry_deletion() to service_role;
+
+revoke all on function prevent_nondraft_header_mutation() from public;
+revoke all on function prevent_nondraft_header_mutation() from authenticated;
+revoke all on function prevent_nondraft_header_mutation() from anon;
+grant execute on function prevent_nondraft_header_mutation() to service_role;
+
+revoke all on function block_audit_log_mutation() from public;
+revoke all on function block_audit_log_mutation() from authenticated;
+revoke all on function block_audit_log_mutation() from anon;
+grant execute on function block_audit_log_mutation() to service_role;
+
+revoke all on function log_journal_entry_change() from public;
+revoke all on function log_journal_entry_change() from authenticated;
+revoke all on function log_journal_entry_change() from anon;
+grant execute on function log_journal_entry_change() to service_role;
 
 -- ============================================================================
 -- 8. ROW-LEVEL SECURITY (multi-tenant isolation)

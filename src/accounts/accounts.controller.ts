@@ -40,6 +40,16 @@ export class AccountsController {
     return this.accountsService.findAll(companyId);
   }
 
+  /**
+   * [feature-spec.md decision #47] Per-account slice of v_trial_balance
+   * ([Rules §3.1]). Membership resolved from the account id (#41).
+   */
+  @Get(':id/trial-balance')
+  @RequireCompanyMembership({ type: 'param', resource: 'account' })
+  getTrialBalance(@Param('id', ParseUUIDPipe) id: string) {
+    return this.accountsService.getTrialBalance(id);
+  }
+
   @Get(':id')
   @RequireCompanyMembership({ type: 'param', resource: 'account' })
   findOne(@Param('id', ParseUUIDPipe) id: string) {

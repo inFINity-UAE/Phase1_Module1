@@ -47,6 +47,12 @@ describe('Controller auth coverage (decision #24)', () => {
       update: jest.fn().mockResolvedValue({ id: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa' }),
       deactivate: jest.fn().mockResolvedValue({ id: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa' }),
       remove: jest.fn().mockResolvedValue(undefined),
+      getTrialBalance: jest.fn().mockResolvedValue({
+        account_id: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+        total_debit: 0,
+        total_credit: 0,
+        balance: 0,
+      }),
     };
 
     const accountingPeriodsService = {
@@ -188,6 +194,7 @@ describe('Controller auth coverage (decision #24)', () => {
   const previouslyUnguardedRoutes: Array<{ method: string; path: string; body?: unknown }> = [
     { method: 'GET', path: `/accounts?company_id=${companyId}` },
     { method: 'GET', path: '/accounts/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa' },
+    { method: 'GET', path: '/accounts/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa/trial-balance' },
     {
       method: 'POST',
       path: '/accounts',
@@ -288,6 +295,10 @@ describe('Controller auth coverage (decision #24)', () => {
 
   it.each([
     { method: 'GET', path: `/accounts?company_id=${companyId}` },
+    {
+      method: 'GET',
+      path: '/accounts/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa/trial-balance',
+    },
     {
       method: 'PATCH',
       path: '/accounts/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',

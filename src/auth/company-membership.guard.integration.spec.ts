@@ -338,6 +338,7 @@ const HTTP_CONTROLLERS: Type[] = [
         { method: 'PATCH', path: `/accounts/${foreignAccountId}`, body: { account_name: 'X' } },
         { method: 'PATCH', path: `/accounts/${foreignAccountId}/deactivate` },
         { method: 'DELETE', path: `/accounts/${foreignAccountId}` },
+        { method: 'GET', path: `/accounts/${foreignAccountId}/trial-balance` },
         {
           method: 'GET',
           path: `/accounting-periods?company_id=${foreignCompanyId}`,
@@ -522,6 +523,12 @@ const HTTP_CONTROLLERS: Type[] = [
 
       const getAccount = await http('GET', `/accounts/${memberAccountId}`);
       expect(getAccount.status).toBe(200);
+
+      const trialBalance = await http(
+        'GET',
+        `/accounts/${memberAccountId}/trial-balance`,
+      );
+      expect(trialBalance.status).toBe(200);
 
       const listPeriods = await http(
         'GET',

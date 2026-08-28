@@ -7,6 +7,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { PostgrestError } from '@supabase/supabase-js';
 import { ACCOUNTS_REPOSITORY, AccountsRepository } from './accounts.repository';
 import { AccountsService } from './accounts.service';
+import { JOURNAL_ENTRIES_REPOSITORY } from '../journal-entries/journal-entries.repository';
 import { AccountCategory } from '../common/enums/account-category.enum';
 import { NormalBalance } from '../common/enums/normal-balance.enum';
 import { Account } from './entities/account.entity';
@@ -45,6 +46,7 @@ function sampleAccount(overrides: Partial<Account> = {}): Account {
 describe('AccountsService', () => {
   let service: AccountsService;
   let repository: jest.Mocked<AccountsRepository>;
+  let journalEntriesRepository: { getAccountTrialBalance: jest.Mock };
 
   beforeEach(async () => {
     repository = {
@@ -55,11 +57,15 @@ describe('AccountsService', () => {
       updateActive: jest.fn(),
       delete: jest.fn(),
     };
+    journalEntriesRepository = {
+      getAccountTrialBalance: jest.fn(),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         AccountsService,
         { provide: ACCOUNTS_REPOSITORY, useValue: repository },
+        { provide: JOURNAL_ENTRIES_REPOSITORY, useValue: journalEntriesRepository },
       ],
     }).compile();
 
