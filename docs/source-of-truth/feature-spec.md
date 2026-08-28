@@ -35,17 +35,20 @@ call site now validated same-company/active-account, matching #35/#39
 **Closed by decision #45:** `parent_account_id`
 now validated as same-company via the extended
 `enforce_account_hierarchy_depth` trigger (was §7.16 finding #5).
-`schema.sql` §2 confirmed synced.
+See §4.15.
+**Closed by decision #46:** `trg_enforce_journal_balance_on_post`
+now fires on INSERT as well as UPDATE (was §7.16 finding #6). See §4.16.
+**Closed by decision #47:** `GET /accounts/:id/trial-balance` exposes
+`getAccountTrialBalance` (was §7.16 finding #8). See §4.17.
+**Closed by decision #48:** all nine trigger helper functions now have
+the §5.1 EXECUTE-revoke checklist (was §7.16 finding #7). See §4.18.
 
 | Gap | Why it's not fixed yet | Detail |
 |---|---|---|
 | Accounts: no service-layer block on UPDATE to `is_system_account` accounts at the DB level | `trg_prevent_account_deletion` is DELETE-only; UPDATE protection is service-layer only (#36) | §4.10 |
-| `trg_enforce_journal_balance_on_post` is UPDATE-only — INSERT as `posted` bypasses it | Same shape as the pre-#28 posted-line INSERT gap | §7.16 finding #6 |
-| Trigger helper functions lack the §5.1 EXECUTE-revoke checklist | Found by the same audit | §7.16 finding #7 |
-| `getAccountTrialBalance` has a service method but no HTTP route | Found by the same audit | §7.16 finding #8 |
-
-Findings #6–#8 remain queued (#1 closed by #41, #2 by #42, #3 by #43,
-#4 by #44, #5 by #45).
+| `period_id` not validated as same-company on manual draft create | Same class as pre-#35 `account_id` gap; FK does not tie period to entry company | §7.26 finding #1 |
+| Recurring `auto_post=true` bypasses approval-threshold / soft-close post workflow | Schema flag intentionally auto-posts; service calls `postEntry` directly, not `JournalEntriesService.post()` | §7.26 finding #2 |
+| `controller-auth-coverage.spec.ts` exercises only 25/37 routes for 401 | Regression suite never expanded when workflow routes were added | §7.26 finding #3 |
 
 **Note on test execution:** `--runInBand` was required from decision #28
 through #36 due to a JWT clock-skew issue — that issue is now closed
@@ -656,6 +659,123 @@ correctly depth-limited. *(Decision #45)*
 
 ---
 
+### 4.16 Journal balance-on-post trigger — INSERT backstop (#46)
+
+`§7.16` finding #6: `trg_enforce_journal_balance_on_post` fired only
+`BEFORE UPDATE`, so a direct `INSERT` with `status = 'posted'` bypassed
+the balance / no-lines checks. No current RPC uses that path (all four
+insert as `draft` then `UPDATE` to `posted`), but the trigger's own
+guarantee had a hole — same architectural shape as #28's posted-line
+INSERT gap and #38's year-end rewrite.
+
+**Layer decision — trigger only; no RPC changes:**
+
+All four RPCs (`insert_journal_entry_draft`, `create_opening_balance_entry`,
+`create_year_end_closing_entry`, `reverse_journal_entry`) already insert
+as `draft` and post via `UPDATE`. They never hit the new INSERT branch in
+normal operation — this is a backstop for manual SQL / future code paths,
+not a behavior change to any RPC.
+
+**Trigger condition (two judgment calls):**
+
+1. **INSERT vs UPDATE detection:** nested `if tg_op = 'INSERT'` branch
+   that never references `OLD`. Do not use `(tg_op = 'INSERT' or
+   old.status is distinct from 'posted')` — PostgreSQL does not guarantee
+   short-circuit evaluation of boolean OR, and referencing `OLD` on INSERT
+   can raise `record "old" is not assigned yet`. Live probe on the first
+   apply confirmed balance-check errors (not OLD errors) on PG 15+, but
+   the hardened form is required for correctness.
+
+2. **Balanced INSERT-as-posted:** reject **unconditionally** on INSERT
+   (`cannot be inserted directly as posted`), not only when unbalanced.
+   Balance rules apply on the UPDATE transition only. Rationale: this
+   project's RPC design (#3 opening balance, #4 year-end, #10 service_role
+   RPCs, #38 year-end rewrite) never posts except via draft→lines→UPDATE;
+   allowing a hypothetically balanced INSERT-as-posted would bypass that
+   workflow even if FK ordering usually prevents it in practice. All four
+   RPCs unchanged — they insert as `draft` and never hit this branch.
+
+**Fixed:** recreate trigger as `BEFORE INSERT OR UPDATE`; INSERT branch
+raises before any `OLD` access; UPDATE branch unchanged. Live apply: re-run
+the relevant sections of current `schema.sql` (or full re-apply).
+
+**Verification:** new `journal-entries.balance-on-post-insert.integration.spec.ts`
+(empty + balanced header-first INSERT-as-posted → `cannot be inserted
+directly as posted`, not OLD error; draft→UPDATE control; unbalanced
+UPDATE unchanged) plus existing journal integration suites for all four
+RPC paths. *(Decision #46)*
+
+---
+
+### 4.17 Account trial balance read route (#47)
+
+`§7.16` finding #8: `JournalEntriesService.getAccountTrialBalance` existed
+with no HTTP route.
+
+**What the method does:** returns a **single-account** row from
+`public.v_trial_balance` — not a company-wide report. Parameters:
+`(companyId, accountId)`. Response shape: `{ account_id, total_debit,
+total_credit, balance }` (signed per `normal_balance`, [Rules §3.1]).
+Repository query: `.from('v_trial_balance').eq('company_id',
+companyId).eq('account_id', accountId)`.
+
+**Route:** `GET /accounts/:id/trial-balance` on `AccountsController`.
+`@RequireCompanyMembership({ type: 'param', resource: 'account' })` —
+company resolved from the account id (#41), not a separate query param.
+Handler loads the account for `company_id`, then calls the existing
+repository method unchanged.
+
+**RLS note:** Nest uses `service_role` (#10), so this route's tenant
+isolation is CompanyMembershipGuard + the explicit `company_id` filter,
+not RLS at query time. `v_trial_balance`'s `security_invoker = true`
+(#22) still matters for any direct authenticated PostgREST access to the
+view — not for this backend-mediated path.
+
+**Verification:** `accounts.trial-balance.integration.spec.ts` (member 200;
+foreign account 403; missing account 404) plus membership-guard and
+controller-auth-coverage updates. *(Decision #47)*
+
+---
+
+### 4.18 Trigger helper function EXECUTE grants (#48)
+
+`§7.16` finding #7: the nine `RETURNS trigger` helpers lacked the §5.1
+revoke/grant block every callable RPC has.
+
+**Empirical proof first (required before applying):**
+`scripts/trigger-execute-empirical-test.mjs` creates a scratch schema +
+table + trigger on embedded PGlite (real Postgres engine), revokes
+`EXECUTE` from `service_role` on the trigger function, and confirms DML
+as `service_role` **still fires the trigger**. Conclusion: EXECUTE grants
+are **hygiene / `role_routine_grants` parity**, not a prerequisite for
+trigger firing — unlike RPCs, triggers are invoked by the engine on DML,
+not by direct `SELECT fn()` calls.
+
+**Applied (in-repo):** grant blocks in `schema.sql` after the trigger
+definitions block. Pattern per function (all nine):
+
+```sql
+revoke all on function <fn>() from public;
+revoke all on function <fn>() from authenticated;
+revoke all on function <fn>() from anon;
+grant execute on function <fn>() to service_role;
+```
+
+Functions: `enforce_account_number_category`,
+`enforce_account_hierarchy_depth`, `prevent_account_deletion`,
+`enforce_journal_balance_on_post`, `prevent_posted_line_mutation`,
+`prevent_posted_entry_deletion`, `prevent_nondraft_header_mutation`,
+`block_audit_log_mutation`, `log_journal_entry_change`.
+
+**Verification:** live `information_schema.role_routine_grants` on
+`hilaeuvltstgedlpgjcw` — all nine functions show `postgres` + `service_role`
+EXECUTE only (no `anon`/`authenticated`/`PUBLIC`); full suite 3× consecutive
+clean (28 suites / 253 tests, ~130s / ~131s / ~113s in parallel mode).
+Empirical PGlite test (`scripts/trigger-execute-empirical-test.mjs`) proved
+EXECUTE revoke does not gate trigger firing. *(Decision #48)*
+
+---
+
 ## 5. Security & Access Control
 
 ### 5.1 Backend-mediated access only
@@ -770,9 +890,15 @@ select/insert/update/delete, sequence usage/select, plus
 `alter default privileges` so future tables/sequences inherit the same
 grants automatically) — kept in sync with a standalone
 `apply_data_api_grants.sql` for one-shot re-application to any other
-fresh/live project. *(Decision #23)*
+fresh/live project. **There is no standalone file** — re-run `schema.sql`
+§12 only. *(Decision #23)*
 
 ### 5.6 Auth-guard coverage — broader gap than decision #21 addressed
+
+**Closed 2026-08-27 by decisions #24 and #41.** Every controller now has
+`SupabaseAuthGuard` + `CompanyMembershipGuard` + `@RequireCompanyMembership`
+on every handler (37 routes across 7 controllers). The narrative below
+documents the *original* gap #24 found; do not treat it as current state.
 
 The fresh-DB verification pass surfaced that decision #21's fix was
 correctly scoped to what it found, but **not exhaustive across the whole
@@ -1050,7 +1176,10 @@ today.
 before `CREATE EXTENSION IF NOT EXISTS` — that statement is a no-op when
 the extension already exists in another schema, which is why a schema-only
 apply could still leave Advisor warnings until
-`apply_security_advisor_lints.sql` ran.
+`apply_security_advisor_lints.sql` ran. **That file was never maintained**
+— current `schema.sql` inlines the #40 fixes (extensions schema,
+`private.is_company_member`). Re-apply from `schema.sql` §9–§11 on older
+DBs, or run the object moves manually.
 
 **Live apply:** required via Supabase SQL Editor (no automated migration
 runner in this project, consistent with #28's precedent) —
@@ -1383,8 +1512,9 @@ helper moved to `private.is_company_member` (not API-exposed); EXECUTE
 revoked from `anon`, kept for `authenticated` + `service_role` so #29 RLS
 still evaluates. `schema.sql` also relocates a public `btree_gist` and
 drops leftover `public.is_company_member` (IF NOT EXISTS / CREATE OR
-REPLACE cannot move objects across schemas). Live one-shot for older DBs:
-`docs/source-of-truth/apply_security_advisor_lints.sql`. Fresh project
+REPLACE cannot move objects across schemas). Live one-shot for older DBs: re-apply the relevant sections of current
+`schema.sql` (extensions + `private.is_company_member` — no standalone
+apply file maintained). Fresh project
 `hilaeuvltstgedlpgjcw` verified 3x consecutive clean in parallel mode
 (21 suites / 218 tests). See §5.10. *(Decision #40)*
 
@@ -1410,17 +1540,78 @@ found 8 new findings not previously in this document, ranked by risk:
 | 3 | Security | `UpdateRecurringJournalTemplateDto` can reassign `company_id` via `PartialType` | **Closed by decision #43 (§4.13)** |
 | 4 | Integrity | Recurring-template line inserts skip `assertAccountsUsableForCompany` (5th call site, §4.9) | **Closed by decision #44 (§4.14)** |
 | 5 | Integrity | `accounts.parent_account_id` not validated as same-company | **Closed by decision #45 (§4.15)** |
-| 6 | Integrity | `trg_enforce_journal_balance_on_post` is UPDATE-only — INSERT as `posted` bypasses it | Open |
-| 7 | Hygiene | Trigger helper functions lack §5.1 EXECUTE-revoke checklist | Open |
-| 8 | Completeness | `getAccountTrialBalance` has a service method but no HTTP route | Open |
+| 6 | Integrity | `trg_enforce_journal_balance_on_post` is UPDATE-only — INSERT as `posted` bypasses it | **Closed by decision #46 (§4.16)** |
+| 7 | Hygiene | Trigger helper functions lack §5.1 EXECUTE-revoke checklist | **Closed by decision #48 (§4.18)** |
+| 8 | Completeness | `getAccountTrialBalance` has a service method but no HTTP route | **Closed by decision #47 (§4.17)** |
 
 **Already confirmed solid by this same audit (0 new findings):** all 7
 controllers have auth guards; all 11 tables + the trial-balance view have
 correct RLS coverage; classic `*_by` identity-spoofing fields are clean
 everywhere; `deleteLine` is routed (#34).
 
-Findings 1–5 closed (#41–#45). Findings 6–8
-remain queued.
+Findings 1–8 all closed (#41–#48).
+
+### 7.24 Trigger helper EXECUTE grants — status
+
+**Closed 2026-08-28.** §7.16 finding #7. Empirical PGlite test proves
+REVOKE EXECUTE from `service_role` does not stop trigger firing; grants
+in `schema.sql` applied live on `hilaeuvltstgedlpgjcw`. Verified: all nine functions — `postgres` +
+`service_role` EXECUTE only; full suite 3× clean (28/253). See §4.18.
+*(Decision #48)*
+
+### 7.25 Post-reset health check — status
+
+**Closed 2026-08-28.** Full DB reset on `hilaeuvltstgedlpgjcw` followed by
+`schema.sql` + `seed_finalized_coa_demo_company_0002.sql` (no legacy
+apply scripts needed — current `schema.sql` already includes #45/#46/#48
+changes). Automated verification run same day:
+
+| Layer | Result |
+|---|---|
+| `npm run build` | Pass |
+| Full suite ×3 (`npx jest --maxWorkers=50%`) | **28 suites / 253 tests** — all pass (~118s / ~117s / ~112s) |
+| COA seed checks (`verify_chart_of_accounts.sql` logic) | **7/7 pass** — 183 accounts on `…0002`, hierarchy demos, 3100 system account |
+| Live DB probes | Tables + `v_trial_balance` readable; `allocate_next_entry_number` RPC OK; `public.is_company_member` absent (in `private`) |
+| Errors | **None** |
+
+**Expected residue:** integration/e2e suites mint fresh companies per run
+— row counts grow after test passes (not a drift signal). Demo seed
+company `…0002` remains the COA clone source only.
+
+Repeat script: `node scripts/verify-reset-health.mjs`. *(Decision #49)*
+
+### 7.26 Comprehensive gap audit — second sweep (2026-08-28)
+
+**2026-08-28, after full DB reset + decision #49 health check.** Same
+categories as §7.16 (#41–#48 all closed). Systematic sweep found **3 new
+open gaps**, **1 closed hygiene fix**, and **0 regressions** in the
+categories that were fully closed.
+
+| Rank | Risk | Finding | Status |
+|---|---|---|---|
+| 1 | **Integrity** | `insertJournalEntryDraftRpc` validates line `account_id`s against body `company_id` but not that `period_id` belongs to that company — cross-tenant period linkage possible for a member supplying a foreign period UUID | **Open** |
+| 2 | Integrity / design | Recurring `auto_post=true` calls `journalEntriesRepository.postEntry()` directly, bypassing `JournalEntriesService.post()` approval-threshold and soft-close override paths; schema `auto_post` flag makes this intentional but Rules §1.24 may not exempt it | **Open — needs product call** |
+| 3 | Hygiene | `controller-auth-coverage.spec.ts` tests 401 on 25/37 routes; 12 workflow routes (post/approve/reject/reverse/opening/year-end/soft-close/delete account/recurring create+get) never added to regression list | **Open** |
+| 4 | Hygiene | `UpdateJournalLineDto` was `PartialType(CreateJournalLineDto)` — clients could PATCH `journal_entry_id` (ignored by repo, not rejected by pipe) | **Closed by decision #50** |
+| — | — | Dead `JournalEntriesService.getAccountTrialBalance()` superseded by `AccountsService.getTrialBalance()` (#47) | **Removed (#50)** |
+
+**Confirmed solid (0 new findings):**
+
+| Category | Result |
+|---|---|
+| Auth guards | All 7 controllers / 37 routes — `SupabaseAuthGuard` + `CompanyMembershipGuard` + `@RequireCompanyMembership` |
+| Identity spoofing | No mutation DTO declares `*_by` / `actor_*` / `is_system_account`; global `forbidNonWhitelisted` |
+| `assertAccountsUsableForCompany` | All 8 client `account_id` write paths covered (#35/#39/#44) |
+| RLS | All 11 tables + `v_trial_balance` `security_invoker` |
+| Grant hygiene | All 15 functions + §12 table grants (#48) |
+| Trigger completeness | All load-bearing triggers present (#28/#38/#45/#46); only system-account UPDATE remains service-only (#36) |
+| Missing routes | No implemented service method lacks an HTTP route (#47 closed trial balance) |
+| Doc drift | README + §5.6 updated; stale refs to non-existent `apply_security_advisor_lints.sql` / `apply_data_api_grants.sql` corrected |
+
+**Cleanup (#50):** removed `dist/` build output; purpose-built
+`UpdateJournalLineDto`; removed dead `JournalEntriesService.getAccountTrialBalance()`.
+
+*(Decision #50)*
 
 ### 7.17 Nest company-membership enforcement — status
 
@@ -1470,6 +1661,21 @@ create/update rejection, same-company depth computation unregressed,
 depth-4 + cross-company-parent interaction, same-company 5th-level depth
 limit still enforced. `schema.sql` §2 confirmed synced with the actual
 trigger SQL. See §4.15. *(Decision #45)*
+
+### 7.22 Journal balance-on-post INSERT backstop — status
+
+**Closed 2026-08-28.** §7.16 finding #6. `trg_enforce_journal_balance_on_post`
+now fires `BEFORE INSERT OR UPDATE`; explicit `tg_op = 'INSERT'` branch.
+No RPC changes — all four paths still draft→UPDATE. See §4.16.
+*(Decision #46)*
+
+### 7.23 Account trial balance HTTP route — status
+
+**Closed 2026-08-28.** §7.16 finding #8. `GET /accounts/:id/trial-balance`
+wires existing `getAccountTrialBalance` (single-account `v_trial_balance`
+row). Membership via account param (#41). Verified:
+`accounts.trial-balance.integration.spec.ts` + guard/coverage updates.
+See §4.17. *(Decision #47)*
 
 ---
 
@@ -1525,3 +1731,8 @@ topical section referenced.
 | 43 | 2026-08-27 | Closed §7.16 finding #3: `UpdateRecurringJournalTemplateDto` rebuilt as purpose-built (no longer `PartialType` of create DTO); `company_id`/`created_by`/`lines`/`id`/timestamps all rejected; repository update no longer writes `company_id` | §4.13, §7.19 |
 | 44 | 2026-08-27 | Closed §7.16 finding #4: recurring template lines' 5th account_id call site (`insert`/`insertLine`/`updateLine`) now uses the shared `assertAccountsUsableForCompany` helper, matching #35/#39 | §4.14, §7.20 |
 | 45 | 2026-08-27 | Closed §7.16 finding #5: `enforce_account_hierarchy_depth` extended to check `parent_account_id`'s `company_id`, DB-layer only, consistent with #28/#38's defense-in-depth pattern; `schema.sql` §2 confirmed synced | §4.15, §7.21 |
+| 46 | 2026-08-28 | Closed §7.16 finding #6: `trg_enforce_journal_balance_on_post` extended to `BEFORE INSERT OR UPDATE` with explicit `tg_op = 'INSERT'` branch; no RPC changes — backstop only | §4.16, §7.22 |
+| 47 | 2026-08-28 | Closed §7.16 finding #8: `GET /accounts/:id/trial-balance` exposes single-account `v_trial_balance` via existing `getAccountTrialBalance`; membership from account param (#41) | §4.17, §7.23 |
+| 48 | 2026-08-28 | Closed §7.16 finding #7: §5.1 EXECUTE-revoke/grant on all nine trigger helpers; empirical PGlite test proves EXECUTE does not gate trigger firing; hygiene only | §4.18, §7.24 |
+| 49 | 2026-08-28 | Post-reset health check on `hilaeuvltstgedlpgjcw`: build + full suite 3× clean (28/253) + COA verify 7/7 — zero errors | §7.25 |
+| 50 | 2026-08-28 | Second gap audit §7.26: 3 new open items; closed UpdateJournalLineDto PartialType gap + removed dead `JournalEntriesService.getAccountTrialBalance()`; README/doc drift fixed | §7.26 |

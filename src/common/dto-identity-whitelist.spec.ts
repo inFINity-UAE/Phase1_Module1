@@ -176,6 +176,7 @@ describe('DTO identity whitelist (forbidNonWhitelisted)', () => {
     ['actor_id', CreateJournalLineDto, validJournalLine],
     ['updated_by', CreateJournalLineDto, validJournalLine],
     ['created_by', UpdateJournalLineDto, { debit: 1 }],
+    ['journal_entry_id', UpdateJournalLineDto, { debit: 1 }],
     ['actor_role', UpdateJournalLineDto, { debit: 1 }],
   ] as const)(
     'rejects spoofed %s on %s',

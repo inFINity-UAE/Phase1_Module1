@@ -1094,19 +1094,6 @@ describe('JournalEntriesService', () => {
       });
 
       repository.createOpeningBalanceEntry.mockResolvedValue(posted);
-      repository.getAccountTrialBalance
-        .mockResolvedValueOnce({
-          account_id: ACCOUNT_A,
-          total_debit: 500,
-          total_credit: 0,
-          balance: 500,
-        })
-        .mockResolvedValueOnce({
-          account_id: ACCOUNT_B,
-          total_debit: 0,
-          total_credit: 500,
-          balance: -500,
-        });
 
       const result = await service.createOpeningBalance(openingBalanceDto, USER_ID);
 
@@ -1117,11 +1104,6 @@ describe('JournalEntriesService', () => {
       expect(result.entry.entry_type).toBe(JournalEntryType.OpeningBalance);
       expect(result.entry.status).toBe(JournalEntryStatus.Posted);
       expect(result.entry.period_id).toBe(PERIOD_ID);
-
-      const balanceA = await service.getAccountTrialBalance(COMPANY_ID, ACCOUNT_A);
-      const balanceB = await service.getAccountTrialBalance(COMPANY_ID, ACCOUNT_B);
-      expect(balanceA?.total_debit).toBe(500);
-      expect(balanceB?.total_credit).toBe(500);
     });
 
     it('an unbalanced opening balance entry is rejected the same way any other entry would be', async () => {

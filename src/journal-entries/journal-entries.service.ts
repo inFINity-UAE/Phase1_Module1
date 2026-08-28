@@ -31,7 +31,6 @@ import {
 } from './dto/journal-entry-approval.dto';
 import { CreateJournalLineDto } from './dto/create-journal-line.dto';
 import { UpdateJournalLineDto } from './dto/update-journal-line.dto';
-import { AccountTrialBalance } from './entities/account-trial-balance.entity';
 import { JournalEntryWithDetails } from './entities/journal-entry-with-details.entity';
 import { JournalEntryReversalResult } from './entities/journal-entry-reversal-result.entity';
 import { JournalAttachment } from './entities/journal-attachment.entity';
@@ -184,20 +183,6 @@ export class JournalEntriesService {
     }
 
     handleDatabaseError(error);
-  }
-
-  async getAccountTrialBalance(
-    companyId: string,
-    accountId: string,
-  ): Promise<AccountTrialBalance | null> {
-    try {
-      return await this.journalEntriesRepository.getAccountTrialBalance(
-        companyId,
-        accountId,
-      );
-    } catch (error) {
-      handleDatabaseError(error);
-    }
   }
 
   /**
