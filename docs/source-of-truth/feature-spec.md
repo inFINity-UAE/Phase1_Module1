@@ -46,9 +46,8 @@ the §5.1 EXECUTE-revoke checklist (was §7.16 finding #7). See §4.18.
 | Gap | Why it's not fixed yet | Detail |
 |---|---|---|
 | Accounts: no service-layer block on UPDATE to `is_system_account` accounts at the DB level | `trg_prevent_account_deletion` is DELETE-only; UPDATE protection is service-layer only (#36) | §4.10 |
-| `period_id` not validated as same-company on manual draft create | Same class as pre-#35 `account_id` gap; FK does not tie period to entry company | §7.26 finding #1 |
-| Recurring `auto_post=true` bypasses approval-threshold / soft-close post workflow | Schema flag intentionally auto-posts; service calls `postEntry` directly, not `JournalEntriesService.post()` | §7.26 finding #2 |
-| `controller-auth-coverage.spec.ts` exercises only 25/37 routes for 401 | Regression suite never expanded when workflow routes were added | §7.26 finding #3 |
+| `period_id` not validated as same-company on manual draft create | Same class as pre-#35 `account_id` gap; FK does not tie period to entry company | **Closed by decision #51 (§7.27)** |
+| `controller-auth-coverage.spec.ts` exercises only 25/37 routes for 401 | Regression suite never expanded when workflow routes were added | **Closed by decision #53 (§7.29)** |
 
 **Note on test execution:** `--runInBand` was required from decision #28
 through #36 due to a JWT clock-skew issue — that issue is now closed
@@ -212,6 +211,12 @@ entry amount or who created the entry — including approving/posting their
 own entries. The Owner is the ultimate accountable party. The
 `pending_approval → approve` flow applies only when the original poster
 is NOT an Owner. *(Decision #1)*
+
+**Recurring templates:** `auto_post=true` controls whether generation
+may automatically *attempt* posting; it does **not** bypass approval
+thresholds, soft-close authorization, or any other §4.1 posting rule.
+Recurring auto-post uses the same `JournalEntriesService.post()` path as
+manual entries. *(Decision #52)*
 
 ### 4.2 Reversals
 
@@ -1589,9 +1594,9 @@ categories that were fully closed.
 
 | Rank | Risk | Finding | Status |
 |---|---|---|---|
-| 1 | **Integrity** | `insertJournalEntryDraftRpc` validates line `account_id`s against body `company_id` but not that `period_id` belongs to that company — cross-tenant period linkage possible for a member supplying a foreign period UUID | **Open** |
-| 2 | Integrity / design | Recurring `auto_post=true` calls `journalEntriesRepository.postEntry()` directly, bypassing `JournalEntriesService.post()` approval-threshold and soft-close override paths; schema `auto_post` flag makes this intentional but Rules §1.24 may not exempt it | **Open — needs product call** |
-| 3 | Hygiene | `controller-auth-coverage.spec.ts` tests 401 on 25/37 routes; 12 workflow routes (post/approve/reject/reverse/opening/year-end/soft-close/delete account/recurring create+get) never added to regression list | **Open** |
+| 1 | **Integrity** | `insertJournalEntryDraftRpc` validates line `account_id`s against body `company_id` but not that `period_id` belongs to that company — cross-tenant period linkage possible for a member supplying a foreign period UUID | **Closed by decision #51 (§7.27)** |
+| 2 | Integrity / design | Recurring `auto_post=true` calls `journalEntriesRepository.postEntry()` directly, bypassing `JournalEntriesService.post()` approval-threshold and soft-close override paths; schema `auto_post` flag makes this intentional but Rules §1.24 may not exempt it | **Closed by decision #52 (§7.28)** |
+| 3 | Hygiene | `controller-auth-coverage.spec.ts` tests 401 on 25/37 routes; 12 workflow routes (post/approve/reject/reverse/opening/year-end/soft-close/delete account/recurring create+get) never added to regression list | **Closed by decision #53 (§7.29)** |
 | 4 | Hygiene | `UpdateJournalLineDto` was `PartialType(CreateJournalLineDto)` — clients could PATCH `journal_entry_id` (ignored by repo, not rejected by pipe) | **Closed by decision #50** |
 | — | — | Dead `JournalEntriesService.getAccountTrialBalance()` superseded by `AccountsService.getTrialBalance()` (#47) | **Removed (#50)** |
 
@@ -1612,6 +1617,43 @@ categories that were fully closed.
 `UpdateJournalLineDto`; removed dead `JournalEntriesService.getAccountTrialBalance()`.
 
 *(Decision #50)*
+
+### 7.27 Draft create `period_id` same-company validation — status
+
+**Closed 2026-08-28.** §7.26 finding #1. `assertPeriodUsableForCompany` (pure)
++ repository fetch in `insertJournalEntryDraftRpc` — covers `insertDraft` and
+`insertGeneratedFromTemplate` (all client-supplied `period_id` draft paths).
+Opening/year-end RPCs resolve period server-side; unchanged. `period_id` remains
+required on `CreateJournalEntryDto` at the HTTP layer. Verified: unit spec +
+`journal-entries.post.integration.spec.ts`. *(Decision #51)*
+
+### 7.28 Recurring `auto_post` approval-threshold bypass — status
+
+**Closed 2026-08-28.** §7.26 finding #2. Canonical product decision:
+`auto_post=true` may attempt automatic posting but must not bypass §4.1
+approval thresholds, soft-close authorization, or Owner-only override
+semantics. `RecurringJournalTemplatesService.generateFromTemplate` now
+calls `JournalEntriesService.post()` (same path as manual entries) instead
+of `journalEntriesRepository.postEntry()`. Above-threshold non-Owner
+entries route to `pending_approval`; schedule still advances so reruns do
+not duplicate the same period. Soft-close / authorization blocks retain
+the draft and advance schedule. Verified: expanded
+`recurring-journal-templates.service.spec.ts` + new
+`recurring-journal-templates.auto-post-approval.integration.spec.ts`.
+*(Decision #52)*
+
+### 7.29 Controller auth-coverage regression — status
+
+**Closed 2026-08-28.** §7.26 finding #3. `controller-auth-coverage.spec.ts` now
+defines a canonical `ALL_GUARDED_ROUTES` array (37 routes across 7
+controllers) aligned with `company-membership.guard.integration.spec.ts`.
+Previously uncovered 12 workflow routes added: `DELETE /accounts/:id`,
+`GET /accounting-periods/:id`, `POST .../soft-close`, journal create /
+opening-balance / year-end-close / post / approve / reject / reverse,
+`POST /recurring-journal-templates`, `GET /recurring-journal-templates/:id`.
+Both unauthenticated (401) and authenticated membership (not 401/403)
+regression probes now iterate all 37 routes. Verified:
+`controller-auth-coverage.spec.ts` — 76 tests passed. *(Decision #53)*
 
 ### 7.17 Nest company-membership enforcement — status
 
@@ -1736,3 +1778,6 @@ topical section referenced.
 | 48 | 2026-08-28 | Closed §7.16 finding #7: §5.1 EXECUTE-revoke/grant on all nine trigger helpers; empirical PGlite test proves EXECUTE does not gate trigger firing; hygiene only | §4.18, §7.24 |
 | 49 | 2026-08-28 | Post-reset health check on `hilaeuvltstgedlpgjcw`: build + full suite 3× clean (28/253) + COA verify 7/7 — zero errors | §7.25 |
 | 50 | 2026-08-28 | Second gap audit §7.26: 3 new open items; closed UpdateJournalLineDto PartialType gap + removed dead `JournalEntriesService.getAccountTrialBalance()`; README/doc drift fixed | §7.26 |
+| 51 | 2026-08-28 | Closed §7.26 finding #1: `assertPeriodUsableForCompany` in `insertJournalEntryDraftRpc` (all draft-create paths); mirrors #35 account pattern | §7.27 |
+| 52 | 2026-08-28 | Closed §7.26 finding #2: recurring `auto_post=true` uses `JournalEntriesService.post()` — does not bypass approval threshold or soft-close authorization | §4.1, §7.28 |
+| 53 | 2026-08-28 | Closed §7.26 finding #3: `controller-auth-coverage.spec.ts` expanded to 37/37 routes (401 + authenticated membership probes) | §7.29 |

@@ -29,6 +29,7 @@ import {
   JournalEntriesRepository,
 } from './journal-entries.repository';
 import { assertAccountsUsableForCompany } from './journal-line-account.validation';
+import { assertPeriodUsableForCompany } from './journal-period.validation';
 
 @Injectable()
 export class SupabaseJournalEntriesRepository implements JournalEntriesRepository {
@@ -101,6 +102,28 @@ export class SupabaseJournalEntriesRepository implements JournalEntriesRepositor
     assertAccountsUsableForCompany(companyId, uniqueIds, data ?? []);
   }
 
+  private async assertPeriodUsableForCompany(
+    companyId: string,
+    periodId: string,
+  ): Promise<void> {
+    // [feature-spec.md §7.26 finding #1] Shared by insert_journal_entry_draft paths.
+    if (!periodId) {
+      return;
+    }
+
+    const { data, error } = await this.supabase.client
+      .from('accounting_periods')
+      .select('id, company_id, period_start, period_end')
+      .eq('id', periodId)
+      .maybeSingle();
+
+    if (error) {
+      throw error;
+    }
+
+    assertPeriodUsableForCompany(companyId, periodId, data ?? null);
+  }
+
   private async insertJournalEntryDraftRpc(params: {
     p_company_id: string;
     p_period_id: string;
@@ -114,6 +137,7 @@ export class SupabaseJournalEntriesRepository implements JournalEntriesRepositor
     p_attachments?: unknown;
   }): Promise<JournalEntryWithDetails> {
     const lines = Array.isArray(params.p_lines) ? params.p_lines : [];
+    await this.assertPeriodUsableForCompany(params.p_company_id, params.p_period_id);
     await this.assertAccountsUsableForCompany(
       params.p_company_id,
       lines.map((line) => String((line as { account_id?: string }).account_id ?? '')),

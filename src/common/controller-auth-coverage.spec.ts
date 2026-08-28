@@ -24,6 +24,7 @@ import { CompanyRole } from './enums/company-role.enum';
 /**
  * [feature-spec.md decisions #24/#27/#41] Controllers reject unauthenticated
  * requests (401) and succeed for a verified Bearer session with membership.
+ * Regression list covers all 37 guarded HTTP routes across 7 controllers.
  */
 describe('Controller auth coverage (decision #24)', () => {
   let app: INestApplication;
@@ -34,6 +35,145 @@ describe('Controller auth coverage (decision #24)', () => {
 
   const sessionUserId = '00000000-0000-0000-0000-0000000000a2';
   const companyId = 'cccccccc-cccc-cccc-cccc-cccccccccccc';
+  const accountId = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+  const periodId = '22222222-2222-2222-2222-222222222222';
+  const entryId = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb';
+  const templateId = 'dddddddd-dddd-dddd-dddd-dddddddddddd';
+  const templateLineId = 'eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee';
+  const journalLineId = 'ffffffff-ffff-ffff-ffff-ffffffffffff';
+
+  const journalEntryDetails = {
+    entry: { id: entryId, company_id: companyId },
+    lines: [],
+    attachments: [],
+  };
+
+  /** Canonical 37-route list — keep in sync with company-membership.guard.integration.spec.ts */
+  const ALL_GUARDED_ROUTES: Array<{ method: string; path: string; body?: unknown }> = [
+    { method: 'GET', path: `/accounts?company_id=${companyId}` },
+    { method: 'GET', path: `/accounts/${accountId}` },
+    {
+      method: 'POST',
+      path: '/accounts',
+      body: {
+        company_id: companyId,
+        account_number: '1999',
+        account_name: 'X',
+        category: 'asset',
+        normal_balance: 'debit',
+      },
+    },
+    { method: 'PATCH', path: `/accounts/${accountId}/deactivate` },
+    { method: 'PATCH', path: `/accounts/${accountId}`, body: { account_name: 'Renamed' } },
+    { method: 'DELETE', path: `/accounts/${accountId}` },
+    { method: 'GET', path: `/accounts/${accountId}/trial-balance` },
+    {
+      method: 'POST',
+      path: '/accounting-periods',
+      body: {
+        company_id: companyId,
+        period_start: '2026-01-01',
+        period_end: '2026-01-31',
+        fiscal_year: 2026,
+      },
+    },
+    { method: 'GET', path: `/accounting-periods?company_id=${companyId}` },
+    { method: 'GET', path: `/accounting-periods/${periodId}` },
+    { method: 'PATCH', path: `/accounting-periods/${periodId}`, body: { fiscal_year: 2027 } },
+    { method: 'POST', path: `/accounting-periods/${periodId}/soft-close`, body: {} },
+    {
+      method: 'POST',
+      path: '/journal-entries',
+      body: {
+        company_id: companyId,
+        period_id: periodId,
+        entry_date: '2026-01-10',
+        narration: 'Auth coverage probe',
+        lines: [
+          { line_number: 1, account_id: accountId, debit: 1, credit: 0 },
+          { line_number: 2, account_id: accountId, debit: 0, credit: 1 },
+        ],
+      },
+    },
+    {
+      method: 'POST',
+      path: '/journal-entries/opening-balance',
+      body: {
+        company_id: companyId,
+        fiscal_year: 2026,
+        entry_date: '2026-01-01',
+        narration: 'Auth coverage opening',
+        lines: [
+          { line_number: 1, account_id: accountId, debit: 1, credit: 0 },
+          { line_number: 2, account_id: accountId, debit: 0, credit: 1 },
+        ],
+      },
+    },
+    {
+      method: 'POST',
+      path: '/journal-entries/year-end-close',
+      body: { company_id: companyId, fiscal_year: 2026 },
+    },
+    { method: 'GET', path: `/journal-entries?company_id=${companyId}` },
+    { method: 'GET', path: `/journal-entries/${entryId}` },
+    { method: 'GET', path: `/journal-entries/${entryId}/attachments` },
+    { method: 'PATCH', path: `/journal-entries/${entryId}`, body: { narration: 'revised' } },
+    { method: 'POST', path: `/journal-entries/${entryId}/post`, body: {} },
+    { method: 'POST', path: `/journal-entries/${entryId}/approve`, body: {} },
+    {
+      method: 'POST',
+      path: `/journal-entries/${entryId}/reject`,
+      body: { rejection_reason: 'Auth coverage reject' },
+    },
+    { method: 'POST', path: `/journal-entries/${entryId}/reverse` },
+    {
+      method: 'POST',
+      path: '/recurring-journal-templates',
+      body: {
+        company_id: companyId,
+        template_name: 'Auth coverage template',
+        narration_template: 'Probe',
+        frequency: 'monthly',
+        start_date: '2026-01-01',
+        lines: [
+          { line_number: 1, account_id: accountId, debit: 1, credit: 0 },
+          { line_number: 2, account_id: accountId, debit: 0, credit: 1 },
+        ],
+      },
+    },
+    { method: 'POST', path: '/recurring-journal-templates/run-due', body: { company_id: companyId } },
+    { method: 'GET', path: `/recurring-journal-templates?company_id=${companyId}` },
+    { method: 'GET', path: `/recurring-journal-templates/${templateId}` },
+    { method: 'PATCH', path: `/recurring-journal-templates/${templateId}`, body: {} },
+    { method: 'DELETE', path: `/recurring-journal-templates/${templateId}` },
+    {
+      method: 'POST',
+      path: `/recurring-journal-templates/${templateId}/lines`,
+      body: {
+        line_number: 1,
+        account_id: accountId,
+        debit: 1,
+        credit: 0,
+      },
+    },
+    { method: 'POST', path: `/recurring-journal-templates/${templateId}/generate`, body: {} },
+    { method: 'PATCH', path: `/recurring-journal-template-lines/${templateLineId}`, body: {} },
+    { method: 'DELETE', path: `/recurring-journal-template-lines/${templateLineId}` },
+    { method: 'GET', path: `/audit-log?company_id=${companyId}` },
+    {
+      method: 'POST',
+      path: '/journal-lines',
+      body: {
+        journal_entry_id: entryId,
+        line_number: 1,
+        account_id: accountId,
+        debit: 1,
+        credit: 0,
+      },
+    },
+    { method: 'PATCH', path: `/journal-lines/${journalLineId}`, body: { debit: 1 } },
+    { method: 'DELETE', path: `/journal-lines/${journalLineId}` },
+  ];
 
   beforeAll(async () => {
     getUser = jest.fn();
@@ -42,13 +182,13 @@ describe('Controller auth coverage (decision #24)', () => {
 
     const accountsService = {
       findAll: jest.fn().mockResolvedValue([]),
-      findOne: jest.fn().mockResolvedValue({ id: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa' }),
-      create: jest.fn().mockResolvedValue({ id: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa' }),
-      update: jest.fn().mockResolvedValue({ id: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa' }),
-      deactivate: jest.fn().mockResolvedValue({ id: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa' }),
+      findOne: jest.fn().mockResolvedValue({ id: accountId }),
+      create: jest.fn().mockResolvedValue({ id: accountId }),
+      update: jest.fn().mockResolvedValue({ id: accountId }),
+      deactivate: jest.fn().mockResolvedValue({ id: accountId }),
       remove: jest.fn().mockResolvedValue(undefined),
       getTrialBalance: jest.fn().mockResolvedValue({
-        account_id: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+        account_id: accountId,
         total_debit: 0,
         total_credit: 0,
         balance: 0,
@@ -56,61 +196,58 @@ describe('Controller auth coverage (decision #24)', () => {
     };
 
     const accountingPeriodsService = {
-      create: jest.fn().mockResolvedValue({ id: '22222222-2222-2222-2222-222222222222' }),
+      create: jest.fn().mockResolvedValue({ id: periodId }),
       findAll: jest.fn().mockResolvedValue([]),
-      findOne: jest.fn().mockResolvedValue({ id: '22222222-2222-2222-2222-222222222222' }),
-      update: jest.fn().mockResolvedValue({ id: '22222222-2222-2222-2222-222222222222' }),
-      softClose: jest.fn().mockResolvedValue({ id: '22222222-2222-2222-2222-222222222222' }),
+      findOne: jest.fn().mockResolvedValue({ id: periodId }),
+      update: jest.fn().mockResolvedValue({ id: periodId }),
+      softClose: jest.fn().mockResolvedValue({ id: periodId }),
     };
 
     const journalEntriesService = {
       findAll: jest.fn().mockResolvedValue([]),
-      findOne: jest.fn().mockResolvedValue({
-        entry: { id: 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', company_id: companyId },
-        lines: [],
-        attachments: [],
-      }),
+      findOne: jest.fn().mockResolvedValue(journalEntryDetails),
       getAttachments: jest.fn().mockResolvedValue([]),
-      update: jest.fn().mockResolvedValue({
-        entry: { id: 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb' },
-        lines: [],
-        attachments: [],
+      update: jest.fn().mockResolvedValue(journalEntryDetails),
+      create: jest.fn().mockResolvedValue(journalEntryDetails),
+      createOpeningBalance: jest.fn().mockResolvedValue(journalEntryDetails),
+      runYearEndClosing: jest.fn().mockResolvedValue(journalEntryDetails),
+      post: jest.fn().mockResolvedValue(journalEntryDetails),
+      approve: jest.fn().mockResolvedValue(journalEntryDetails),
+      reject: jest.fn().mockResolvedValue(journalEntryDetails),
+      reverse: jest.fn().mockResolvedValue({
+        ...journalEntryDetails,
+        reversal: journalEntryDetails,
       }),
-      create: jest.fn().mockResolvedValue({
-        entry: { id: 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb' },
-        lines: [],
-        attachments: [],
-      }),
-      createOpeningBalance: jest.fn(),
-      runYearEndClosing: jest.fn(),
-      post: jest.fn(),
-      approve: jest.fn(),
-      reject: jest.fn(),
-      reverse: jest.fn(),
       createLine: jest.fn().mockResolvedValue({
-        id: 'ffffffff-ffff-ffff-ffff-ffffffffffff',
-        journal_entry_id: 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
+        id: journalLineId,
+        journal_entry_id: entryId,
         line_number: 1,
-        account_id: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+        account_id: accountId,
         debit: 1,
         credit: 0,
       }),
-      updateLine: jest.fn().mockResolvedValue({ id: 'ffffffff-ffff-ffff-ffff-ffffffffffff' }),
+      updateLine: jest.fn().mockResolvedValue({ id: journalLineId }),
       deleteLine: jest.fn().mockResolvedValue(undefined),
     };
 
     const recurringService = {
-      create: jest.fn().mockResolvedValue({ id: 'dddddddd-dddd-dddd-dddd-dddddddddddd' }),
+      create: jest.fn().mockResolvedValue({
+        template: { id: templateId, company_id: companyId },
+        lines: [],
+      }),
       findAll: jest.fn().mockResolvedValue([]),
-      findOne: jest.fn().mockResolvedValue({ id: 'dddddddd-dddd-dddd-dddd-dddddddddddd' }),
-      update: jest.fn().mockResolvedValue({ id: 'dddddddd-dddd-dddd-dddd-dddddddddddd' }),
+      findOne: jest.fn().mockResolvedValue({
+        template: { id: templateId, company_id: companyId },
+        lines: [],
+      }),
+      update: jest.fn().mockResolvedValue({ id: templateId }),
       remove: jest.fn().mockResolvedValue(undefined),
-      addLine: jest.fn().mockResolvedValue({ id: 'eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee' }),
+      addLine: jest.fn().mockResolvedValue({ id: templateLineId }),
       generateTemplate: jest.fn().mockResolvedValue({
-        template_id: 'dddddddd-dddd-dddd-dddd-dddddddddddd',
+        template_id: templateId,
       }),
       runDueGenerations: jest.fn().mockResolvedValue([]),
-      updateLine: jest.fn().mockResolvedValue({ id: 'eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee' }),
+      updateLine: jest.fn().mockResolvedValue({ id: templateLineId }),
       removeLine: jest.fn().mockResolvedValue(undefined),
     };
 
@@ -191,100 +328,11 @@ describe('Controller auth coverage (decision #24)', () => {
     return { status: response.status, body: await response.text() };
   }
 
-  const previouslyUnguardedRoutes: Array<{ method: string; path: string; body?: unknown }> = [
-    { method: 'GET', path: `/accounts?company_id=${companyId}` },
-    { method: 'GET', path: '/accounts/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa' },
-    { method: 'GET', path: '/accounts/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa/trial-balance' },
-    {
-      method: 'POST',
-      path: '/accounts',
-      body: { company_id: companyId, account_number: '1999', account_name: 'X', category: 'asset', normal_balance: 'debit' },
-    },
-    { method: 'PATCH', path: '/accounts/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa/deactivate' },
-    {
-      method: 'PATCH',
-      path: '/accounts/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
-      body: { account_name: 'Renamed' },
-    },
-    {
-      method: 'POST',
-      path: '/accounting-periods',
-      body: {
-        company_id: companyId,
-        period_start: '2026-01-01',
-        period_end: '2026-01-31',
-        fiscal_year: 2026,
-      },
-    },
-    { method: 'GET', path: `/accounting-periods?company_id=${companyId}` },
-    {
-      method: 'PATCH',
-      path: '/accounting-periods/22222222-2222-2222-2222-222222222222',
-      body: { fiscal_year: 2027 },
-    },
-    { method: 'GET', path: `/journal-entries?company_id=${companyId}` },
-    { method: 'GET', path: '/journal-entries/bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb' },
-    { method: 'GET', path: '/journal-entries/bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb/attachments' },
-    {
-      method: 'PATCH',
-      path: '/journal-entries/bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
-      body: { narration: 'revised' },
-    },
-    { method: 'GET', path: `/recurring-journal-templates?company_id=${companyId}` },
-    { method: 'POST', path: '/recurring-journal-templates/run-due', body: { company_id: companyId } },
-    { method: 'PATCH', path: '/recurring-journal-templates/dddddddd-dddd-dddd-dddd-dddddddddddd', body: {} },
-    {
-      method: 'DELETE',
-      path: '/recurring-journal-templates/dddddddd-dddd-dddd-dddd-dddddddddddd',
-    },
-    {
-      method: 'POST',
-      path: '/recurring-journal-templates/dddddddd-dddd-dddd-dddd-dddddddddddd/generate',
-      body: {},
-    },
-    {
-      method: 'POST',
-      path: '/recurring-journal-templates/dddddddd-dddd-dddd-dddd-dddddddddddd/lines',
-      body: {
-        line_number: 1,
-        account_id: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
-        debit: 1,
-        credit: 0,
-      },
-    },
-    {
-      method: 'PATCH',
-      path: '/recurring-journal-template-lines/eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee',
-      body: {},
-    },
-    {
-      method: 'DELETE',
-      path: '/recurring-journal-template-lines/eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee',
-    },
-    { method: 'GET', path: `/audit-log?company_id=${companyId}` },
-    {
-      method: 'POST',
-      path: '/journal-lines',
-      body: {
-        journal_entry_id: 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
-        line_number: 1,
-        account_id: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
-        debit: 1,
-        credit: 0,
-      },
-    },
-    {
-      method: 'PATCH',
-      path: '/journal-lines/ffffffff-ffff-ffff-ffff-ffffffffffff',
-      body: { debit: 1 },
-    },
-    {
-      method: 'DELETE',
-      path: '/journal-lines/ffffffff-ffff-ffff-ffff-ffffffffffff',
-    },
-  ];
+  it('covers all 37 guarded HTTP routes', () => {
+    expect(ALL_GUARDED_ROUTES).toHaveLength(37);
+  });
 
-  it.each(previouslyUnguardedRoutes)(
+  it.each(ALL_GUARDED_ROUTES)(
     'unauthenticated $method $path returns 401',
     async ({ method, path, body }) => {
       getUser.mockResolvedValue({ data: { user: null }, error: { message: 'no session' } });
@@ -293,77 +341,7 @@ describe('Controller auth coverage (decision #24)', () => {
     },
   );
 
-  it.each([
-    { method: 'GET', path: `/accounts?company_id=${companyId}` },
-    {
-      method: 'GET',
-      path: '/accounts/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa/trial-balance',
-    },
-    {
-      method: 'PATCH',
-      path: '/accounts/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
-      body: { account_name: 'Renamed' },
-    },
-    {
-      method: 'GET',
-      path: `/accounting-periods?company_id=${companyId}`,
-    },
-    {
-      method: 'POST',
-      path: '/accounting-periods',
-      body: {
-        company_id: companyId,
-        period_start: '2026-01-01',
-        period_end: '2026-01-31',
-        fiscal_year: 2026,
-      },
-    },
-    {
-      method: 'PATCH',
-      path: '/accounting-periods/22222222-2222-2222-2222-222222222222',
-      body: { fiscal_year: 2027 },
-    },
-    {
-      method: 'GET',
-      path: '/journal-entries/bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb/attachments',
-    },
-    {
-      method: 'GET',
-      path: `/journal-entries?company_id=${companyId}`,
-    },
-    {
-      method: 'PATCH',
-      path: '/journal-entries/bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
-      body: { narration: 'revised' },
-    },
-    { method: 'GET', path: `/recurring-journal-templates?company_id=${companyId}` },
-    {
-      method: 'POST',
-      path: '/recurring-journal-templates/run-due',
-      body: { company_id: companyId },
-    },
-    { method: 'GET', path: `/audit-log?company_id=${companyId}` },
-    {
-      method: 'PATCH',
-      path: '/journal-lines/ffffffff-ffff-ffff-ffff-ffffffffffff',
-      body: { debit: 1 },
-    },
-    {
-      method: 'POST',
-      path: '/journal-lines',
-      body: {
-        journal_entry_id: 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
-        line_number: 1,
-        account_id: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
-        debit: 1,
-        credit: 0,
-      },
-    },
-    {
-      method: 'DELETE',
-      path: '/journal-lines/ffffffff-ffff-ffff-ffff-ffffffffffff',
-    },
-  ] as const)(
+  it.each(ALL_GUARDED_ROUTES)(
     'authenticated $method $path reaches handler (not 401/403)',
     async ({ method, path, body }) => {
       getUser.mockResolvedValue({

@@ -19,6 +19,7 @@ import { JournalEntriesService } from './journal-entries.service';
 import {
   ensurePostIntegrationCompanyReady,
   INTEGRATION_USER_ID,
+  mintFreshIntegrationCompany,
 } from '../test/integration-company.setup';
 import { DEMO_COMPANY_ID, getAccountIdByNumber } from '../e2e/e2e-company.setup';
 
@@ -417,6 +418,70 @@ const USER_ID = INTEGRATION_USER_ID;
       );
       createdEntryIds.push(created.entry.id);
       expect(created.lines).toHaveLength(2);
+    });
+
+    it('insertDraft rejects missing and cross-company period_id (§7.26 / decision #51)', async () => {
+      const periodId = await getPeriodId();
+      const [accA, accB] = await getTwoAssetAccounts();
+      const missingPeriodId = '00000000-0000-4000-8000-000000000099';
+
+      const foreignCompanyId = await mintFreshIntegrationCompany(
+        supabase,
+        'Period cross-company foreign',
+      );
+      const { data: foreignPeriod, error: foreignPeriodError } = await supabase.client
+        .from('accounting_periods')
+        .select('id')
+        .eq('company_id', foreignCompanyId)
+        .eq('period_start', '2026-01-01')
+        .single();
+      if (foreignPeriodError || !foreignPeriod) {
+        throw foreignPeriodError ?? new Error('Need a foreign-company accounting period');
+      }
+
+      const validLines = [
+        { line_number: 1, account_id: accA, debit: 10, credit: 0 },
+        { line_number: 2, account_id: accB, debit: 0, credit: 10 },
+      ];
+
+      await expect(
+        service.create(
+          {
+            company_id: companyId,
+            period_id: missingPeriodId,
+            entry_date: '2026-01-16',
+            narration: 'draft missing period',
+            lines: validLines,
+          },
+          USER_ID,
+        ),
+      ).rejects.toThrow(/was not found/i);
+
+      await expect(
+        service.create(
+          {
+            company_id: companyId,
+            period_id: foreignPeriod.id,
+            entry_date: '2026-01-16',
+            narration: 'draft cross-company period',
+            lines: validLines,
+          },
+          USER_ID,
+        ),
+      ).rejects.toThrow(/different company/i);
+
+      const created = await service.create(
+        {
+          company_id: companyId,
+          period_id: periodId,
+          entry_date: '2026-01-16',
+          narration: 'draft valid period',
+          lines: validLines,
+        },
+        USER_ID,
+      );
+      createdEntryIds.push(created.entry.id);
+      expect(created.entry.period_id).toBe(periodId);
     });
 
     it('createOpeningBalance rejects inactive and cross-company account_id (decision #39)', async () => {

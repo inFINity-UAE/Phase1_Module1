@@ -1,8 +1,8 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Inject,
   Injectable,
-  InternalServerErrorException,
   NotFoundException,
 } from '@nestjs/common';
 import {
@@ -19,6 +19,7 @@ import {
   JOURNAL_ENTRIES_REPOSITORY,
   JournalEntriesRepository,
 } from '../journal-entries/journal-entries.repository';
+import { JournalEntriesService } from '../journal-entries/journal-entries.service';
 import { CreateRecurringJournalTemplateDto } from './dto/create-recurring-journal-template.dto';
 import { UpdateRecurringJournalTemplateDto } from './dto/update-recurring-journal-template.dto';
 import { CreateRecurringJournalTemplateLineDto } from './dto/create-recurring-journal-template-line.dto';
@@ -40,6 +41,7 @@ export class RecurringJournalTemplatesService {
     private readonly templatesRepository: RecurringJournalTemplatesRepository,
     @Inject(JOURNAL_ENTRIES_REPOSITORY)
     private readonly journalEntriesRepository: JournalEntriesRepository,
+    private readonly journalEntriesService: JournalEntriesService,
   ) {}
 
   async create(
@@ -134,7 +136,9 @@ export class RecurringJournalTemplatesService {
 
   /**
    * [feature-spec] Generation job for due recurring templates.
-   * [Rules §1.3] auto_post=false → draft for review; auto_post=true → post with balance check.
+   * [Rules §1.3] auto_post=false → draft for review; auto_post=true → attempt post.
+   * [feature-spec §4.1 decision #52] auto_post=true uses JournalEntriesService.post() —
+   * it does not bypass approval thresholds or soft-close authorization.
    * [feature-spec.md decision #41] Scoped to one company_id — no cross-tenant batch.
    */
   async runDueGenerations(
@@ -256,42 +260,65 @@ export class RecurringJournalTemplatesService {
       handleDatabaseError(error);
     }
 
+    let posted = false;
+    let autoPostError: string | undefined;
+
     if (template.auto_post) {
       try {
-        const posted = await this.journalEntriesRepository.postEntry(generated.entry.id);
+        // [feature-spec §4.1 decision #52] Same post/approval path as manual entries.
+        generated = await this.journalEntriesService.post(
+          generated.entry.id,
+          template.created_by,
+        );
+        posted = generated.entry.status === JournalEntryStatus.Posted;
 
-        if (!posted.posted_at) {
+        if (generated.entry.status === JournalEntryStatus.PendingApproval) {
+          autoPostError =
+            'Entry exceeds approval threshold and requires Owner approval before posting';
+        }
+      } catch (error) {
+        if (this.isBalancePostFailure(error)) {
           await this.journalEntriesRepository.deleteEntry(generated.entry.id);
-          throw new InternalServerErrorException(
-            `Recurring entry ${posted.entry_number} was posted but posted_at was not set`,
-          );
+
+          const message =
+            error instanceof BadRequestException &&
+            typeof error.message === 'string' &&
+            /must equal total credits/i.test(error.message)
+              ? error.message
+              : formatUnbalancedPostError(
+                  generated.entry.entry_number,
+                  generated.lines,
+                );
+
+          return {
+            template_id: template.id,
+            template_name: template.template_name,
+            journal_entry: null,
+            posted: false,
+            next_run_date: template.next_run_date,
+            error: message,
+          };
         }
 
-        generated = (await this.journalEntriesRepository.findByIdWithDetails(
-          generated.entry.id,
-        ))!;
-      } catch (error) {
-        await this.journalEntriesRepository.deleteEntry(generated.entry.id);
+        if (error instanceof BadRequestException || error instanceof ForbiddenException) {
+          autoPostError = error.message;
+          generated =
+            (await this.journalEntriesRepository.findByIdWithDetails(generated.entry.id)) ??
+            generated;
+        } else if (isPostgrestError(error)) {
+          await this.journalEntriesRepository.deleteEntry(generated.entry.id);
 
-        const message =
-          isPostgrestError(error) &&
-          error.code === 'P0001' &&
-          isJournalBalancePostRejection(error.message)
-            ? formatUnbalancedPostError(generated.entry.entry_number, generated.lines)
-            : isPostgrestError(error)
-              ? error.message
-              : error instanceof Error
-                ? error.message
-                : 'Posting failed';
-
-        return {
-          template_id: template.id,
-          template_name: template.template_name,
-          journal_entry: null,
-          posted: false,
-          next_run_date: template.next_run_date,
-          error: message,
-        };
+          return {
+            template_id: template.id,
+            template_name: template.template_name,
+            journal_entry: null,
+            posted: false,
+            next_run_date: template.next_run_date,
+            error: error.message,
+          };
+        } else {
+          handleDatabaseError(error);
+        }
       }
     }
 
@@ -312,8 +339,31 @@ export class RecurringJournalTemplatesService {
       template_id: template.id,
       template_name: template.template_name,
       journal_entry: generated,
-      posted: template.auto_post,
+      posted,
       next_run_date: updatedTemplate.next_run_date,
+      error: autoPostError,
     };
+  }
+
+  /** [Rules §1.1] Balance rejection — discard generated draft and retry on next schedule run. */
+  private isBalancePostFailure(error: unknown): boolean {
+    if (
+      isPostgrestError(error) &&
+      error.code === 'P0001' &&
+      isJournalBalancePostRejection(error.message)
+    ) {
+      return true;
+    }
+
+    if (error instanceof BadRequestException) {
+      const message = typeof error.message === 'string' ? error.message : '';
+      return (
+        isJournalBalancePostRejection(message) ||
+        (/must equal total credits/i.test(message) &&
+          /Cannot post journal entry/i.test(message))
+      );
+    }
+
+    return false;
   }
 }
