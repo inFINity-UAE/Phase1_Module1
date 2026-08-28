@@ -1340,6 +1340,17 @@ describe('JournalEntriesService', () => {
       expect(result.entry.narration).toBe('revised');
     });
 
+    it('rejects entry_date outside the entry period on draft header update (§7.30)', async () => {
+      const draft = draftDetails();
+      repository.findByIdWithDetails.mockResolvedValue(draft);
+      periodsRepository.findById.mockResolvedValue(samplePeriod());
+
+      await expect(
+        service.update(ENTRY_ID, { entry_date: '2026-02-01' }, USER_ID),
+      ).rejects.toThrow(/must fall within accounting period/i);
+      expect(repository.updateDraftHeader).not.toHaveBeenCalled();
+    });
+
     it('rejects header update when status is not draft', async () => {
       repository.findByIdWithDetails.mockResolvedValue(postedDetails());
 

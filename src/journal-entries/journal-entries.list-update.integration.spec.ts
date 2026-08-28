@@ -62,15 +62,15 @@ const USER_ID = INTEGRATION_USER_ID;
       }
     });
 
-    async function getPeriodId(): Promise<string> {
+    async function getPeriodId(periodStart = '2026-01-01'): Promise<string> {
       const { data, error } = await supabase.client
         .from('accounting_periods')
         .select('id')
         .eq('company_id', companyId)
-        .limit(1)
+        .eq('period_start', periodStart)
         .single();
       if (error || !data) {
-        throw error ?? new Error('No accounting period found');
+        throw error ?? new Error(`No accounting period ${periodStart} found`);
       }
       return data.id;
     }
@@ -135,6 +135,14 @@ const USER_ID = INTEGRATION_USER_ID;
       expect(updated.entry.reference_number).toBe('REF-31');
       expect(updated.entry.entry_date).toBe('2026-01-21');
       expect(updated.entry.status).toBe(JournalEntryStatus.Draft);
+    });
+
+    it('rejects entry_date outside the entry period on draft header update (§7.30)', async () => {
+      const id = await insertDraft('date-range-probe', '2026-01-20');
+
+      await expect(
+        service.update(id, { entry_date: '2026-02-01' }, USER_ID),
+      ).rejects.toThrow(/must fall within accounting period/i);
     });
 
     it('rejects header update when status is not draft', async () => {

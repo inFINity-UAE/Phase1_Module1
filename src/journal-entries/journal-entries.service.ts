@@ -45,6 +45,7 @@ import {
   JOURNAL_ENTRIES_REPOSITORY,
   JournalEntriesRepository,
 } from './journal-entries.repository';
+import { assertEntryDateWithinPeriod } from './journal-period.validation';
 
 @Injectable()
 export class JournalEntriesService {
@@ -533,6 +534,19 @@ export class JournalEntriesService {
       dto.attachments !== undefined;
     if (!hasPatch) {
       throw new BadRequestException('No updatable header fields provided');
+    }
+
+    if (dto.entry_date !== undefined) {
+      const period = await this.accountingPeriodsRepository.findById(
+        existing.entry.period_id,
+      );
+      if (!period) {
+        throw new BadRequestException(
+          `Accounting period ${existing.entry.period_id} not found`,
+        );
+      }
+      // [§7.30 audit] entry_date must stay within the entry's fixed period.
+      assertEntryDateWithinPeriod(dto.entry_date, period);
     }
 
     try {

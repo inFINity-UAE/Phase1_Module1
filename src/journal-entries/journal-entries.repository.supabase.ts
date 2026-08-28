@@ -29,7 +29,11 @@ import {
   JournalEntriesRepository,
 } from './journal-entries.repository';
 import { assertAccountsUsableForCompany } from './journal-line-account.validation';
-import { assertPeriodUsableForCompany } from './journal-period.validation';
+import {
+  assertEntryDateWithinPeriod,
+  assertPeriodUsableForCompany,
+  assertRecurringTemplateUsableForCompany,
+} from './journal-period.validation';
 
 @Injectable()
 export class SupabaseJournalEntriesRepository implements JournalEntriesRepository {
@@ -105,6 +109,7 @@ export class SupabaseJournalEntriesRepository implements JournalEntriesRepositor
   private async assertPeriodUsableForCompany(
     companyId: string,
     periodId: string,
+    entryDate?: string,
   ): Promise<void> {
     // [feature-spec.md §7.26 finding #1] Shared by insert_journal_entry_draft paths.
     if (!periodId) {
@@ -122,6 +127,32 @@ export class SupabaseJournalEntriesRepository implements JournalEntriesRepositor
     }
 
     assertPeriodUsableForCompany(companyId, periodId, data ?? null);
+
+    if (entryDate !== undefined) {
+      assertEntryDateWithinPeriod(entryDate, data ?? null);
+    }
+  }
+
+  private async assertRecurringTemplateUsableForCompany(
+    companyId: string,
+    templateId: string | null | undefined,
+  ): Promise<void> {
+    // [§7.30 audit] Same-company check for recurring_template_id on draft creates.
+    if (!templateId) {
+      return;
+    }
+
+    const { data, error } = await this.supabase.client
+      .from('recurring_journal_templates')
+      .select('id, company_id')
+      .eq('id', templateId)
+      .maybeSingle();
+
+    if (error) {
+      throw error;
+    }
+
+    assertRecurringTemplateUsableForCompany(companyId, templateId, data ?? null);
   }
 
   private async insertJournalEntryDraftRpc(params: {
@@ -137,7 +168,15 @@ export class SupabaseJournalEntriesRepository implements JournalEntriesRepositor
     p_attachments?: unknown;
   }): Promise<JournalEntryWithDetails> {
     const lines = Array.isArray(params.p_lines) ? params.p_lines : [];
-    await this.assertPeriodUsableForCompany(params.p_company_id, params.p_period_id);
+    await this.assertPeriodUsableForCompany(
+      params.p_company_id,
+      params.p_period_id,
+      params.p_entry_date,
+    );
+    await this.assertRecurringTemplateUsableForCompany(
+      params.p_company_id,
+      params.p_recurring_template_id,
+    );
     await this.assertAccountsUsableForCompany(
       params.p_company_id,
       lines.map((line) => String((line as { account_id?: string }).account_id ?? '')),

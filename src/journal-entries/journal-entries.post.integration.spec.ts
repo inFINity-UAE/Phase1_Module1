@@ -65,15 +65,15 @@ const USER_ID = INTEGRATION_USER_ID;
       return repository.getNextEntryNumber(companyId);
     }
 
-    async function getPeriodId(): Promise<string> {
+    async function getPeriodId(periodStart = '2026-01-01'): Promise<string> {
       const { data, error } = await supabase.client
         .from('accounting_periods')
         .select('id')
         .eq('company_id', companyId)
-        .limit(1)
+        .eq('period_start', periodStart)
         .single();
       if (error || !data) {
-        throw error ?? new Error('No accounting period found for demo company');
+        throw error ?? new Error(`No accounting period ${periodStart} found for company`);
       }
       return data.id;
     }
@@ -482,6 +482,68 @@ const USER_ID = INTEGRATION_USER_ID;
       );
       createdEntryIds.push(created.entry.id);
       expect(created.entry.period_id).toBe(periodId);
+    });
+
+    it('insertDraft rejects entry_date outside the linked period (§7.30)', async () => {
+      const periodId = await getPeriodId();
+      const [accA, accB] = await getTwoAssetAccounts();
+      const validLines = [
+        { line_number: 1, account_id: accA, debit: 10, credit: 0 },
+        { line_number: 2, account_id: accB, debit: 0, credit: 10 },
+      ];
+
+      await expect(
+        service.create(
+          {
+            company_id: companyId,
+            period_id: periodId,
+            entry_date: '2026-02-01',
+            narration: 'draft date outside period',
+            lines: validLines,
+          },
+          USER_ID,
+        ),
+      ).rejects.toThrow(/must fall within accounting period/i);
+    });
+
+    it('insertGeneratedFromTemplate rejects cross-company recurring_template_id (§7.30)', async () => {
+      const periodId = await getPeriodId();
+      const [accA, accB] = await getTwoAssetAccounts();
+      const foreignCompanyId = await mintFreshIntegrationCompany(
+        supabase,
+        'Recurring template cross-company foreign',
+      );
+      const { data: foreignTemplate, error: templateError } = await supabase.client
+        .from('recurring_journal_templates')
+        .insert({
+          company_id: foreignCompanyId,
+          template_name: 'Foreign probe',
+          narration_template: 'Foreign',
+          frequency: 'monthly',
+          start_date: '2026-01-01',
+          next_run_date: '2026-01-31',
+          created_by: USER_ID,
+        })
+        .select('id')
+        .single();
+      if (templateError || !foreignTemplate) {
+        throw templateError ?? new Error('Need a foreign recurring template');
+      }
+
+      await expect(
+        repository.insertGeneratedFromTemplate({
+          company_id: companyId,
+          period_id: periodId,
+          entry_date: '2026-01-16',
+          narration: 'cross-company recurring link',
+          created_by: USER_ID,
+          recurring_template_id: foreignTemplate.id,
+          lines: [
+            { line_number: 1, account_id: accA, debit: 10, credit: 0 },
+            { line_number: 2, account_id: accB, debit: 0, credit: 10 },
+          ],
+        }),
+      ).rejects.toThrow(/different company/i);
     });
 
     it('createOpeningBalance rejects inactive and cross-company account_id (decision #39)', async () => {

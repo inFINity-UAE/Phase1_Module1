@@ -93,7 +93,15 @@ export class AccountsService {
 
   /** [feature-spec] Deactivate — never hard-delete accounts with history. */
   async deactivate(id: string): Promise<Account> {
-    await this.findOne(id);
+    const account = await this.findOne(id);
+
+    // [feature-spec.md decision #36 / §7.30] System accounts (e.g. 3100) cannot be deactivated.
+    if (account.is_system_account) {
+      throw new BadRequestException(
+        `Account ${id} is a system account and cannot be deactivated`,
+      );
+    }
+
     try {
       return await this.accountsRepository.updateActive(id, false);
     } catch (error) {

@@ -163,6 +163,22 @@ describe('AccountsService', () => {
     expect(repository.updateActive).toHaveBeenCalledWith(ACCOUNT_ID, false);
   });
 
+  it('deactivating a system account fails (decision #36 / §7.30)', async () => {
+    repository.findById.mockResolvedValue(
+      sampleAccount({
+        account_number: '3100',
+        account_name: 'Retained Earnings',
+        is_system_account: true,
+      }),
+    );
+
+    await expect(service.deactivate(ACCOUNT_ID)).rejects.toThrow(BadRequestException);
+    await expect(service.deactivate(ACCOUNT_ID)).rejects.toThrow(
+      'is a system account and cannot be deactivated',
+    );
+    expect(repository.updateActive).not.toHaveBeenCalled();
+  });
+
   it('attempting to delete an account that has journal_lines fails cleanly', async () => {
     repository.findById.mockResolvedValue(sampleAccount());
     repository.delete.mockRejectedValue(
