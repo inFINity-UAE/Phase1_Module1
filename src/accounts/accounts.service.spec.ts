@@ -124,6 +124,29 @@ describe('AccountsService', () => {
     ).rejects.toThrow('Sub-account hierarchy cannot exceed 4 levels deep');
   });
 
+  it('creating with a cross-company parent_account_id fails (decision #45)', async () => {
+    const parentId = '22222222-2222-2222-2222-222222222222';
+    repository.insert.mockRejectedValue(
+      pgError('P0001', `Parent account ${parentId} belongs to a different company`),
+    );
+
+    await expect(
+      service.create({
+        ...validDto,
+        account_number: '1017',
+        parent_account_id: parentId,
+      }),
+    ).rejects.toThrow(BadRequestException);
+
+    await expect(
+      service.create({
+        ...validDto,
+        account_number: '1017',
+        parent_account_id: parentId,
+      }),
+    ).rejects.toThrow(/belongs to a different company/i);
+  });
+
   it('deactivating an account with no transactions succeeds', async () => {
     const active = sampleAccount({ is_active: true });
     const deactivated = sampleAccount({ is_active: false });

@@ -16,6 +16,10 @@ Apply in the SQL Editor, in order:
 2. `docs/source-of-truth/seed_finalized_coa_demo_company_0002.sql` - demo COA (...0002)
 3. Optional: `docs/source-of-truth/verify_chart_of_accounts.sql` - seed checks
 
+If an existing live DB was applied before decision #45, also run
+`docs/source-of-truth/apply_account_parent_same_company.sql` once (extends
+`enforce_account_hierarchy_depth` with same-company parent check).
+
 Current `schema.sql` forces `btree_gist` into `extensions` and puts
 `is_company_member` in `private` (and drops any leftover
 `public.is_company_member`). If Advisor still warns on a DB that was

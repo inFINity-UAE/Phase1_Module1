@@ -171,18 +171,30 @@ create trigger trg_enforce_account_number_category
   before insert or update on accounts
   for each row execute function enforce_account_number_category();
 
--- Enforce hierarchy depth <= 4 and auto-compute depth from parent
+-- Enforce hierarchy depth <= 4, same-company parent, and auto-compute depth.
+-- [feature-spec.md decision #45 / §7.16 finding #5] Parent must belong to the
+-- same company as the child — FK alone only checks parent EXISTS.
 create or replace function enforce_account_hierarchy_depth()
 returns trigger as $$
 declare
   parent_depth smallint;
+  parent_company_id uuid;
 begin
   if new.parent_account_id is null then
     new.depth := 1;
   else
-    select depth into parent_depth from accounts where id = new.parent_account_id;
+    select depth, company_id
+      into parent_depth, parent_company_id
+      from accounts
+     where id = new.parent_account_id;
     if parent_depth is null then
       raise exception 'Parent account % not found', new.parent_account_id;
+    end if;
+    -- Same-company before depth so a cross-tenant parent at max depth does not
+    -- surface as a depth error (and does not leak the other company's depth).
+    if parent_company_id <> new.company_id then
+      raise exception 'Parent account % belongs to a different company',
+        new.parent_account_id;
     end if;
     if parent_depth >= 4 then
       raise exception 'Sub-account hierarchy cannot exceed 4 levels deep';

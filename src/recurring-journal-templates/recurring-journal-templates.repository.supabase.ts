@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { PeriodStatus } from '../common/enums/period-status.enum';
 import { SupabaseService } from '../database/supabase.service';
+import { assertAccountsUsableForCompany } from '../journal-entries/journal-line-account.validation';
 import { AccountingPeriod } from '../accounting-periods/entities/accounting-period.entity';
 import { CreateRecurringJournalTemplateDto } from './dto/create-recurring-journal-template.dto';
 import { UpdateRecurringJournalTemplateDto } from './dto/update-recurring-journal-template.dto';
@@ -17,7 +18,37 @@ export class SupabaseRecurringJournalTemplatesRepository
 {
   constructor(private readonly supabase: SupabaseService) {}
 
+  /**
+   * [feature-spec.md decision #44] Same helper as journal paths (#35/#39) —
+   * same-company + is_active, same 400 shape.
+   */
+  private async assertAccountsUsableForCompany(
+    companyId: string,
+    accountIds: string[],
+  ): Promise<void> {
+    const uniqueIds = [...new Set(accountIds.filter(Boolean))];
+    if (uniqueIds.length === 0) {
+      return;
+    }
+
+    const { data, error } = await this.supabase.client
+      .from('accounts')
+      .select('id, company_id, is_active, account_number')
+      .in('id', uniqueIds);
+
+    if (error) {
+      throw error;
+    }
+
+    assertAccountsUsableForCompany(companyId, uniqueIds, data ?? []);
+  }
+
   async insert(dto: CreateRecurringJournalTemplateWithActor): Promise<RecurringJournalTemplateWithLines> {
+    await this.assertAccountsUsableForCompany(
+      dto.company_id,
+      dto.lines.map((line) => line.account_id),
+    );
+
     const { data: template, error: templateError } = await this.supabase.client
       .from('recurring_journal_templates')
       .insert({
@@ -130,9 +161,11 @@ export class SupabaseRecurringJournalTemplatesRepository
     id: string,
     dto: UpdateRecurringJournalTemplateDto,
   ): Promise<RecurringJournalTemplate> {
+    // [feature-spec.md §7.16 finding #3 / decision #43] Never write company_id /
+    // created_by from the client — tenant is fixed at create; #41 resolves
+    // membership from the existing row.
     const payload: Record<string, unknown> = {};
 
-    if (dto.company_id !== undefined) payload.company_id = dto.company_id;
     if (dto.template_name !== undefined) payload.template_name = dto.template_name;
     if (dto.narration_template !== undefined) {
       payload.narration_template = dto.narration_template;
@@ -179,6 +212,21 @@ export class SupabaseRecurringJournalTemplatesRepository
     templateId: string,
     dto: CreateRecurringJournalTemplateLineDto,
   ): Promise<RecurringJournalTemplateLine> {
+    const { data: template, error: templateLookupError } = await this.supabase.client
+      .from('recurring_journal_templates')
+      .select('company_id')
+      .eq('id', templateId)
+      .maybeSingle();
+
+    if (templateLookupError) {
+      throw templateLookupError;
+    }
+    if (!template?.company_id) {
+      throw new Error(`Recurring journal template ${templateId} not found`);
+    }
+
+    await this.assertAccountsUsableForCompany(template.company_id as string, [dto.account_id]);
+
     const { data, error } = await this.supabase.client
       .from('recurring_journal_template_lines')
       .insert({
@@ -203,6 +251,34 @@ export class SupabaseRecurringJournalTemplatesRepository
     id: string,
     dto: UpdateRecurringJournalTemplateLineDto,
   ): Promise<RecurringJournalTemplateLine> {
+    if (dto.account_id !== undefined) {
+      const { data: line, error: lineLookupError } = await this.supabase.client
+        .from('recurring_journal_template_lines')
+        .select('template_id, recurring_journal_templates!inner(company_id)')
+        .eq('id', id)
+        .maybeSingle();
+
+      if (lineLookupError) {
+        throw lineLookupError;
+      }
+      if (!line) {
+        throw new Error(`Recurring journal template line ${id} not found`);
+      }
+
+      const parent = line.recurring_journal_templates as
+        | { company_id?: string }
+        | { company_id?: string }[]
+        | null;
+      const companyId = Array.isArray(parent)
+        ? parent[0]?.company_id
+        : parent?.company_id;
+      if (!companyId) {
+        throw new Error(`Recurring journal template line ${id} has no company`);
+      }
+
+      await this.assertAccountsUsableForCompany(companyId, [dto.account_id]);
+    }
+
     const payload: Record<string, unknown> = {};
 
     if (dto.line_number !== undefined) payload.line_number = dto.line_number;

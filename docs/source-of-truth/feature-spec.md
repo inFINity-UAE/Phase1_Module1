@@ -26,18 +26,26 @@ on every tenant-scoped route (was the critical §7.16 finding #1). See §5.11.
 **Closed 2026-08-27 by decision #42:** `CreateAccountDto` no longer
 accepts `is_system_account`/`locked_at`/`locked_reason` from the client
 (was §7.16 finding #2). See §4.12.
+**Closed 2026-08-27 by decision #43:** `UpdateRecurringJournalTemplateDto`
+no longer accepts `company_id` reassignment (was §7.16 finding #3). See
+§4.13.
+**Closed 2026-08-27 by decision #44:** Recurring template lines' 5th
+call site now validated same-company/active-account, matching #35/#39
+(was §7.16 finding #4). See §4.14.
+**Closed by decision #45:** `parent_account_id`
+now validated as same-company via the extended
+`enforce_account_hierarchy_depth` trigger (was §7.16 finding #5).
+`schema.sql` §2 confirmed synced.
 
 | Gap | Why it's not fixed yet | Detail |
 |---|---|---|
 | Accounts: no service-layer block on UPDATE to `is_system_account` accounts at the DB level | `trg_prevent_account_deletion` is DELETE-only; UPDATE protection is service-layer only (#36) | §4.10 |
-| `UpdateRecurringJournalTemplateDto` can reassign `company_id` via `PartialType` | Found by the 2026-08-27 audit | §7.16 finding #3 |
-| Recurring-template line inserts skip `assertAccountsUsableForCompany` (5th call site) | Same class of gap #35/#39 fixed for 4 other call sites; this one wasn't covered | §7.16 finding #4 |
-| `accounts.parent_account_id` not validated as same-company | Found by the same audit | §7.16 finding #5 |
 | `trg_enforce_journal_balance_on_post` is UPDATE-only — INSERT as `posted` bypasses it | Same shape as the pre-#28 posted-line INSERT gap | §7.16 finding #6 |
 | Trigger helper functions lack the §5.1 EXECUTE-revoke checklist | Found by the same audit | §7.16 finding #7 |
 | `getAccountTrialBalance` has a service method but no HTTP route | Found by the same audit | §7.16 finding #8 |
 
-Findings #3–#8 remain queued (#1 closed by #41, #2 closed by #42).
+Findings #6–#8 remain queued (#1 closed by #41, #2 by #42, #3 by #43,
+#4 by #44, #5 by #45).
 
 **Note on test execution:** `--runInBand` was required from decision #28
 through #36 due to a JWT clock-skew issue — that issue is now closed
@@ -553,6 +561,98 @@ belt-and-suspenders, not a behavior change.
 them; repository defaults confirmed `false`/`null`) plus the broader
 `dto-identity-whitelist` + `accounts.service.spec` suites — 3 suites / 68
 tests passed. *(Decision #42)*
+
+---
+
+### 4.13 Recurring template update — `company_id` reassignment locked down (#43)
+
+`§7.16` finding #3: `UpdateRecurringJournalTemplateDto` was
+`PartialType(CreateRecurringJournalTemplateDto)`, which inherited
+`company_id` as an editable-but-optional field — a client could
+potentially reassign a template to a different company via the update
+body. Since `CompanyMembershipGuard` (#41) authorizes this route using
+the template's *existing* `company_id`, a spoofed body value could not
+bypass the guard's authorization check itself, but it could still corrupt
+the template's tenant assignment post-authorization — a real integrity
+gap, not just a defense-in-depth nicety.
+
+**Fixed:** `UpdateRecurringJournalTemplateDto` rebuilt as a purpose-built
+DTO (no longer `PartialType` of the create DTO), whitelisting only the
+genuinely editable fields: `template_name`, `narration_template`,
+`frequency`, `start_date`, `end_date`, `next_run_date`, `day_of_month`,
+`auto_post`, `is_active`. `company_id`, `created_by`, `lines`, `id`, and
+timestamps are all rejected with 400 via `forbidNonWhitelisted`. Repository
+update no longer writes `company_id` under any circumstance. Audited the
+same file for other identity-shaped fields while in there (same discipline
+as #42) — confirmed `created_by` was never on either DTO to begin with
+(create derives it from `@CurrentUser()`), and the template-line update
+DTO (a separate `PartialType` of the line create DTO) has no `company_id`/
+`created_by` exposure either, left unchanged.
+
+**Verification:** `dto-identity-whitelist` + update-payload +
+`recurring service.spec` — 3 suites / 70 tests passed. *(Decision #43)*
+
+---
+
+### 4.14 Recurring template lines — same-company/active-account validation (#44)
+
+`§7.16` finding #4: `SupabaseRecurringJournalTemplatesRepository`'s three
+line-write paths (`insert`, `insertLine`, `updateLine`) accepted an
+`account_id` without the same-company + `is_active` validation that
+`createLine`, `insert_journal_entry_draft`, `create_opening_balance_entry`,
+and `updateLine` (journal-lines) already enforce (decisions #35/#39) —
+this was the 5th call site, missed when the other four were fixed.
+
+**Fixed:** all three paths now call the same shared
+`assertAccountsUsableForCompany` helper used by the other four call
+sites — no one-off check written, same function, same error shape:
+- `insert` — validates every line's `account_id` before the
+  template/lines insert
+- `insertLine` — resolves the template's `company_id`, then validates
+- `updateLine` — validates only when `account_id` is present in the
+  update payload (consistent with journal-lines' `updateLine` behavior)
+
+**Verification:** new `recurring-journal-templates.account-validation.spec.ts`
+(cross-company and inactive-account `account_id` → `BadRequestException`,
+same message pattern as the other four call sites; same-company active
+account succeeds) plus existing recurring service/update-payload suites —
+3 suites / 13 tests passed. *(Decision #44)*
+
+---
+
+### 4.15 `parent_account_id` same-company validation (#45)
+
+`§7.16` finding #5: `parent_account_id` was not validated as belonging to
+the same company as the account being created/updated —
+`enforce_account_hierarchy_depth` (the existing DB trigger) only checked
+that the parent *existed* and computed depth from it, with no
+`company_id` check at either the DB or app layer. Without this, a client
+could set an account's parent to a different company's account, corrupting
+the hierarchy across a tenant boundary and potentially leaking structural
+information (parent account existence/ID) across companies even where
+`journal_lines` RLS still protects transaction data.
+
+**Layer decision: DB only**, extending `enforce_account_hierarchy_depth`
+to check the parent's `company_id` before computing depth — consistent
+with this project's established preference for DB-level defense-in-depth
+on ledger-adjacent invariants (decisions #28, #38 took the same approach
+rather than relying on service-layer-only checks). Nest's create/update
+path reuses the trigger's existing `P0001` → 400 error translation; no
+duplicated service-layer check added.
+
+**Synced:** the actual trigger SQL was provided and confirmed —
+`schema.sql` §2's `enforce_account_hierarchy_depth` now checks
+`parent_company_id <> new.company_id` (same-company check placed
+*before* the depth check, so a cross-tenant parent at max depth
+correctly surfaces as the company error, not a depth error, and doesn't
+leak the other company's depth value). Fully closed, no outstanding
+drift.
+
+**Verification:** 3 suites / 15 tests passed — covers cross-company
+create/update rejection, same-company parent with correct depth
+computation (no regression to existing depth logic), a depth-4 +
+cross-company-parent combination case, and same-company 5th-level still
+correctly depth-limited. *(Decision #45)*
 
 ---
 
@@ -1307,9 +1407,9 @@ found 8 new findings not previously in this document, ranked by risk:
 |---|---|---|---|
 | 1 | **Security — critical** | Company membership not verified on Nest routes except post/approve/reject | **Closed by decision #41 (§5.11)** |
 | 2 | Security | `CreateAccountDto` accepts `is_system_account`, `locked_at`, `locked_reason` from the client | **Closed by decision #42 (§4.12)** |
-| 3 | Security | `UpdateRecurringJournalTemplateDto` can reassign `company_id` via `PartialType` | Open |
-| 4 | Integrity | Recurring-template line inserts skip `assertAccountsUsableForCompany` (5th call site, §4.9) | Open |
-| 5 | Integrity | `accounts.parent_account_id` not validated as same-company | Open |
+| 3 | Security | `UpdateRecurringJournalTemplateDto` can reassign `company_id` via `PartialType` | **Closed by decision #43 (§4.13)** |
+| 4 | Integrity | Recurring-template line inserts skip `assertAccountsUsableForCompany` (5th call site, §4.9) | **Closed by decision #44 (§4.14)** |
+| 5 | Integrity | `accounts.parent_account_id` not validated as same-company | **Closed by decision #45 (§4.15)** |
 | 6 | Integrity | `trg_enforce_journal_balance_on_post` is UPDATE-only — INSERT as `posted` bypasses it | Open |
 | 7 | Hygiene | Trigger helper functions lack §5.1 EXECUTE-revoke checklist | Open |
 | 8 | Completeness | `getAccountTrialBalance` has a service method but no HTTP route | Open |
@@ -1319,7 +1419,8 @@ controllers have auth guards; all 11 tables + the trial-balance view have
 correct RLS coverage; classic `*_by` identity-spoofing fields are clean
 everywhere; `deleteLine` is routed (#34).
 
-Findings 1–2 closed (#41, #42). Findings 3–8 remain queued.
+Findings 1–5 closed (#41–#45). Findings 6–8
+remain queued.
 
 ### 7.17 Nest company-membership enforcement — status
 
@@ -1339,6 +1440,36 @@ Verified: 3 targeted cases (reject all three fields with 400; accept
 without them; confirm repository defaults) plus `dto-identity-whitelist` +
 `accounts.service.spec` — 3 suites / 68 tests passed. See §4.12.
 *(Decision #42)*
+
+### 7.19 `UpdateRecurringJournalTemplateDto` `company_id` lockdown — status
+
+**Closed 2026-08-27.** §7.16 finding #3. Update DTO rebuilt as
+purpose-built (no longer `PartialType` of the create DTO); `company_id`,
+`created_by`, `lines`, `id`, timestamps all rejected 400. Repository
+update no longer writes `company_id`. Audited for other identity fields
+in the same file — none found. Verified: `dto-identity-whitelist` +
+update-payload + `recurring service.spec` — 3 suites / 70 tests passed.
+See §4.13. *(Decision #43)*
+
+### 7.20 Recurring template lines — account-validation gap — status
+
+**Closed 2026-08-27.** §7.16 finding #4 — the 5th call site missed when
+decisions #35/#39 fixed the other four. All three line-write paths
+(`insert`, `insertLine`, `updateLine`) in
+`SupabaseRecurringJournalTemplatesRepository` now call the shared
+`assertAccountsUsableForCompany` helper. Verified: new
+`recurring-journal-templates.account-validation.spec.ts` + existing
+recurring suites — 3 suites / 13 tests passed. See §4.14. *(Decision #44)*
+
+### 7.21 `parent_account_id` same-company validation — status
+
+**Closed 2026-08-28.** §7.16 finding #5. `enforce_account_hierarchy_depth`
+extended to check the parent account's `company_id`, DB-layer only (no
+service-layer duplicate). Verified: 3 suites / 15 tests — cross-company
+create/update rejection, same-company depth computation unregressed,
+depth-4 + cross-company-parent interaction, same-company 5th-level depth
+limit still enforced. `schema.sql` §2 confirmed synced with the actual
+trigger SQL. See §4.15. *(Decision #45)*
 
 ---
 
@@ -1391,3 +1522,6 @@ topical section referenced.
 | 40 | 2026-08-27 | Security Advisor: move `btree_gist` (and other extensions) to schema `extensions`; move `is_company_member` to `private` (drop public RPC surface); revoke EXECUTE from `anon`. **Unrelated to the membership-enforcement gap found in the same day's later audit (§7.16) — does not close it.** | §5.10, §7.15 |
 | 41 | 2026-08-27 | Closed Nest cross-tenant membership gap (audit §7.16 finding #1): shared CompanyMembershipGuard + @RequireCompanyMembership on every tenant-scoped route; post/approve/reject reuse guard-resolved role (no duplicate lookup); accounts/recurring list + run-due require company_id; 403 for non-members | §5.11, §7.17 |
 | 42 | 2026-08-27 | Closed §7.16 finding #2: `CreateAccountDto` no longer accepts `is_system_account`/`locked_at`/`locked_reason` from the client; repository insert hardcodes system defaults as defense in depth | §4.12, §7.18 |
+| 43 | 2026-08-27 | Closed §7.16 finding #3: `UpdateRecurringJournalTemplateDto` rebuilt as purpose-built (no longer `PartialType` of create DTO); `company_id`/`created_by`/`lines`/`id`/timestamps all rejected; repository update no longer writes `company_id` | §4.13, §7.19 |
+| 44 | 2026-08-27 | Closed §7.16 finding #4: recurring template lines' 5th account_id call site (`insert`/`insertLine`/`updateLine`) now uses the shared `assertAccountsUsableForCompany` helper, matching #35/#39 | §4.14, §7.20 |
+| 45 | 2026-08-27 | Closed §7.16 finding #5: `enforce_account_hierarchy_depth` extended to check `parent_account_id`'s `company_id`, DB-layer only, consistent with #28/#38's defense-in-depth pattern; `schema.sql` §2 confirmed synced | §4.15, §7.21 |

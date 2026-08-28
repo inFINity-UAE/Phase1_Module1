@@ -151,6 +151,11 @@ describe('DTO identity whitelist (forbidNonWhitelisted)', () => {
     ['actor_id', CreateRecurringJournalTemplateDto, validRecurring],
     ['created_by', UpdateRecurringJournalTemplateDto, { template_name: 'x' }],
     ['actor_id', UpdateRecurringJournalTemplateDto, { template_name: 'x' }],
+    ['company_id', UpdateRecurringJournalTemplateDto, { template_name: 'x' }],
+    ['lines', UpdateRecurringJournalTemplateDto, { template_name: 'x' }],
+    ['id', UpdateRecurringJournalTemplateDto, { template_name: 'x' }],
+    ['created_at', UpdateRecurringJournalTemplateDto, { template_name: 'x' }],
+    ['updated_at', UpdateRecurringJournalTemplateDto, { template_name: 'x' }],
     ['created_by', RunRecurringGenerationDto, {}],
     ['actor_id', RunRecurringGenerationDto, {}],
     ['actor_id', CreateAccountDto, validAccount],
@@ -216,6 +221,25 @@ describe('DTO identity whitelist (forbidNonWhitelisted)', () => {
     expect(result).not.toHaveProperty('is_system_account');
     expect(result).not.toHaveProperty('locked_at');
     expect(result).not.toHaveProperty('locked_reason');
+  });
+
+  it('accepts recurring template update without company_id / created_by / lines', async () => {
+    const result = await pipe.transform(
+      {
+        template_name: 'Renamed',
+        auto_post: true,
+        is_active: false,
+      },
+      meta(UpdateRecurringJournalTemplateDto),
+    );
+    expect(result).toMatchObject({
+      template_name: 'Renamed',
+      auto_post: true,
+      is_active: false,
+    });
+    expect(result).not.toHaveProperty('company_id');
+    expect(result).not.toHaveProperty('created_by');
+    expect(result).not.toHaveProperty('lines');
   });
 
   it('audit query actor_id remains a filter (not acting identity)', async () => {

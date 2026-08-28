@@ -1,9 +1,11 @@
 import { BadRequestException } from '@nestjs/common';
 
 /**
- * [feature-spec.md decisions #35 / #39] Shared account_id checks for journal_lines
- * writes that accept client-supplied accounts (createLine, insert_journal_entry_draft,
- * create_opening_balance_entry, updateLine when account_id changes).
+ * [feature-spec.md decisions #35 / #39 / #44] Shared account_id checks for
+ * client-supplied accounts on journal_lines writes (createLine,
+ * insert_journal_entry_draft, create_opening_balance_entry, updateLine when
+ * account_id changes) and recurring_journal_template_lines
+ * (template create lines, insertLine, updateLine when account_id changes).
  */
 export type JournalLineAccountRow = {
   id: string;
