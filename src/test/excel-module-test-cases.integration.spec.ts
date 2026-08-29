@@ -887,14 +887,41 @@ async function periodIdForMonth(
 
         const tbBankAfter = await accountsService.getTrialBalance(bank1020ob);
 
+        // #57: income account on opening-balance lines must be rejected (non-first line).
+        let categoryBlocked = false;
+        try {
+          const income4000 = await accountIdByNumber(supabase, companyId, '4000');
+          // Use main company (has open Jan period) for category probe — fresh ob company already has OB.
+          await journalService.createOpeningBalance(
+            {
+              company_id: companyId,
+              fiscal_year: FISCAL_YEAR,
+              entry_date: '2026-01-01',
+              narration: 'TC13 income category probe',
+              lines: [
+                { line_number: 1, account_id: bank1020, debit: 100, credit: 0 },
+                { line_number: 2, account_id: income4000, debit: 0, credit: 100 },
+              ],
+            },
+            OWNER_ID,
+          );
+        } catch (e) {
+          categoryBlocked =
+            e instanceof BadRequestException ||
+            /OPENING_BALANCE_INVALID_ACCOUNT_CATEGORY|income|expense|balance-sheet/i.test(
+              e instanceof Error ? e.message : String(e),
+            );
+        }
+
         record(
           'TC13',
           duplicateBlocked &&
+            categoryBlocked &&
             Math.abs(tbBank.balance - 120000) < 0.01 &&
             Math.abs(tbBankAfter.balance - 120000) < 0.01,
-          duplicateBlocked
-            ? 'Opening balance posted once; duplicate rejected; bank still 120,000.'
-            : `duplicateBlocked=${duplicateBlocked}; bank=${tbBankAfter.balance}; dupMsg=${duplicateMsg || 'second call succeeded'}`,
+          duplicateBlocked && categoryBlocked
+            ? 'Opening balance posted once; duplicate rejected; income line rejected (#57); bank still 120,000.'
+            : `duplicateBlocked=${duplicateBlocked}; categoryBlocked=${categoryBlocked}; bank=${tbBankAfter.balance}; dupMsg=${duplicateMsg || 'second call succeeded'}`,
         );
       } catch (e) {
         record('TC13', false, e instanceof Error ? e.message : String(e));
@@ -926,6 +953,23 @@ async function periodIdForMonth(
           deleteBlocked = e instanceof BadRequestException;
         }
 
+        let lineDeleteBlocked = false;
+        let lineDeleteAudited = false;
+        try {
+          const posted = await journalService.findOne(entryId);
+          await journalService.deleteLine(posted.lines[0].id, OWNER_ID);
+        } catch (e) {
+          lineDeleteBlocked = e instanceof BadRequestException;
+        }
+        const lineAudit = await auditService.find({
+          company_id: companyId,
+          table_name: 'journal_lines',
+        });
+        lineDeleteAudited = lineAudit.some(
+          (r) =>
+            r.action === AuditAction.DeleteBlocked && r.actor_id === OWNER_ID,
+        );
+
         await journalService.reverse(entryId, OWNER_ID);
         const auditRows = await auditService.find({
           company_id: companyId,
@@ -942,10 +986,22 @@ async function periodIdForMonth(
 
         record(
           'TC14',
-          deleteBlocked && hasInsert && hasStatus && hasReversal && hasDeleteBlocked,
-          deleteBlocked && hasInsert && hasStatus && hasReversal && hasDeleteBlocked
-            ? 'Posted entry delete blocked; audit has insert, status_change, reverse, delete_blocked.'
-            : `deleteBlocked=${deleteBlocked}; insert=${hasInsert} status=${hasStatus} reversal=${hasReversal} delete_blocked=${hasDeleteBlocked}`,
+          deleteBlocked &&
+            lineDeleteBlocked &&
+            lineDeleteAudited &&
+            hasInsert &&
+            hasStatus &&
+            hasReversal &&
+            hasDeleteBlocked,
+          deleteBlocked &&
+            lineDeleteBlocked &&
+            lineDeleteAudited &&
+            hasInsert &&
+            hasStatus &&
+            hasReversal &&
+            hasDeleteBlocked
+            ? 'Posted entry+line delete blocked; audit has insert, status_change, reverse, delete_blocked (entry+line).'
+            : `deleteBlocked=${deleteBlocked}; lineDelete=${lineDeleteBlocked}; lineAudit=${lineDeleteAudited}; insert=${hasInsert} status=${hasStatus} reversal=${hasReversal} delete_blocked=${hasDeleteBlocked}`,
         );
       } catch (e) {
         record('TC14', false, e instanceof Error ? e.message : String(e));

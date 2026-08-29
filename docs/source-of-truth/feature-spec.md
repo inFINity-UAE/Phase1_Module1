@@ -19,7 +19,7 @@ repeated inline.
 |---|---|---|
 | Hard-close / reopen HTTP; close checklist (Rules §1.22) | **Stub** | Schema columns reserved; not gaps |
 
-All §7.16 / §7.26 audit findings are closed (#41–#48, #51–#54). Auth: 38/38 routes guarded (#41, #53, #56). `--runInBand` is **not** required (#37). System-account UPDATE DB backstop closed (#58).
+All §7.16 / §7.26 audit findings are closed (#41–#48, #51–#54). Auth: 38/38 routes guarded (#41, #53, #56). `--runInBand` is **not** required (#37). System-account UPDATE DB backstop closed (#58). Integrity sweep #59: no open product defects; hard-close/reopen remains the only stub.
 
 **Fresh DB setup:** run `schema.sql` top-to-bottom (includes §12 table grants — no separate apply scripts).
 
@@ -706,19 +706,20 @@ to keep applying to any future fixed-company test setup.)*
 
 ### 7.2 Verification baseline
 
-**Current (2026-08-29, post-#58):**
+**Current (2026-08-29, post-#59 integrity sweep):**
 
 | Check | Result |
 |---|---|
 | npm run build | Pass |
-| Full suite | **33 suites / 333 tests** — all pass (~132s, parallel OK) |
+| Full suite | **34 suites / 339 tests** — all pass (~118s, parallel OK) |
 | COA verify | node scripts/verify-reset-health.mjs — **7/7** on demo …0002 |
-| Auth regression | **38/38** routes (controller-auth-coverage.spec.ts) |
+| Auth regression | **38/38** routes (controller-auth-coverage.spec.ts; recount matches 7 controllers) |
 | Fresh DB setup | schema.sql top-to-bottom + seed_finalized_coa_demo_company_0002.sql |
+| Excel TC1–TC14 | **14 PASS / 0 PARTIAL / 0 FAIL** (incl. #55/#56/#57 deltas) |
 
-Corrected 30/314 (2026-08-28, post-#54) → 33/333 after #55–#58 regression suites
-(self-approval audit, blocked-delete audit, opening-balance category, system-account
-UPDATE trigger). Auth stayed 38/38 — #58 is DB-only, no new HTTP route.
+Corrected 30/314 (2026-08-28, post-#54) → 33/333 after #55–#58 → **34/339** after #59
+(integrity-sweep regression suite permanently covering previously untested
+trigger/RPC branches). Auth stayed 38/38 — no new HTTP routes.
 Older decision-log entries (#26–#49) record suite counts *at decision time*.
 
 ### 7.3 Gap audit closure index
@@ -803,3 +804,4 @@ topical section referenced.
 | 56 | 2026-08-29 | Blocked hard-delete of posted journal entries/lines writes `audit_log` with `delete_blocked` in a separate Nest transaction after catching `POSTED_ENTRY_DELETE_BLOCKED` / `POSTED_LINE_DELETE_BLOCKED`; enum + trigger tokens in schema.sql; DELETE /journal-entries/:id | §3, §4.7, §5.12 |
 | 57 | 2026-08-29 | Opening balance rejects income/expense account lines — Nest `assertOpeningBalanceAccountsUsable` + RPC `OPENING_BALANCE_INVALID_ACCOUNT_CATEGORY` (balance-sheet accounts only) | §4.3, §6 |
 | 58 | 2026-08-29 | System-account structural UPDATE DB backstop: `trg_prevent_system_account_mutation` blocks §4.9 structural/identity columns when `is_system_account = true`; metadata allowed; Nest PATCH still blocks all system-account updates; closes known-open-item | §4.9, §4.17 |
+| 59 | 2026-08-29 | Integrity sweep: live behavioral re-verify of enums/constraints/triggers/RPC tokens/RLS proxies; permanentized Jest coverage for previously untested branches (system delete, draft delete allow, zero-line post, equity/income band mismatch, JOURNAL_DRAFT_REQUIRES_LINES, NO_OPEN/NO_PERIOD, OB income on first line, reverse-a-reversal); Excel TC13/TC14 extended for #57/#56 line delete; no product defects found — catalog SQL (pg_enum / role_routine_grants / security_invoker reloption) still requires DATABASE_URL | §7.2 |
