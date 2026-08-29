@@ -57,11 +57,12 @@ export class AccountsService {
   }
 
   /**
-   * [feature-spec.md decision #36] Metadata-only update. Structural columns
+   * [feature-spec.md decision #36/#58] Metadata-only update. Structural columns
    * (account_number, category, normal_balance, hierarchy) are rejected by
    * UpdateAccountDto + forbidNonWhitelisted. System accounts
    * (is_system_account = true, e.g. 3100 Retained Earnings #16) are blocked
-   * here — schema.sql trg_prevent_account_deletion covers DELETE only, not UPDATE.
+   * here for all PATCH fields; schema.sql trg_prevent_system_account_mutation
+   * (#58) is the DB backstop for structural/identity columns (service_role).
    */
   async update(id: string, dto: UpdateAccountDto): Promise<Account> {
     const account = await this.findOne(id);

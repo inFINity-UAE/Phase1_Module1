@@ -1063,6 +1063,10 @@ describe('JournalEntriesService', () => {
 
     it('Owner bypasses threshold and posts directly regardless of amount', async () => {
       const draft = draftDetails({
+        entry: {
+          ...draftDetails().entry,
+          created_by: OWNER_ID,
+        },
         lines: [
           {
             id: LINE_ID,
@@ -1093,6 +1097,8 @@ describe('JournalEntriesService', () => {
           ...draft.entry,
           status: JournalEntryStatus.Posted,
           posted_at: '2026-08-22T12:00:00.000Z',
+          approved_by: OWNER_ID,
+          approved_at: '2026-08-22T12:00:00.000Z',
         },
         lines: draft.lines,
       });
@@ -1106,7 +1112,7 @@ describe('JournalEntriesService', () => {
 
       expect(repository.getCompanySettings).not.toHaveBeenCalled();
       expect(repository.submitForApproval).not.toHaveBeenCalled();
-      expect(repository.postEntry).toHaveBeenCalledWith(ENTRY_ID);
+      expect(repository.postEntry).toHaveBeenCalledWith(ENTRY_ID, OWNER_ID);
       expect(result.entry.status).toBe(JournalEntryStatus.Posted);
     });
   });

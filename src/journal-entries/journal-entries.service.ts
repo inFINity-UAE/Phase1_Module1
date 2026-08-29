@@ -261,7 +261,7 @@ export class JournalEntriesService {
       }
     }
 
-    return this.executeDirectPost(id, existing);
+    return this.executeDirectPost(id, existing, isOwner ? actor.id : undefined);
   }
 
   /**
@@ -346,9 +346,21 @@ export class JournalEntriesService {
   private async executeDirectPost(
     id: string,
     existing: JournalEntryWithDetails,
+    /**
+     * [feature-spec.md #55] When the poster is Owner and created the entry,
+     * pass their id so postEntry stamps approved_by = created_by and the
+     * audit trigger writes notes = 'Self-approved by Owner'.
+     */
+    ownerSelfApproveId?: string,
   ): Promise<JournalEntryWithDetails> {
     try {
-      const posted = await this.journalEntriesRepository.postEntry(id);
+      const approvedBy =
+        ownerSelfApproveId && existing.entry.created_by === ownerSelfApproveId
+          ? ownerSelfApproveId
+          : undefined;
+      const posted = approvedBy
+        ? await this.journalEntriesRepository.postEntry(id, approvedBy)
+        : await this.journalEntriesRepository.postEntry(id);
 
       if (!posted.posted_at) {
         throw new InternalServerErrorException(

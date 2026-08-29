@@ -629,25 +629,33 @@ async function periodIdForMonth(
           table_name: 'journal_entries',
         });
         const selfApprovedLabel = ownerAudit.some(
-          (row) =>
-            JSON.stringify(row).toLowerCase().includes('self-approved') ||
-            JSON.stringify(row).toLowerCase().includes('self approved'),
+          (row) => row.notes === 'Self-approved by Owner',
+        );
+
+        const otherAudit = await auditService.find({
+          company_id: companyId,
+          record_id: aboveDraft.entry.id,
+          table_name: 'journal_entries',
+        });
+        const otherHasSelfLabel = otherAudit.some(
+          (row) => row.notes === 'Self-approved by Owner',
         );
 
         const corePass =
           pending.entry.status === JournalEntryStatus.PendingApproval &&
           approved.entry.status === JournalEntryStatus.Posted &&
           belowPosted.entry.status === JournalEntryStatus.Posted &&
-          ownerPosted.entry.status === JournalEntryStatus.Posted;
+          ownerPosted.entry.status === JournalEntryStatus.Posted &&
+          !otherHasSelfLabel;
 
         const tc9FullPass = corePass && selfApprovedLabel;
         record(
           'TC9',
           tc9FullPass,
-          corePass
-            ? `Threshold=${APPROVAL_THRESHOLD} AED: pending→approve, below immediate, Owner self-post OK.`
-            : `pending=${pending.entry.status}; approved=${approved.entry.status}; below=${belowPosted.entry.status}; owner=${ownerPosted.entry.status}`,
-          `App threshold is ${APPROVAL_THRESHOLD} AED (Excel specifies 50,000). Audit lacks explicit "Self-approved by Owner" label.`,
+          tc9FullPass
+            ? `Threshold=${APPROVAL_THRESHOLD} AED: pending→approve, below immediate, Owner self-post labeled.`
+            : `pending=${pending.entry.status}; approved=${approved.entry.status}; below=${belowPosted.entry.status}; owner=${ownerPosted.entry.status}; selfLabel=${selfApprovedLabel}; otherLabeled=${otherHasSelfLabel}`,
+          `App threshold is ${APPROVAL_THRESHOLD} AED (Excel specifies 50,000).`,
           corePass && !selfApprovedLabel,
         );
       } catch (e) {

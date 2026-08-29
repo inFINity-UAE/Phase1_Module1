@@ -100,7 +100,7 @@ export interface JournalEntriesRepository {
   submitForApproval(id: string): Promise<JournalEntry>;
   approveAndPostEntry(id: string, approvedBy: string): Promise<JournalEntry>;
   rejectEntry(id: string, rejectedBy: string, reason: string): Promise<JournalEntry>;
-  postEntry(id: string): Promise<JournalEntry>;
+  postEntry(id: string, approvedBy?: string): Promise<JournalEntry>;
   reverseEntry(originalId: string, createdBy: string): Promise<JournalEntryReversalResult>;
   /**
    * [feature-spec.md decision #32] Insert one journal_lines row. Posted parents

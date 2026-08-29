@@ -875,16 +875,24 @@ export class SupabaseJournalEntriesRepository implements JournalEntriesRepositor
   /**
    * Transition draft → posted. Balance enforced by enforce_journal_balance_on_post.
    * posted_at set by application layer on successful transition.
+   * [feature-spec.md #55] When approvedBy is provided (Owner posting their own
+   * entry), stamp approved_by/approved_at so log_journal_entry_change can label
+   * the audit row 'Self-approved by Owner'.
    */
-  async postEntry(id: string): Promise<JournalEntry> {
+  async postEntry(id: string, approvedBy?: string): Promise<JournalEntry> {
     const postedAt = new Date().toISOString();
+    const payload: Record<string, unknown> = {
+      status: JournalEntryStatus.Posted,
+      posted_at: postedAt,
+    };
+    if (approvedBy) {
+      payload.approved_by = approvedBy;
+      payload.approved_at = postedAt;
+    }
 
     const { data, error } = await this.supabase.client
       .from('journal_entries')
-      .update({
-        status: JournalEntryStatus.Posted,
-        posted_at: postedAt,
-      })
+      .update(payload)
       .eq('id', id)
       .eq('status', JournalEntryStatus.Draft)
       .select()

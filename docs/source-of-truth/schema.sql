@@ -211,6 +211,40 @@ create trigger trg_prevent_account_deletion
   before delete on accounts
   for each row execute function prevent_account_deletion();
 
+-- [feature-spec.md decision #58 / §4.9] System-account structural immutability.
+-- Mirrors prevent_nondraft_header_mutation: compare NEW vs OLD on the blocked
+-- column set only. Metadata (account_name, sub_category, description) stays
+-- writable even when is_system_account = true. Nest PATCH still blocks all
+-- system-account updates (#36); this is the service_role/DB backstop for
+-- structural columns (including is_active / is_system_account un-flag).
+-- Uses OLD.is_system_account so clearing the flag cannot bypass the guard.
+create or replace function prevent_system_account_mutation()
+returns trigger as $$
+begin
+  if not old.is_system_account then
+    return new;
+  end if;
+
+  if new.account_number is distinct from old.account_number
+     or new.category is distinct from old.category
+     or new.normal_balance is distinct from old.normal_balance
+     or new.parent_account_id is distinct from old.parent_account_id
+     or new.depth is distinct from old.depth
+     or new.is_system_account is distinct from old.is_system_account
+     or new.company_id is distinct from old.company_id
+     or new.is_active is distinct from old.is_active then
+    raise exception 'System accounts cannot change structural or identity fields — update account_name, sub_category, or description only';
+  end if;
+
+  return new;
+end;
+$$ language plpgsql
+   set search_path = public, pg_temp;
+
+create trigger trg_prevent_system_account_mutation
+  before update on accounts
+  for each row execute function prevent_system_account_mutation();
+
 -- ============================================================================
 -- 3. ACCOUNTING PERIODS
 -- ============================================================================
@@ -541,8 +575,13 @@ create trigger trg_block_audit_log_delete
 
 -- Generic trigger to auto-log inserts/updates on journal_entries into audit_log.
 -- (Attach an equivalent trigger to accounts, journal_lines, periods as needed.)
+-- [feature-spec.md #55] Self-approval (approved_by = created_by while entering
+-- approved/posted) is labeled in notes at write time — no company_role check;
+-- Nest §4.1 already restricts who may approve their own entry.
 create or replace function log_journal_entry_change()
 returns trigger as $$
+declare
+  v_notes text := null;
 begin
   if tg_op = 'INSERT' then
     insert into audit_log (company_id, table_name, record_id, action, actor_id, new_data)
@@ -553,10 +592,18 @@ begin
     -- CASE, and Postgres does not implicitly cast text -> enum (only
     -- untyped literals get that implicit coercion). Omitting the cast
     -- causes 42804 (datatype mismatch) on every UPDATE to journal_entries.
-    insert into audit_log (company_id, table_name, record_id, action, actor_id, old_data, new_data)
+    if new.approved_by is not null
+       and new.approved_by = new.created_by
+       and new.status in ('approved', 'posted')
+       and old.status is distinct from new.status
+       and old.status not in ('approved', 'posted') then
+      v_notes := 'Self-approved by Owner';
+    end if;
+
+    insert into audit_log (company_id, table_name, record_id, action, actor_id, old_data, new_data, notes)
       values (new.company_id, 'journal_entries', new.id,
         (case when new.status = 'reversed' then 'reversal' else 'status_change' end)::audit_action,
-        coalesce(new.approved_by, new.created_by), to_jsonb(old), to_jsonb(new));
+        coalesce(new.approved_by, new.created_by), to_jsonb(old), to_jsonb(new), v_notes);
   end if;
   return new;
 end;
@@ -585,6 +632,11 @@ revoke all on function prevent_account_deletion() from public;
 revoke all on function prevent_account_deletion() from authenticated;
 revoke all on function prevent_account_deletion() from anon;
 grant execute on function prevent_account_deletion() to service_role;
+
+revoke all on function prevent_system_account_mutation() from public;
+revoke all on function prevent_system_account_mutation() from authenticated;
+revoke all on function prevent_system_account_mutation() from anon;
+grant execute on function prevent_system_account_mutation() to service_role;
 
 revoke all on function enforce_journal_balance_on_post() from public;
 revoke all on function enforce_journal_balance_on_post() from authenticated;

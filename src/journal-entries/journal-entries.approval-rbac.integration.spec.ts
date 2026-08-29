@@ -5,9 +5,12 @@ config({ path: resolve(__dirname, '../../.env.local') });
 
 import { ForbiddenException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
+import { AuditAction } from '../common/enums/audit-action.enum';
 import { CompanyRole } from '../common/enums/company-role.enum';
 import { JournalEntryStatus } from '../common/enums/journal-entry-status.enum';
 import { AccountingPeriodsModule } from '../accounting-periods/accounting-periods.module';
+import { AuditLogModule } from '../audit-log/audit-log.module';
+import { AuditLogService } from '../audit-log/audit-log.service';
 import { CompanyMembersModule } from '../company-members/company-members.module';
 import { CompanyMembersService } from '../company-members/company-members.service';
 import { DatabaseModule } from '../database/database.module';
@@ -27,6 +30,7 @@ const hasSupabase = Boolean(
 
 const OWNER_ID = INTEGRATION_USER_ID;
 const ACCOUNTANT_ID = INTEGRATION_ACCOUNTANT_ID;
+const SELF_APPROVED_NOTE = 'Self-approved by Owner';
 
 (hasSupabase ? describe : describe.skip)(
   'Journal entry approval RBAC (Supabase integration)',
@@ -35,6 +39,7 @@ const ACCOUNTANT_ID = INTEGRATION_ACCOUNTANT_ID;
     jest.setTimeout(180_000);
 
     let service: JournalEntriesService;
+    let auditLogService: AuditLogService;
     let companyMembersService: CompanyMembersService;
     let supabase: SupabaseService;
     /** [feature-spec.md decision #19] Fresh company UUID per run. */
@@ -51,10 +56,12 @@ const ACCOUNTANT_ID = INTEGRATION_ACCOUNTANT_ID;
           AccountingPeriodsModule,
           CompanyMembersModule,
           JournalEntriesModule,
+          AuditLogModule,
         ],
       }).compile();
 
       service = module.get(JournalEntriesService);
+      auditLogService = module.get(AuditLogService);
       companyMembersService = module.get(CompanyMembersService);
       supabase = module.get(SupabaseService);
 
@@ -99,7 +106,9 @@ const ACCOUNTANT_ID = INTEGRATION_ACCOUNTANT_ID;
       }
     });
 
-    async function createPendingApprovalEntry(): Promise<string> {
+    async function createPendingApprovalEntry(
+      createdBy: string = ACCOUNTANT_ID,
+    ): Promise<string> {
       const draft = await service.create(
         {
           company_id: companyId,
@@ -121,10 +130,11 @@ const ACCOUNTANT_ID = INTEGRATION_ACCOUNTANT_ID;
             },
           ],
         },
-        ACCOUNTANT_ID,
+        createdBy,
       );
       createdEntryIds.push(draft.entry.id);
 
+      // Non-Owner post submits above-threshold drafts for approval (even if Owner created).
       const pending = await service.post(draft.entry.id, ACCOUNTANT_ID);
       expect(pending.entry.status).toBe(JournalEntryStatus.PendingApproval);
       return draft.entry.id;
@@ -139,7 +149,6 @@ const ACCOUNTANT_ID = INTEGRATION_ACCOUNTANT_ID;
       );
       expect(resolved.role).toBe(CompanyRole.Accountant);
 
-      // Service resolves role from DB via user id; actor_role is no longer accepted in the body.
       await expect(service.approve(entryId, ACCOUNTANT_ID)).rejects.toThrow(
         ForbiddenException,
       );
@@ -163,6 +172,82 @@ const ACCOUNTANT_ID = INTEGRATION_ACCOUNTANT_ID;
       const approved = await service.approve(entryId, OWNER_ID);
       expect(approved.entry.status).toBe(JournalEntryStatus.Posted);
       expect(approved.entry.approved_by).toBe(OWNER_ID);
+    });
+
+    it('Owner approving someone else leaves status_change notes unlabeled (#55)', async () => {
+      const entryId = await createPendingApprovalEntry(ACCOUNTANT_ID);
+      await service.approve(entryId, OWNER_ID);
+
+      const rows = await auditLogService.find({
+        company_id: companyId,
+        record_id: entryId,
+        table_name: 'journal_entries',
+      });
+      const statusChanges = rows.filter((r) => r.action === AuditAction.StatusChange);
+      expect(statusChanges.length).toBeGreaterThan(0);
+      expect(statusChanges.some((r) => r.notes === SELF_APPROVED_NOTE)).toBe(false);
+    });
+
+    it('Owner self-approval writes notes = Self-approved by Owner (#55)', async () => {
+      // Owner-created draft; Accountant submits above threshold → pending;
+      // Owner approve → approved_by = created_by → trigger labels.
+      const entryId = await createPendingApprovalEntry(OWNER_ID);
+      const approved = await service.approve(entryId, OWNER_ID);
+      expect(approved.entry.approved_by).toBe(OWNER_ID);
+      expect(approved.entry.created_by).toBe(OWNER_ID);
+
+      const rows = await auditLogService.find({
+        company_id: companyId,
+        record_id: entryId,
+        table_name: 'journal_entries',
+      });
+      const labeled = rows.filter(
+        (r) => r.action === AuditAction.StatusChange && r.notes === SELF_APPROVED_NOTE,
+      );
+      expect(labeled).toHaveLength(1);
+      expect(labeled[0].actor_id).toBe(OWNER_ID);
+    });
+
+    it('Owner posting their own draft stamps self-approval audit notes (#55)', async () => {
+      const draft = await service.create(
+        {
+          company_id: companyId,
+          period_id: periodId,
+          entry_date: '2026-01-21',
+          narration: 'Owner self-post audit probe',
+          lines: [
+            {
+              line_number: 1,
+              account_id: expenseAccountId,
+              debit: APPROVAL_THRESHOLD,
+              credit: 0,
+            },
+            {
+              line_number: 2,
+              account_id: cashAccountId,
+              debit: 0,
+              credit: APPROVAL_THRESHOLD,
+            },
+          ],
+        },
+        OWNER_ID,
+      );
+      createdEntryIds.push(draft.entry.id);
+
+      const posted = await service.post(draft.entry.id, OWNER_ID);
+      expect(posted.entry.status).toBe(JournalEntryStatus.Posted);
+      expect(posted.entry.approved_by).toBe(OWNER_ID);
+
+      const rows = await auditLogService.find({
+        company_id: companyId,
+        record_id: draft.entry.id,
+        table_name: 'journal_entries',
+      });
+      expect(
+        rows.some(
+          (r) => r.action === AuditAction.StatusChange && r.notes === SELF_APPROVED_NOTE,
+        ),
+      ).toBe(true);
     });
   },
 );

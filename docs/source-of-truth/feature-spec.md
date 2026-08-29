@@ -17,10 +17,9 @@ repeated inline.
 
 | Gap | Status | Detail |
 |---|---|---|
-| System-account **UPDATE** has no DB trigger (`trg_prevent_account_deletion` is DELETE-only) | **Open** | Service-layer block on `PATCH /accounts/:id` only — see §4.10 |
 | Hard-close / reopen HTTP; close checklist (Rules §1.22) | **Stub** | Schema columns reserved; not gaps |
 
-All §7.16 / §7.26 audit findings are closed (#41–#48, #51–#54). Auth: 38/38 routes guarded (#41, #53, #56). `--runInBand` is **not** required (#37).
+All §7.16 / §7.26 audit findings are closed (#41–#48, #51–#54). Auth: 38/38 routes guarded (#41, #53, #56). `--runInBand` is **not** required (#37). System-account UPDATE DB backstop closed (#58).
 
 **Fresh DB setup:** run `schema.sql` top-to-bottom (includes §12 table grants — no separate apply scripts).
 
@@ -180,6 +179,15 @@ own entries. The Owner is the ultimate accountable party. The
 `pending_approval → approve` flow applies only when the original poster
 is NOT an Owner. *(Decision #1)*
 
+**Self-approval audit label (#55):** when a journal entry transitions into
+`approved` or `posted` with `approved_by = created_by`, `log_journal_entry_change`
+writes `audit_log.notes = 'Self-approved by Owner'` on that `status_change`
+row. Owner approving a different creator's entry leaves `notes` null.
+Detection is equality of the two actor columns only — no `company_role`
+lookup in SQL (Nest §4.1 already gates who may approve). Owner posting
+their own draft (bypass path) stamps `approved_by` so the same label
+applies. *(Decision #55)*
+
 **Recurring templates:** `auto_post=true` controls whether generation
 may automatically *attempt* posting; it does **not** bypass approval
 thresholds, soft-close authorization, or any other §4.1 posting rule.
@@ -304,18 +312,20 @@ client-supplied ccount_id write path:
 
 Year-end and reversal lines use system-resolved accounts — not validated here.
 
-### 4.9 Accounts update — PATCH /accounts/:id (#36, #54)
+### 4.9 Accounts update — PATCH /accounts/:id (#36, #54, #58)
 
 | Column(s) | Editable? |
 |---|---|
-| ccount_name, sub_category, description | Yes |
-| ccount_number, category, 
-ormal_balance, parent_account_id, depth, is_system_account, company_id, is_active | No — structural/identity; deactivate uses dedicated route |
+| account_name, sub_category, description | Yes |
+| account_number, category, normal_balance, parent_account_id, depth, is_system_account, company_id, is_active | No — structural/identity; deactivate uses dedicated route |
 
 Purpose-built UpdateAccountDto (not PartialType(CreateAccountDto)).
-System accounts: UPDATE and **deactivate** blocked in service; DELETE blocked at
-DB by 	rg_prevent_account_deletion. **No DB trigger for UPDATE/deactivate**
-— open item (top-of-doc table).
+System accounts: Nest blocks **all** PATCH and deactivate (#36/#54);
+DELETE blocked at DB by `trg_prevent_account_deletion`. **DB backstop for
+structural UPDATE** — `trg_prevent_system_account_mutation` (#58) rejects
+changes to the structural/identity columns above when
+`is_system_account = true` (metadata columns remain writable at DB;
+mirrors `prevent_nondraft_header_mutation`'s NEW-vs-OLD shape).
 
 ### 4.10 DB defense-in-depth — period overlap + posted-header immutability (#38)
 
@@ -365,17 +375,17 @@ company_id before depth check (schema.sql §2).
 GET /accounts/:id/trial-balance — single-account row from _trial_balance
 (	otal_debit, 	otal_credit, alance). Membership from account param (#41).
 
-### 4.17 Trigger helper EXECUTE grants (#48)
+### 4.17 Trigger helper EXECUTE grants (#48, #58)
 
-All nine RETURNS trigger helpers have §5.1 revoke/grant blocks in schema.sql.
+All ten RETURNS trigger helpers have §5.1 revoke/grant blocks in schema.sql.
 EXECUTE grants are hygiene only — triggers fire without them
 (scripts/trigger-execute-empirical-test.mjs).
 
 Functions: enforce_account_number_category, enforce_account_hierarchy_depth,
-prevent_account_deletion, enforce_journal_balance_on_post,
-prevent_posted_line_mutation, prevent_posted_entry_deletion,
-prevent_nondraft_header_mutation, lock_audit_log_mutation,
-log_journal_entry_change.
+prevent_account_deletion, prevent_system_account_mutation (#58),
+enforce_journal_balance_on_post, prevent_posted_line_mutation,
+prevent_posted_entry_deletion, prevent_nondraft_header_mutation,
+block_audit_log_mutation, log_journal_entry_change.
 
 ### 4.18 Draft-create integrity (#51, #54)
 
@@ -696,16 +706,19 @@ to keep applying to any future fixed-company test setup.)*
 
 ### 7.2 Verification baseline
 
-**Current (2026-08-28, post-#54):**
+**Current (2026-08-29, post-#58):**
 
 | Check | Result |
 |---|---|
 | npm run build | Pass |
-| Full suite | **30 suites / 314 tests** — all pass (~120s, parallel OK) |
+| Full suite | **33 suites / 333 tests** — all pass (~132s, parallel OK) |
 | COA verify | node scripts/verify-reset-health.mjs — **7/7** on demo …0002 |
 | Auth regression | **38/38** routes (controller-auth-coverage.spec.ts) |
 | Fresh DB setup | schema.sql top-to-bottom + seed_finalized_coa_demo_company_0002.sql |
 
+Corrected 30/314 (2026-08-28, post-#54) → 33/333 after #55–#58 regression suites
+(self-approval audit, blocked-delete audit, opening-balance category, system-account
+UPDATE trigger). Auth stayed 38/38 — #58 is DB-only, no new HTTP route.
 Older decision-log entries (#26–#49) record suite counts *at decision time*.
 
 ### 7.3 Gap audit closure index
@@ -786,5 +799,7 @@ topical section referenced.
 | 52 | 2026-08-28 | Closed §7.26 finding #2: recurring `auto_post=true` uses `JournalEntriesService.post()` — does not bypass approval threshold or soft-close authorization | §4.1 |
 | 53 | 2026-08-28 | Closed §7.26 finding #3: `controller-auth-coverage.spec.ts` expanded to 37/37 routes (401 + authenticated membership probes) | §7.3 |
 | 54 | 2026-08-28 | Closed §7.30 third audit: system-account deactivate block; `recurring_template_id` + `entry_date` draft-create integrity | §4.9, §4.18 |
+| 55 | 2026-08-29 | Self-approval labeled at write time: `log_journal_entry_change` sets `audit_log.notes = 'Self-approved by Owner'` when `approved_by = created_by` on transition into approved/posted; Owner self-post stamps `approved_by`; two-person Owner approval leaves notes null | §4.1 |
 | 56 | 2026-08-29 | Blocked hard-delete of posted journal entries/lines writes `audit_log` with `delete_blocked` in a separate Nest transaction after catching `POSTED_ENTRY_DELETE_BLOCKED` / `POSTED_LINE_DELETE_BLOCKED`; enum + trigger tokens in schema.sql; DELETE /journal-entries/:id | §3, §4.7, §5.12 |
 | 57 | 2026-08-29 | Opening balance rejects income/expense account lines — Nest `assertOpeningBalanceAccountsUsable` + RPC `OPENING_BALANCE_INVALID_ACCOUNT_CATEGORY` (balance-sheet accounts only) | §4.3, §6 |
+| 58 | 2026-08-29 | System-account structural UPDATE DB backstop: `trg_prevent_system_account_mutation` blocks §4.9 structural/identity columns when `is_system_account = true`; metadata allowed; Nest PATCH still blocks all system-account updates; closes known-open-item | §4.9, §4.17 |
