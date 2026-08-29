@@ -1,4 +1,7 @@
-import { assertAccountsUsableForCompany } from './journal-line-account.validation';
+import {
+  assertAccountsUsableForCompany,
+  assertOpeningBalanceAccountsUsable,
+} from './journal-line-account.validation';
 
 describe('assertAccountsUsableForCompany (decision #35)', () => {
   const companyId = '00000000-0000-0000-0000-000000000002';
@@ -43,5 +46,44 @@ describe('assertAccountsUsableForCompany (decision #35)', () => {
         [{ id: accountA, company_id: companyId, is_active: false, account_number: '1050' }],
       ),
     ).toThrow(/inactive/i);
+  });
+});
+
+describe('assertOpeningBalanceAccountsUsable (decision #57)', () => {
+  const companyId = '00000000-0000-0000-0000-000000000002';
+  const bank = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+  const income = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb';
+
+  it('accepts asset and equity accounts', () => {
+    expect(() =>
+      assertOpeningBalanceAccountsUsable(
+        companyId,
+        [bank, income],
+        [
+          { id: bank, company_id: companyId, is_active: true, category: 'asset' },
+          { id: income, company_id: companyId, is_active: true, category: 'equity' },
+        ],
+      ),
+    ).not.toThrow();
+  });
+
+  it('rejects income accounts', () => {
+    expect(() =>
+      assertOpeningBalanceAccountsUsable(
+        companyId,
+        [income],
+        [{ id: income, company_id: companyId, is_active: true, category: 'income' }],
+      ),
+    ).toThrow(/asset, liability, or equity accounts/i);
+  });
+
+  it('rejects expense accounts', () => {
+    expect(() =>
+      assertOpeningBalanceAccountsUsable(
+        companyId,
+        [bank],
+        [{ id: bank, company_id: companyId, is_active: true, category: 'expense' }],
+      ),
+    ).toThrow(/asset, liability, or equity accounts/i);
   });
 });

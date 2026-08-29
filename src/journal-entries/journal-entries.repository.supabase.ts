@@ -28,7 +28,10 @@ import {
   CreateYearEndClosingWithActor,
   JournalEntriesRepository,
 } from './journal-entries.repository';
-import { assertAccountsUsableForCompany } from './journal-line-account.validation';
+import {
+  assertAccountsUsableForCompany,
+  assertOpeningBalanceAccountsUsable,
+} from './journal-line-account.validation';
 import {
   assertEntryDateWithinPeriod,
   assertPeriodUsableForCompany,
@@ -365,6 +368,36 @@ export class SupabaseJournalEntriesRepository implements JournalEntriesRepositor
     return (data ?? []) as JournalAttachment[];
   }
 
+  /**
+   * [feature-spec.md #56] Resolve line + parent company_id for blocked-delete audit.
+   */
+  async findLineWithCompany(
+    id: string,
+  ): Promise<{ line: JournalLine; company_id: string } | null> {
+    const { data, error } = await this.supabase.client
+      .from('journal_lines')
+      .select('*, journal_entries!inner(company_id)')
+      .eq('id', id)
+      .maybeSingle();
+
+    if (error) {
+      throw error;
+    }
+
+    if (!data) {
+      return null;
+    }
+
+    const { journal_entries: parent, ...line } = data as JournalLine & {
+      journal_entries: { company_id: string };
+    };
+
+    return {
+      line: line as JournalLine,
+      company_id: parent.company_id,
+    };
+  }
+
   async findPeriodById(id: string): Promise<AccountingPeriod | null> {
     const { data, error } = await this.supabase.client
       .from('accounting_periods')
@@ -635,11 +668,23 @@ export class SupabaseJournalEntriesRepository implements JournalEntriesRepositor
   async createOpeningBalanceEntry(
     dto: CreateOpeningBalanceWithActor,
   ): Promise<JournalEntryWithDetails> {
-    // [feature-spec.md decision #39] Same helper as createLine / draft insert (#35).
-    await this.assertAccountsUsableForCompany(
-      dto.company_id,
-      dto.lines.map((line) => line.account_id),
-    );
+    const accountIds = dto.lines.map((line) => line.account_id);
+    const uniqueIds = [...new Set(accountIds.filter(Boolean))];
+
+    if (uniqueIds.length > 0) {
+      const { data, error } = await this.supabase.client
+        .from('accounts')
+        .select('id, company_id, is_active, account_number, category')
+        .in('id', uniqueIds);
+
+      if (error) {
+        throw error;
+      }
+
+      // [feature-spec.md decisions #39 / #57] Same-company + active (#35) and
+      // balance-sheet categories only; RPC repeats category check as DB backstop.
+      assertOpeningBalanceAccountsUsable(dto.company_id, accountIds, data ?? []);
+    }
 
     const { data, error } = await this.supabase.client.rpc('create_opening_balance_entry', {
       p_company_id: dto.company_id,
@@ -684,6 +729,7 @@ export class SupabaseJournalEntriesRepository implements JournalEntriesRepositor
     const message = error.message ?? '';
     const tokens = [
       'OPENING_BALANCE_ALREADY_EXISTS',
+      'OPENING_BALANCE_INVALID_ACCOUNT_CATEGORY',
       'YEAR_END_ALREADY_CLOSED',
       'NO_OPEN_PERIOD_FOR_FISCAL_YEAR',
       'NO_PERIOD_FOR_FISCAL_YEAR',
@@ -701,12 +747,14 @@ export class SupabaseJournalEntriesRepository implements JournalEntriesRepositor
     return error as Error;
   }
 
+  /**
+   * Hard-delete a journal entry. Drafts cascade-delete lines/attachments.
+   * Posted rows are rejected by trg_prevent_posted_entry_deletion
+   * (POSTED_ENTRY_DELETE_BLOCKED) — do not delete children first, or a
+   * failed child delete could leave attachments stripped while the entry
+   * remains. [feature-spec.md #56]
+   */
   async deleteEntry(id: string): Promise<void> {
-    await this.supabase.client.from('journal_lines').delete().eq('journal_entry_id', id);
-    await this.supabase.client
-      .from('journal_attachments')
-      .delete()
-      .eq('journal_entry_id', id);
     const { error } = await this.supabase.client.from('journal_entries').delete().eq('id', id);
 
     if (error) {

@@ -52,6 +52,13 @@ export interface JournalEntriesRepository {
     },
   ): Promise<JournalEntryWithDetails>;
   findAttachmentsByEntryId(entryId: string): Promise<JournalAttachment[]>;
+  /**
+   * [feature-spec.md #56] Line + parent company for blocked-delete audit.
+   */
+  findLineWithCompany(id: string): Promise<{
+    line: JournalLine;
+    company_id: string;
+  } | null>;
   findPeriodById(id: string): Promise<AccountingPeriod | null>;
   findNextOpenPeriod(
     companyId: string,

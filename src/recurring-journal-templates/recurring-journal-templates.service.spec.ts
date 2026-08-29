@@ -169,6 +169,7 @@ describe('RecurringJournalTemplatesService', () => {
       findByCompany: jest.fn(),
       updateDraftHeader: jest.fn(),
       findAttachmentsByEntryId: jest.fn(),
+      findLineWithCompany: jest.fn(),
       findPeriodById: jest.fn(),
       findEarliestOpenPeriod: jest.fn(),
       hasOpeningBalanceForFiscalYear: jest.fn(),

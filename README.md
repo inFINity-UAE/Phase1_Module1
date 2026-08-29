@@ -100,7 +100,7 @@ Integration/e2e suites **skip automatically** if `NEXT_PUBLIC_SUPABASE_URL` or
 `SUPABASE_SECRET_KEY` is missing. With keys set, they mint fresh test companies
 against your live project (demo `…0002` is read-only COA clone source — never wiped).
 
-Current baseline: **28 suites / 254 tests** (see `feature-spec.md` §7.25).
+Current baseline: **30 suites / 314 tests** (see `feature-spec.md` §7.2).
 
 ---
 

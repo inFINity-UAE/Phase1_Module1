@@ -1,8 +1,12 @@
 import { Injectable } from '@nestjs/common';
+import { AuditAction } from '../common/enums/audit-action.enum';
 import { SupabaseService } from '../database/supabase.service';
 import { QueryAuditLogDto } from './dto/query-audit-log.dto';
 import { AuditLogEntry } from './entities/audit-log-entry.entity';
-import { AuditLogRepository } from './audit-log.repository';
+import {
+  AuditLogRepository,
+  InsertBlockedDeleteAuditParams,
+} from './audit-log.repository';
 
 function toStartOfDay(isoDate: string): string {
   return isoDate.length <= 10 ? `${isoDate}T00:00:00.000Z` : isoDate;
@@ -57,5 +61,34 @@ export class SupabaseAuditLogRepository implements AuditLogRepository {
     }
 
     return (data ?? []) as AuditLogEntry[];
+  }
+
+  /**
+   * [feature-spec.md #56] Separate request from the failed DELETE so the
+   * blocking trigger's ROLLBACK cannot erase this row.
+   */
+  async insertBlockedDelete(
+    params: InsertBlockedDeleteAuditParams,
+  ): Promise<AuditLogEntry> {
+    const { data, error } = await this.supabase.client
+      .from('audit_log')
+      .insert({
+        company_id: params.company_id,
+        table_name: params.table_name,
+        record_id: params.record_id,
+        action: AuditAction.DeleteBlocked,
+        actor_id: params.actor_id,
+        old_data: params.old_data,
+        new_data: null,
+        notes: params.notes ?? null,
+      })
+      .select('*')
+      .single();
+
+    if (error) {
+      throw error;
+    }
+
+    return data as AuditLogEntry;
   }
 }

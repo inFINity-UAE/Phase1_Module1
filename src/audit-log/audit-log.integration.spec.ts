@@ -3,6 +3,7 @@ import { resolve } from 'path';
 
 config({ path: resolve(__dirname, '../../.env.local') });
 
+import { BadRequestException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { AuditAction } from '../common/enums/audit-action.enum';
 import { JournalEntryStatus } from '../common/enums/journal-entry-status.enum';
@@ -259,6 +260,88 @@ const USER_ID = INTEGRATION_USER_ID;
       });
 
       expect(stillThere.some((row) => row.id === target.id)).toBe(true);
+    });
+
+    it('records delete_blocked audit when deleting a posted journal entry (#56)', async () => {
+      const draft = await journalEntriesService.create(
+        {
+          company_id: companyId,
+          period_id: periodId,
+          entry_date: '2026-01-18',
+          narration: 'Blocked delete audit probe',
+          lines: [
+            { line_number: 1, account_id: cashAccountId, debit: 40, credit: 0 },
+            { line_number: 2, account_id: bankAccountId, debit: 0, credit: 40 },
+          ],
+        },
+        USER_ID,
+      );
+      createdEntryIds.push(draft.entry.id);
+      await journalEntriesService.post(draft.entry.id, USER_ID);
+
+      const before = await auditLogService.find({
+        company_id: companyId,
+        record_id: draft.entry.id,
+        table_name: 'journal_entries',
+      });
+      const beforeBlocked = before.filter((r) => r.action === AuditAction.DeleteBlocked);
+
+      await expect(
+        journalEntriesService.deleteEntry(draft.entry.id, USER_ID),
+      ).rejects.toThrow(/Posted journal entries cannot be deleted/i);
+
+      const after = await auditLogService.find({
+        company_id: companyId,
+        record_id: draft.entry.id,
+        table_name: 'journal_entries',
+      });
+      const blocked = after.filter((r) => r.action === AuditAction.DeleteBlocked);
+
+      expect(blocked.length).toBe(beforeBlocked.length + 1);
+      expect(blocked[blocked.length - 1].actor_id).toBe(USER_ID);
+      expect(blocked[blocked.length - 1].record_id).toBe(draft.entry.id);
+      expect(blocked[blocked.length - 1].notes).toBe('POSTED_ENTRY_DELETE_BLOCKED');
+
+      const stillPosted = await journalEntriesService.findOne(draft.entry.id);
+      expect(stillPosted.entry.status).toBe(JournalEntryStatus.Posted);
+      expect(stillPosted.lines).toHaveLength(2);
+    });
+
+    it('records delete_blocked audit when deleting a line on a posted entry (#56)', async () => {
+      const draft = await journalEntriesService.create(
+        {
+          company_id: companyId,
+          period_id: periodId,
+          entry_date: '2026-01-19',
+          narration: 'Blocked line delete audit probe',
+          lines: [
+            { line_number: 1, account_id: cashAccountId, debit: 55, credit: 0 },
+            { line_number: 2, account_id: bankAccountId, debit: 0, credit: 55 },
+          ],
+        },
+        USER_ID,
+      );
+      createdEntryIds.push(draft.entry.id);
+      const posted = await journalEntriesService.post(draft.entry.id, USER_ID);
+      const lineId = posted.lines[0].id;
+
+      await expect(
+        journalEntriesService.deleteLine(lineId, USER_ID),
+      ).rejects.toThrow(BadRequestException);
+
+      const blocked = await auditLogService.find({
+        company_id: companyId,
+        record_id: lineId,
+        table_name: 'journal_lines',
+      });
+      expect(blocked).toHaveLength(1);
+      expect(blocked[0].action).toBe(AuditAction.DeleteBlocked);
+      expect(blocked[0].actor_id).toBe(USER_ID);
+      expect(blocked[0].notes).toBe('POSTED_LINE_DELETE_BLOCKED');
+
+      const stillPosted = await journalEntriesService.findOne(draft.entry.id);
+      expect(stillPosted.entry.status).toBe(JournalEntryStatus.Posted);
+      expect(stillPosted.lines).toHaveLength(2);
     });
   },
 );

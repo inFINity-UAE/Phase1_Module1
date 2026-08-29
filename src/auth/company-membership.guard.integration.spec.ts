@@ -404,6 +404,7 @@ const HTTP_CONTROLLERS: Type[] = [
           body: { rejection_reason: 'x' },
         },
         { method: 'POST', path: `/journal-entries/${foreignEntryId}/reverse` },
+        { method: 'DELETE', path: `/journal-entries/${foreignEntryId}` },
         {
           method: 'POST',
           path: '/journal-entries/opening-balance',

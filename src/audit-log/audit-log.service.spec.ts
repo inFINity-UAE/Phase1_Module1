@@ -15,6 +15,7 @@ describe('AuditLogService', () => {
   beforeEach(async () => {
     repository = {
       find: jest.fn(),
+      insertBlockedDelete: jest.fn(),
     };
 
     const module: TestingModule = await Test.createTestingModule({

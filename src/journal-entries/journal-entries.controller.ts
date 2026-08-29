@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, Param, ParseUUIDPipe, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { AuthenticatedUser } from '../auth/authenticated-user';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { RequireCompanyMembership } from '../auth/decorators/require-company-membership.decorator';
@@ -117,6 +117,20 @@ export class JournalEntriesController {
     @CurrentUser() user: AuthenticatedUser,
   ) {
     return this.journalEntriesService.reverse(id, user.id);
+  }
+
+  /**
+   * [feature-spec.md #56/#41] Hard-delete; posted → 400 + audit delete_blocked.
+   * Actor from session.
+   */
+  @Delete(':id')
+  @HttpCode(204)
+  @RequireCompanyMembership({ type: 'param', resource: 'journal_entry' })
+  remove(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.journalEntriesService.deleteEntry(id, user.id);
   }
 
   /**

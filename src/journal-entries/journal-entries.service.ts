@@ -14,6 +14,7 @@ import { CompanyRole } from '../common/enums/company-role.enum';
 import { PeriodStatus } from '../common/enums/period-status.enum';
 import { JournalEntryStatus } from '../common/enums/journal-entry-status.enum';
 import { ActorContext } from '../auth/actor-context';
+import { AuditLogService } from '../audit-log/audit-log.service';
 import { CompanyMembersService } from '../company-members/company-members.service';
 import {
   ACCOUNTING_PERIODS_REPOSITORY,
@@ -47,6 +48,14 @@ import {
 } from './journal-entries.repository';
 import { assertEntryDateWithinPeriod } from './journal-period.validation';
 
+const POSTED_ENTRY_DELETE_BLOCKED = 'POSTED_ENTRY_DELETE_BLOCKED';
+const POSTED_LINE_DELETE_BLOCKED = 'POSTED_LINE_DELETE_BLOCKED';
+
+const POSTED_ENTRY_DELETE_MESSAGE =
+  'Posted journal entries cannot be deleted — use a reversing entry (entry_type = reversal)';
+const POSTED_LINE_DELETE_MESSAGE =
+  'Cannot modify lines of a posted journal entry — reverse it instead';
+
 @Injectable()
 export class JournalEntriesService {
   constructor(
@@ -55,6 +64,7 @@ export class JournalEntriesService {
     @Inject(ACCOUNTING_PERIODS_REPOSITORY)
     private readonly accountingPeriodsRepository: AccountingPeriodsRepository,
     private readonly companyMembersService: CompanyMembersService,
+    private readonly auditLogService: AuditLogService,
   ) {}
 
   /**
@@ -143,6 +153,12 @@ export class JournalEntriesService {
       throw new BadRequestException(
         `An opening balance entry already exists for fiscal year ${fiscalYear}. ` +
           'Use a manual adjusting or reversing entry to correct balances instead.',
+      );
+    }
+    if (message === 'OPENING_BALANCE_INVALID_ACCOUNT_CATEGORY') {
+      throw new BadRequestException(
+        'Opening balance lines may only use asset, liability, or equity accounts — ' +
+          'income and expense accounts are not allowed',
       );
     }
     if (message === 'YEAR_END_ALREADY_CLOSED') {
@@ -608,14 +624,97 @@ export class JournalEntriesService {
     }
   }
 
-  async deleteLine(id: string): Promise<void> {
-    // [feature-spec.md decision #34] Posted-parent DELETE rejected by
-    // trg_prevent_posted_line_update (#28) — P0001 → 400 via handleDatabaseError.
+  async deleteLine(id: string, actorId: string): Promise<void> {
+    // [feature-spec.md #34/#56] Posted-parent DELETE → POSTED_LINE_DELETE_BLOCKED;
+    // Nest writes audit_log.delete_blocked in a separate request, then 400.
+    const context = await this.journalEntriesRepository.findLineWithCompany(id);
+    if (!context) {
+      throw new NotFoundException(`Journal line ${id} not found`);
+    }
+
     try {
       await this.journalEntriesRepository.deleteLine(id);
     } catch (error) {
+      await this.recordBlockedDeleteIfNeeded(error, {
+        token: POSTED_LINE_DELETE_BLOCKED,
+        company_id: context.company_id,
+        table_name: 'journal_lines',
+        record_id: id,
+        actor_id: actorId,
+        old_data: context.line as unknown as Record<string, unknown>,
+        clientMessage: POSTED_LINE_DELETE_MESSAGE,
+      });
       handleDatabaseError(error);
     }
+  }
+
+  /**
+   * [feature-spec.md #56 / Rules §1.3] Hard-delete. Drafts succeed (cascade);
+   * posted entries are rejected by trg_prevent_posted_entry_deletion and
+   * recorded in audit_log with action delete_blocked (separate transaction).
+   */
+  async deleteEntry(id: string, actorId: string): Promise<void> {
+    const existing = await this.journalEntriesRepository.findByIdWithDetails(id);
+    if (!existing) {
+      throw new NotFoundException(`Journal entry ${id} not found`);
+    }
+
+    try {
+      await this.journalEntriesRepository.deleteEntry(id);
+    } catch (error) {
+      await this.recordBlockedDeleteIfNeeded(error, {
+        token: POSTED_ENTRY_DELETE_BLOCKED,
+        company_id: existing.entry.company_id,
+        table_name: 'journal_entries',
+        record_id: id,
+        actor_id: actorId,
+        old_data: existing.entry as unknown as Record<string, unknown>,
+        clientMessage: POSTED_ENTRY_DELETE_MESSAGE,
+      });
+      handleDatabaseError(error);
+    }
+  }
+
+  /**
+   * [feature-spec.md #56] On a known blocked-delete token, insert audit_log
+   * outside the failed DELETE transaction, then rethrow as 400.
+   */
+  private async recordBlockedDeleteIfNeeded(
+    error: unknown,
+    params: {
+      token: string;
+      company_id: string;
+      table_name: 'journal_entries' | 'journal_lines';
+      record_id: string;
+      actor_id: string;
+      old_data: Record<string, unknown>;
+      clientMessage: string;
+    },
+  ): Promise<void> {
+    if (!this.isBlockedDeleteToken(error, params.token)) {
+      return;
+    }
+
+    await this.auditLogService.recordBlockedDelete({
+      company_id: params.company_id,
+      table_name: params.table_name,
+      record_id: params.record_id,
+      actor_id: params.actor_id,
+      old_data: params.old_data,
+      notes: params.token,
+    });
+
+    throw new BadRequestException(params.clientMessage);
+  }
+
+  private isBlockedDeleteToken(error: unknown, token: string): boolean {
+    if (isPostgrestError(error) && error.code === 'P0001') {
+      return (error.message ?? '').includes(token);
+    }
+    if (error instanceof Error) {
+      return error.message.includes(token);
+    }
+    return false;
   }
 
   private handlePostError(

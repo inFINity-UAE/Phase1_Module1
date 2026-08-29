@@ -23,6 +23,7 @@ import {
 import { AccountingPeriod } from '../accounting-periods/entities/accounting-period.entity';
 import { JournalEntriesService } from './journal-entries.service';
 import { CompanyMembersService } from '../company-members/company-members.service';
+import { AuditLogService } from '../audit-log/audit-log.service';
 
 const COMPANY_ID = '00000000-0000-0000-0000-000000000002';
 const PERIOD_ID = '22222222-2222-2222-2222-222222222222';
@@ -139,6 +140,7 @@ describe('JournalEntriesService', () => {
   let companyMembersService: jest.Mocked<
     Pick<CompanyMembersService, 'resolveRoleForJournalEntry'>
   >;
+  let auditLogService: { find: jest.Mock; recordBlockedDelete: jest.Mock };
 
   const companySettingsOpen = {
     company_id: COMPANY_ID,
@@ -169,6 +171,7 @@ describe('JournalEntriesService', () => {
       findByCompany: jest.fn(),
       updateDraftHeader: jest.fn(),
       findAttachmentsByEntryId: jest.fn(),
+      findLineWithCompany: jest.fn(),
       findPeriodById: jest.fn(),
       findNextOpenPeriod: jest.fn(),
       findEarliestOpenPeriod: jest.fn(),
@@ -213,12 +216,18 @@ describe('JournalEntriesService', () => {
       })),
     };
 
+    auditLogService = {
+      find: jest.fn(),
+      recordBlockedDelete: jest.fn(),
+    };
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         JournalEntriesService,
         { provide: JOURNAL_ENTRIES_REPOSITORY, useValue: repository },
         { provide: ACCOUNTING_PERIODS_REPOSITORY, useValue: periodsRepository },
         { provide: CompanyMembersService, useValue: companyMembersService },
+        { provide: AuditLogService, useValue: auditLogService },
       ],
     }).compile();
 
@@ -472,24 +481,106 @@ describe('JournalEntriesService', () => {
   });
 
   it('after posting, attempting to delete a line fails with a DB trigger error', async () => {
+    repository.findLineWithCompany.mockResolvedValue({
+      line: {
+        id: LINE_ID,
+        journal_entry_id: ENTRY_ID,
+        line_number: 1,
+        account_id: ACCOUNT_A,
+        debit: 100,
+        credit: 0,
+        description: null,
+        cost_center: null,
+        created_at: '2026-01-15T00:00:00.000Z',
+      },
+      company_id: COMPANY_ID,
+    });
     repository.deleteLine.mockRejectedValue(
-      pgError(
-        'P0001',
-        'Cannot modify lines of a posted journal entry — reverse it instead',
-      ),
+      pgError('P0001', 'POSTED_LINE_DELETE_BLOCKED'),
     );
+    auditLogService.recordBlockedDelete.mockResolvedValue({
+      id: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+      company_id: COMPANY_ID,
+      table_name: 'journal_lines',
+      record_id: LINE_ID,
+      action: 'delete_blocked',
+      actor_id: USER_ID,
+      old_data: null,
+      new_data: null,
+      notes: 'POSTED_LINE_DELETE_BLOCKED',
+      created_at: '2026-01-15T00:00:00.000Z',
+    });
 
-    await expect(service.deleteLine(LINE_ID)).rejects.toThrow(BadRequestException);
-    await expect(service.deleteLine(LINE_ID)).rejects.toThrow(
+    await expect(service.deleteLine(LINE_ID, USER_ID)).rejects.toThrow(BadRequestException);
+    await expect(service.deleteLine(LINE_ID, USER_ID)).rejects.toThrow(
       'Cannot modify lines of a posted journal entry',
+    );
+    expect(auditLogService.recordBlockedDelete).toHaveBeenCalledWith(
+      expect.objectContaining({
+        company_id: COMPANY_ID,
+        table_name: 'journal_lines',
+        record_id: LINE_ID,
+        actor_id: USER_ID,
+        notes: 'POSTED_LINE_DELETE_BLOCKED',
+      }),
     );
   });
 
   it('deleteLine removes a line on a draft parent (decision #34)', async () => {
+    repository.findLineWithCompany.mockResolvedValue({
+      line: {
+        id: LINE_ID,
+        journal_entry_id: ENTRY_ID,
+        line_number: 1,
+        account_id: ACCOUNT_A,
+        debit: 100,
+        credit: 0,
+        description: null,
+        cost_center: null,
+        created_at: '2026-01-15T00:00:00.000Z',
+      },
+      company_id: COMPANY_ID,
+    });
     repository.deleteLine.mockResolvedValue(undefined);
 
-    await expect(service.deleteLine(LINE_ID)).resolves.toBeUndefined();
+    await expect(service.deleteLine(LINE_ID, USER_ID)).resolves.toBeUndefined();
     expect(repository.deleteLine).toHaveBeenCalledWith(LINE_ID);
+    expect(auditLogService.recordBlockedDelete).not.toHaveBeenCalled();
+  });
+
+  it('deleteEntry on a posted entry is rejected and writes delete_blocked audit (#56)', async () => {
+    const posted = postedDetails();
+    repository.findByIdWithDetails.mockResolvedValue(posted);
+    repository.deleteEntry.mockRejectedValue(
+      pgError('P0001', 'POSTED_ENTRY_DELETE_BLOCKED'),
+    );
+    auditLogService.recordBlockedDelete.mockResolvedValue({
+      id: 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
+      company_id: COMPANY_ID,
+      table_name: 'journal_entries',
+      record_id: ENTRY_ID,
+      action: 'delete_blocked',
+      actor_id: USER_ID,
+      old_data: null,
+      new_data: null,
+      notes: 'POSTED_ENTRY_DELETE_BLOCKED',
+      created_at: '2026-01-15T00:00:00.000Z',
+    });
+
+    await expect(service.deleteEntry(ENTRY_ID, USER_ID)).rejects.toThrow(BadRequestException);
+    await expect(service.deleteEntry(ENTRY_ID, USER_ID)).rejects.toThrow(
+      /Posted journal entries cannot be deleted/i,
+    );
+    expect(auditLogService.recordBlockedDelete).toHaveBeenCalledWith(
+      expect.objectContaining({
+        company_id: COMPANY_ID,
+        table_name: 'journal_entries',
+        record_id: ENTRY_ID,
+        actor_id: USER_ID,
+        notes: 'POSTED_ENTRY_DELETE_BLOCKED',
+      }),
+    );
+    expect(repository.deleteEntry).toHaveBeenCalledWith(ENTRY_ID);
   });
 
   it('[Rules §3.1] trial balance totals stay equal after posting balanced entries', async () => {
@@ -1173,6 +1264,19 @@ describe('JournalEntriesService', () => {
         `An opening balance entry already exists for fiscal year ${FISCAL_YEAR}`,
       );
       expect(repository.createOpeningBalanceEntry).toHaveBeenCalled();
+    });
+
+    it('rejects opening balance lines that use income or expense accounts (#57)', async () => {
+      repository.createOpeningBalanceEntry.mockRejectedValue(
+        new Error('OPENING_BALANCE_INVALID_ACCOUNT_CATEGORY'),
+      );
+
+      await expect(service.createOpeningBalance(openingBalanceDto, USER_ID)).rejects.toThrow(
+        BadRequestException,
+      );
+      await expect(service.createOpeningBalance(openingBalanceDto, USER_ID)).rejects.toThrow(
+        /asset, liability, or equity accounts/i,
+      );
     });
   });
 

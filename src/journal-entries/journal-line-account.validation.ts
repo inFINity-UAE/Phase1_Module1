@@ -6,12 +6,14 @@ import { BadRequestException } from '@nestjs/common';
  * insert_journal_entry_draft, create_opening_balance_entry, updateLine when
  * account_id changes) and recurring_journal_template_lines
  * (template create lines, insertLine, updateLine when account_id changes).
+ * Not category-aware — opening-balance income/expense rejection is RPC-only (#57).
  */
 export type JournalLineAccountRow = {
   id: string;
   company_id: string;
   is_active: boolean;
   account_number?: string | null;
+  category?: string;
 };
 
 export function assertAccountsUsableForCompany(
@@ -41,6 +43,33 @@ export function assertAccountsUsableForCompany(
     if (!account.is_active) {
       throw new BadRequestException(
         `Account ${account.account_number ?? accountId} is inactive (is_active = false) and cannot be used on journal lines`,
+      );
+    }
+  }
+}
+
+/**
+ * [feature-spec.md decision #57] Opening-balance call site only — extends #35/#39 with
+ * income/expense rejection. Mirrors create_opening_balance_entry RPC; app layer fails
+ * fast, RPC is the DB backstop when service_role bypasses Nest (§5.1).
+ */
+export function assertOpeningBalanceAccountsUsable(
+  companyId: string,
+  accountIds: string[],
+  accounts: JournalLineAccountRow[],
+): void {
+  assertAccountsUsableForCompany(companyId, accountIds, accounts);
+
+  const byId = new Map(accounts.map((row) => [row.id, row]));
+  for (const accountId of [...new Set(accountIds.filter(Boolean))]) {
+    const account = byId.get(accountId);
+    if (
+      account &&
+      (account.category === 'income' || account.category === 'expense')
+    ) {
+      throw new BadRequestException(
+        'Opening balance lines may only use asset, liability, or equity accounts — ' +
+          'income and expense accounts are not allowed',
       );
     }
   }

@@ -2,7 +2,8 @@
 export enum AuditAction {
   Insert = 'insert',
   Update = 'update',
-  Delete = 'delete',
   StatusChange = 'status_change',
   Reversal = 'reversal',
+  /** Rejected hard-delete of a posted entry/line — feature-spec.md #56 */
+  DeleteBlocked = 'delete_blocked',
 }

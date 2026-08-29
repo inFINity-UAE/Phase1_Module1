@@ -1,46 +1,18 @@
+-- inFINity — Module 1.1.A Ledger Schema (PostgreSQL / Supabase)
 -- ============================================================================
--- inFINity — Double-Entry Accounting Engine
--- Core Ledger Schema (PostgreSQL / Supabase)
--- ============================================================================
--- Design notes:
---   • Multi-tenant via company_id + Row-Level Security (RLS) — one bug in the
---     app layer cannot leak one company's ledger into another's.
---   • Immutability is enforced at the DATABASE layer via triggers, not just
---     app logic — no DELETE is ever permitted on posted financial records.
---   • Debit/credit imbalance rejection is enforced via trigger BEFORE a
---     journal entry can transition to 'posted', not just on insert.
---   • Scope: this schema fully covers Module 1.1.A (ledger, posting engine,
---     manual entry, reversals, opening balances, approvals, recurring
---     entries, period close, year-end closing). All Phase A/B/C business
---     rules referenced throughout (approval thresholds, one-time opening
---     balance / year-end closing per fiscal year, reversal restrictions,
---     etc.) are resolved decisions — see feature-spec.md §4 for the current
---     rules and §8 for the full decision index. Do not treat any inline
---     comment below as still-pending; if a comment references a rule as
---     "TBD" or "once you send it," that comment is stale and should be
---     corrected, not trusted.
---   • §9b adds advisory-lock RPCs for entry-number allocation, opening
---     balance creation, and year-end closing — see feature-spec.md §6 for
---     the lock-key convention and exception-token contract these implement.
---   • §12 adds explicit Data API grants — required on fresh Supabase
---     projects, see feature-spec.md §5.5 / decision #23.
+-- Single source of truth for DB structure. Apply top-to-bottom on fresh projects.
+-- Business rules: feature-spec.md §4; decision index §8.
+-- Includes: RLS, triggers, advisory-lock RPCs (§9b), views (§9), grants (§12).
+-- Do not maintain separate apply_*.sql patches — fold changes here.
 -- ============================================================================
 
--- Extensions live in `extensions` (Supabase default), not `public` —
--- avoids Security Advisor lint 0014_extension_in_public.
---
--- Important: `CREATE EXTENSION IF NOT EXISTS … WITH SCHEMA extensions` is a
--- no-op when the extension already exists in ANY schema. A prior apply that
--- used `create extension btree_gist` (no schema) — or any install that landed
--- in `public` — will leave lint 0014 forever unless we relocate first.
+-- Extensions in schema `extensions` (not `public`) — Security Advisor lint 0014.
+-- If btree_gist already exists elsewhere, drop + recreate (see DO block below).
 create schema if not exists extensions;
 create extension if not exists "uuid-ossp" with schema extensions;
 create extension if not exists pgcrypto with schema extensions;
 
--- Required for uuid equality in GiST exclusion constraints (period overlap).
--- btree_gist is often non-relocatable; drop + recreate in `extensions`.
--- CASCADE only matters on re-apply (drops accounting_periods exclusion);
--- the constraint is created later in this file on a fresh run.
+-- btree_gist: required for period overlap exclusion; relocatable via drop/recreate.
 do $$
 begin
   if exists (
@@ -84,7 +56,16 @@ create type journal_entry_status as enum (
 
 create type recurrence_frequency as enum ('daily', 'weekly', 'monthly', 'quarterly', 'annually');
 
-create type audit_action as enum ('insert', 'update', 'reversal', 'status_change');
+-- delete_blocked: service-layer record of a rejected hard-delete attempt
+-- (posted entry/line). Cannot be written inside the blocking trigger's
+-- transaction — that ROLLBACK would erase it. See feature-spec.md #56.
+create type audit_action as enum (
+  'insert',
+  'update',
+  'reversal',
+  'status_change',
+  'delete_blocked'
+);
 
 -- ============================================================================
 -- 1. COMPANIES (multi-tenant root)
@@ -389,6 +370,9 @@ create trigger trg_enforce_journal_balance_on_post
 
 -- Immutability: once posted, an entry's lines cannot be added, edited, or
 -- deleted, and the entry itself cannot be deleted — only reversed via a new entry.
+-- [feature-spec.md #56] DELETE raises a distinct token so Nest can catch it
+-- and write audit_log.delete_blocked in a separate transaction (this RAISE
+-- aborts the delete transaction, so an audit insert here would roll back).
 create or replace function prevent_posted_line_mutation()
 returns trigger as $$
 declare
@@ -397,6 +381,9 @@ begin
   select status into entry_status from journal_entries
     where id = coalesce(new.journal_entry_id, old.journal_entry_id);
   if entry_status = 'posted' then
+    if tg_op = 'DELETE' then
+      raise exception 'POSTED_LINE_DELETE_BLOCKED';
+    end if;
     raise exception 'Cannot modify lines of a posted journal entry — reverse it instead';
   end if;
   return coalesce(new, old);
@@ -412,7 +399,8 @@ create or replace function prevent_posted_entry_deletion()
 returns trigger as $$
 begin
   if old.status = 'posted' then
-    raise exception 'Posted journal entries cannot be deleted — use a reversing entry (entry_type = reversal)';
+    -- [feature-spec.md #56] Token (not message-match) for Nest audit catch.
+    raise exception 'POSTED_ENTRY_DELETE_BLOCKED';
   end if;
   return old;
 end;
@@ -896,7 +884,8 @@ grant execute on function insert_journal_entry_draft(uuid, uuid, date, journal_e
 -- [feature-spec.md decision #3] One opening_balance per company per fiscal year.
 -- [race fix] Lock 'ob:' namespace FIRST, then allocate_next_entry_number's
 -- company-scoped lock.
--- Exception tokens: OPENING_BALANCE_ALREADY_EXISTS, NO_OPEN_PERIOD_FOR_FISCAL_YEAR
+-- Exception tokens: OPENING_BALANCE_ALREADY_EXISTS, NO_OPEN_PERIOD_FOR_FISCAL_YEAR,
+-- OPENING_BALANCE_INVALID_ACCOUNT_CATEGORY
 -- [feature-spec.md decision #10] service_role only.
 
 create or replace function create_opening_balance_entry(
@@ -954,6 +943,25 @@ begin
   if not found then
     raise exception 'NO_OPEN_PERIOD_FOR_FISCAL_YEAR';
   end if;
+
+  -- [feature-spec.md §4.3 decision #57] Opening balances seed balance-sheet accounts
+  -- only — income/expense lines would corrupt current-year P&L. Fail atomically before
+  -- any journal_entries / journal_lines inserts. Nest uses assertOpeningBalanceAccountsUsable
+  -- (shared assertAccountsUsableForCompany is not category-aware); this RPC is the DB
+  -- backstop when service_role bypasses Nest (§5.1).
+  for v_line in
+    select value from jsonb_array_elements(p_lines) as t(value)
+  loop
+    if exists (
+      select 1
+        from accounts a
+       where a.id = (v_line->>'account_id')::uuid
+         and a.company_id = p_company_id
+         and a.category in ('income', 'expense')
+    ) then
+      raise exception 'OPENING_BALANCE_INVALID_ACCOUNT_CATEGORY';
+    end if;
+  end loop;
 
   v_entry_number := allocate_next_entry_number(p_company_id);
 
@@ -1445,9 +1453,8 @@ create policy company_isolation_companies on companies
 -- only, not base TABLE access. This was discovered via the fresh-DB drift
 -- verification exercise (feature-spec.md §8 decision index) — exactly the
 -- kind of environment-default assumption that check exists to catch.
--- One-shot re-apply on a live project that missed this block: run the
--- entire §12 grant section below in the SQL Editor (do not maintain a
--- duplicate standalone grants file).
+-- One-shot re-apply on a live project that missed this block: run §12 in the
+-- SQL Editor (no duplicate standalone grants file — see feature-spec.md §5.5).
 
 grant usage on schema public to service_role;
 

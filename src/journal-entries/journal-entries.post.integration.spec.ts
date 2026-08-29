@@ -666,8 +666,8 @@ const USER_ID = INTEGRATION_USER_ID;
         throw error ?? new Error('Line not found');
       }
 
-      await expect(service.deleteLine(line.id)).rejects.toThrow(BadRequestException);
-      await expect(service.deleteLine(line.id)).rejects.toThrow(
+      await expect(service.deleteLine(line.id, USER_ID)).rejects.toThrow(BadRequestException);
+      await expect(service.deleteLine(line.id, USER_ID)).rejects.toThrow(
         /Cannot modify lines of a posted journal entry/i,
       );
     });
@@ -712,7 +712,7 @@ const USER_ID = INTEGRATION_USER_ID;
         credit: 10,
       });
 
-      await expect(service.deleteLine(lineA.id)).resolves.toBeUndefined();
+      await expect(service.deleteLine(lineA.id, USER_ID)).resolves.toBeUndefined();
 
       const { data: remaining, error: remainingError } = await supabase.client
         .from('journal_lines')

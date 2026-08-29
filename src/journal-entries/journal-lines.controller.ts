@@ -1,4 +1,6 @@
 import { Body, Controller, Delete, HttpCode, Param, ParseUUIDPipe, Patch, Post, UseGuards } from '@nestjs/common';
+import { AuthenticatedUser } from '../auth/authenticated-user';
+import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { RequireCompanyMembership } from '../auth/decorators/require-company-membership.decorator';
 import { CompanyMembershipGuard } from '../auth/guards/company-membership.guard';
 import { SupabaseAuthGuard } from '../auth/guards/supabase-auth.guard';
@@ -28,13 +30,16 @@ export class JournalLinesController {
   }
 
   /**
-   * [feature-spec.md decision #34/#41] DELETE wires existing deleteLine —
-   * posted parents blocked by trg_prevent_posted_line_update (#28).
+   * [feature-spec.md #34/#41/#56] DELETE wires deleteLine — posted parents
+   * blocked + audit_log.delete_blocked. Actor from session.
    */
   @Delete(':id')
   @HttpCode(204)
   @RequireCompanyMembership({ type: 'param', resource: 'journal_line' })
-  remove(@Param('id', ParseUUIDPipe) id: string) {
-    return this.journalEntriesService.deleteLine(id);
+  remove(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.journalEntriesService.deleteLine(id, user.id);
   }
 }

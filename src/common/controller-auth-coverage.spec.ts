@@ -24,7 +24,7 @@ import { CompanyRole } from './enums/company-role.enum';
 /**
  * [feature-spec.md decisions #24/#27/#41] Controllers reject unauthenticated
  * requests (401) and succeed for a verified Bearer session with membership.
- * Regression list covers all 37 guarded HTTP routes across 7 controllers.
+ * Regression list covers all 38 guarded HTTP routes across 7 controllers.
  */
 describe('Controller auth coverage (decision #24)', () => {
   let app: INestApplication;
@@ -48,7 +48,7 @@ describe('Controller auth coverage (decision #24)', () => {
     attachments: [],
   };
 
-  /** Canonical 37-route list — keep in sync with company-membership.guard.integration.spec.ts */
+  /** Canonical 38-route list — keep in sync with company-membership.guard.integration.spec.ts */
   const ALL_GUARDED_ROUTES: Array<{ method: string; path: string; body?: unknown }> = [
     { method: 'GET', path: `/accounts?company_id=${companyId}` },
     { method: 'GET', path: `/accounts/${accountId}` },
@@ -126,6 +126,7 @@ describe('Controller auth coverage (decision #24)', () => {
       body: { rejection_reason: 'Auth coverage reject' },
     },
     { method: 'POST', path: `/journal-entries/${entryId}/reverse` },
+    { method: 'DELETE', path: `/journal-entries/${entryId}` },
     {
       method: 'POST',
       path: '/recurring-journal-templates',
@@ -228,6 +229,7 @@ describe('Controller auth coverage (decision #24)', () => {
       }),
       updateLine: jest.fn().mockResolvedValue({ id: journalLineId }),
       deleteLine: jest.fn().mockResolvedValue(undefined),
+      deleteEntry: jest.fn().mockResolvedValue(undefined),
     };
 
     const recurringService = {
@@ -328,8 +330,8 @@ describe('Controller auth coverage (decision #24)', () => {
     return { status: response.status, body: await response.text() };
   }
 
-  it('covers all 37 guarded HTTP routes', () => {
-    expect(ALL_GUARDED_ROUTES).toHaveLength(37);
+  it('covers all 38 guarded HTTP routes', () => {
+    expect(ALL_GUARDED_ROUTES).toHaveLength(38);
   });
 
   it.each(ALL_GUARDED_ROUTES)(
