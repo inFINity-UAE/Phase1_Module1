@@ -734,6 +734,30 @@ create policy company_isolation_attachments on journal_attachments
 -- ============================================================================
 -- 9. HELPER VIEW — trial balance (sanity-check view, expand into full reports later)
 -- ============================================================================
+
+-- [feature-spec-1.1.H1.md decision #4 / feature-spec.md decision #60]
+-- Ledger-truth status for reporting reads AND v_trial_balance.
+-- posted + reversed are ground truth; draft / pending_approval / rejected
+-- (and approved) never contribute.
+create or replace function is_ledger_truth_status(p_status journal_entry_status)
+returns boolean
+language sql
+immutable
+security invoker
+parallel safe
+set search_path = public, pg_temp
+as $$
+  select p_status in (
+    'posted'::journal_entry_status,
+    'reversed'::journal_entry_status
+  );
+$$;
+
+revoke all on function is_ledger_truth_status(journal_entry_status) from public;
+revoke all on function is_ledger_truth_status(journal_entry_status) from authenticated;
+revoke all on function is_ledger_truth_status(journal_entry_status) from anon;
+grant execute on function is_ledger_truth_status(journal_entry_status) to service_role;
+
 -- [feature-spec.md decision #22] security_invoker = true is REQUIRED here.
 -- Without it, Postgres runs this view's row-level security checks as the
 -- VIEW OWNER, not the querying role — silently bypassing the
@@ -741,8 +765,14 @@ create policy company_isolation_attachments on journal_attachments
 -- view. This was previously reported fixed, then found live as
 -- SECURITY DEFINER again by Supabase's linter — treat this clause as
 -- non-negotiable on any future CREATE OR REPLACE of this view.
+--
+-- [feature-spec.md decision #60] Status filter must NOT sit only in a
+-- LEFT JOIN's ON clause (that left jl debit/credit in the sum when je
+-- failed to match — drafts and reversed originals leaked). Qualify lines
+-- via an inner subquery filtered by is_ledger_truth_status, then LEFT
+-- JOIN that to accounts so empty / draft-only accounts still appear as 0.
 
-create view v_trial_balance
+create or replace view v_trial_balance
 with (security_invoker = true)
 as
 select
@@ -752,16 +782,443 @@ select
   a.account_name,
   a.category,
   a.normal_balance,
-  coalesce(sum(jl.debit), 0)  as total_debit,
-  coalesce(sum(jl.credit), 0) as total_credit,
+  coalesce(sum(ql.debit), 0)  as total_debit,
+  coalesce(sum(ql.credit), 0) as total_credit,
   case a.normal_balance
-    when 'debit'  then coalesce(sum(jl.debit), 0) - coalesce(sum(jl.credit), 0)
-    when 'credit' then coalesce(sum(jl.credit), 0) - coalesce(sum(jl.debit), 0)
+    when 'debit'  then coalesce(sum(ql.debit), 0) - coalesce(sum(ql.credit), 0)
+    when 'credit' then coalesce(sum(ql.credit), 0) - coalesce(sum(ql.debit), 0)
   end as balance
 from accounts a
-left join journal_lines jl on jl.account_id = a.id
-left join journal_entries je on je.id = jl.journal_entry_id and je.status = 'posted'
+left join (
+  select
+    jl.account_id,
+    jl.debit,
+    jl.credit
+  from journal_lines jl
+  join journal_entries je on je.id = jl.journal_entry_id
+  where is_ledger_truth_status(je.status)
+) ql on ql.account_id = a.id
 group by a.company_id, a.id, a.account_number, a.account_name, a.category, a.normal_balance;
+
+-- [feature-spec-1.1.H1.md decision #1 / #4] Period-scoped Trial Balance.
+-- Opening = ledger-truth lines with entry_date < period_start.
+-- Period activity = ledger-truth lines with entry_date in [period_start, period_end].
+-- Closing = opening + period activity. Signed balances use the same
+-- normal_balance convention as v_trial_balance. SECURITY INVOKER so RLS
+-- applies like the view (#22 class — never DEFINER for reporting reads).
+create or replace function get_trial_balance_for_period(
+  p_company_id uuid,
+  p_period_id uuid,
+  p_include_zero_balance boolean default false
+)
+returns table (
+  account_id uuid,
+  account_number char(4),
+  account_name text,
+  category account_category,
+  normal_balance normal_balance_type,
+  opening_debit numeric(18,2),
+  opening_credit numeric(18,2),
+  opening_balance numeric(18,2),
+  period_debit numeric(18,2),
+  period_credit numeric(18,2),
+  closing_debit numeric(18,2),
+  closing_credit numeric(18,2),
+  closing_balance numeric(18,2)
+)
+language plpgsql
+security invoker
+stable
+set search_path = public, pg_temp
+as $$
+declare
+  v_period accounting_periods%rowtype;
+begin
+  select * into v_period
+    from accounting_periods
+   where id = p_period_id;
+
+  if not found then
+    raise exception 'PERIOD_NOT_FOUND';
+  end if;
+
+  if v_period.company_id is distinct from p_company_id then
+    raise exception 'PERIOD_COMPANY_MISMATCH';
+  end if;
+
+  return query
+  with opening as (
+    select
+      jl.account_id,
+      coalesce(sum(jl.debit), 0)::numeric(18,2) as debit,
+      coalesce(sum(jl.credit), 0)::numeric(18,2) as credit
+    from journal_lines jl
+    join journal_entries je on je.id = jl.journal_entry_id
+    where je.company_id = p_company_id
+      and is_ledger_truth_status(je.status)
+      and je.entry_date < v_period.period_start
+    group by jl.account_id
+  ),
+  period_act as (
+    select
+      jl.account_id,
+      coalesce(sum(jl.debit), 0)::numeric(18,2) as debit,
+      coalesce(sum(jl.credit), 0)::numeric(18,2) as credit
+    from journal_lines jl
+    join journal_entries je on je.id = jl.journal_entry_id
+    where je.company_id = p_company_id
+      and is_ledger_truth_status(je.status)
+      and je.entry_date >= v_period.period_start
+      and je.entry_date <= v_period.period_end
+    group by jl.account_id
+  )
+  select
+    a.id,
+    a.account_number,
+    a.account_name,
+    a.category,
+    a.normal_balance,
+    coalesce(o.debit, 0)::numeric(18,2),
+    coalesce(o.credit, 0)::numeric(18,2),
+    (case a.normal_balance
+      when 'debit'  then coalesce(o.debit, 0) - coalesce(o.credit, 0)
+      when 'credit' then coalesce(o.credit, 0) - coalesce(o.debit, 0)
+    end)::numeric(18,2),
+    coalesce(p.debit, 0)::numeric(18,2),
+    coalesce(p.credit, 0)::numeric(18,2),
+    (coalesce(o.debit, 0) + coalesce(p.debit, 0))::numeric(18,2),
+    (coalesce(o.credit, 0) + coalesce(p.credit, 0))::numeric(18,2),
+    (case a.normal_balance
+      when 'debit' then
+        (coalesce(o.debit, 0) + coalesce(p.debit, 0))
+        - (coalesce(o.credit, 0) + coalesce(p.credit, 0))
+      when 'credit' then
+        (coalesce(o.credit, 0) + coalesce(p.credit, 0))
+        - (coalesce(o.debit, 0) + coalesce(p.debit, 0))
+    end)::numeric(18,2)
+  from accounts a
+  left join opening o on o.account_id = a.id
+  left join period_act p on p.account_id = a.id
+  where a.company_id = p_company_id
+    and (
+      p_include_zero_balance
+      or coalesce(o.debit, 0) <> 0
+      or coalesce(o.credit, 0) <> 0
+      or coalesce(p.debit, 0) <> 0
+      or coalesce(p.credit, 0) <> 0
+    )
+  order by a.account_number;
+end;
+$$;
+
+revoke all on function get_trial_balance_for_period(uuid, uuid, boolean) from public;
+revoke all on function get_trial_balance_for_period(uuid, uuid, boolean) from authenticated;
+revoke all on function get_trial_balance_for_period(uuid, uuid, boolean) from anon;
+grant execute on function get_trial_balance_for_period(uuid, uuid, boolean) to service_role;
+
+-- [feature-spec-1.1.H1.md decision #2 / #4] Balance Sheet as of a date.
+-- Cumulative A/L/E balances from journal_lines whose parent has
+-- entry_date <= p_as_of_date and is_ledger_truth_status(status).
+-- Including 'reversed' is required so an as-of date before the reversing
+-- entry still reconstructs the original effect (original flips to
+-- 'reversed' at reversal time; the reversing entry posts later).
+-- Income/expense excluded — year-end close folds P&L into Retained Earnings
+-- (feature-spec.md §4.4/§6). SECURITY INVOKER + §5.1 grants.
+create or replace function get_balance_sheet(
+  p_company_id uuid,
+  p_as_of_date date
+)
+returns table (
+  account_id uuid,
+  account_number char(4),
+  account_name text,
+  category account_category,
+  normal_balance normal_balance_type,
+  total_debit numeric(18,2),
+  total_credit numeric(18,2),
+  balance numeric(18,2)
+)
+language plpgsql
+security invoker
+stable
+set search_path = public, pg_temp
+as $$
+begin
+  if p_as_of_date is null then
+    raise exception 'AS_OF_DATE_REQUIRED';
+  end if;
+
+  -- Only lines whose parent entry matches status+as-of filters.
+  -- Do not left-join bare journal_lines then filter je in ON — unmatched
+  -- lines would still enter sum(jl.*) and break as-of / reversal tests.
+  return query
+  with matched_lines as (
+    select
+      jl.account_id,
+      jl.debit,
+      jl.credit
+    from journal_lines jl
+    join journal_entries je on je.id = jl.journal_entry_id
+    where je.company_id = p_company_id
+      and is_ledger_truth_status(je.status)
+      and je.entry_date <= p_as_of_date
+  )
+  select
+    a.id,
+    a.account_number,
+    a.account_name,
+    a.category,
+    a.normal_balance,
+    coalesce(sum(ml.debit), 0)::numeric(18,2),
+    coalesce(sum(ml.credit), 0)::numeric(18,2),
+    (case a.normal_balance
+      when 'debit'  then coalesce(sum(ml.debit), 0) - coalesce(sum(ml.credit), 0)
+      when 'credit' then coalesce(sum(ml.credit), 0) - coalesce(sum(ml.debit), 0)
+    end)::numeric(18,2)
+  from accounts a
+  left join matched_lines ml on ml.account_id = a.id
+  where a.company_id = p_company_id
+    and a.category in ('asset', 'liability', 'equity')
+  group by a.id, a.account_number, a.account_name, a.category, a.normal_balance
+  having (case a.normal_balance
+            when 'debit'  then coalesce(sum(ml.debit), 0) - coalesce(sum(ml.credit), 0)
+            when 'credit' then coalesce(sum(ml.credit), 0) - coalesce(sum(ml.debit), 0)
+          end) <> 0
+  order by a.account_number;
+end;
+$$;
+
+revoke all on function get_balance_sheet(uuid, date) from public;
+revoke all on function get_balance_sheet(uuid, date) from authenticated;
+revoke all on function get_balance_sheet(uuid, date) from anon;
+grant execute on function get_balance_sheet(uuid, date) to service_role;
+
+-- [feature-spec-1.1.H1.md decision #3] Shared P&L / year-end signed balance.
+-- Identical CASE to the historical create_year_end_closing_entry inline
+-- expression — both YE and get_profit_and_loss MUST call this helper so
+-- net_profit and the RE transfer cannot drift.
+create or replace function account_signed_balance(
+  p_normal_balance normal_balance_type,
+  p_total_debit numeric,
+  p_total_credit numeric
+)
+returns numeric(18,2)
+language sql
+immutable
+security invoker
+parallel safe
+set search_path = public, pg_temp
+as $$
+  select case
+    when p_normal_balance = 'debit' then
+      round((coalesce(p_total_debit, 0) - coalesce(p_total_credit, 0))::numeric, 2)
+    else
+      round((coalesce(p_total_credit, 0) - coalesce(p_total_debit, 0))::numeric, 2)
+  end;
+$$;
+
+revoke all on function account_signed_balance(normal_balance_type, numeric, numeric) from public;
+revoke all on function account_signed_balance(normal_balance_type, numeric, numeric) from authenticated;
+revoke all on function account_signed_balance(normal_balance_type, numeric, numeric) from anon;
+grant execute on function account_signed_balance(normal_balance_type, numeric, numeric) to service_role;
+
+-- [feature-spec-1.1.H1.md decision #3 / #4] Single-period P&L (no prior-period
+-- comparison — deferred to H2 / build-order Extended Reports).
+-- Income/expense only; entry_date in [p_period_start, p_period_end].
+-- is_ledger_truth_status so originals still count when the reversing entry
+-- falls outside the range (same reconstruction need as BS #2).
+-- Signed balance via account_signed_balance (lockstep with year-end close).
+create or replace function get_profit_and_loss(
+  p_company_id uuid,
+  p_period_start date,
+  p_period_end date
+)
+returns table (
+  account_id uuid,
+  account_number char(4),
+  account_name text,
+  category account_category,
+  normal_balance normal_balance_type,
+  total_debit numeric(18,2),
+  total_credit numeric(18,2),
+  balance numeric(18,2)
+)
+language plpgsql
+security invoker
+stable
+set search_path = public, pg_temp
+as $$
+begin
+  if p_period_start is null or p_period_end is null then
+    raise exception 'PERIOD_RANGE_REQUIRED';
+  end if;
+
+  if p_period_end < p_period_start then
+    raise exception 'INVALID_PERIOD_RANGE';
+  end if;
+
+  return query
+  with matched_lines as (
+    select
+      jl.account_id,
+      jl.debit,
+      jl.credit
+    from journal_lines jl
+    join journal_entries je on je.id = jl.journal_entry_id
+    where je.company_id = p_company_id
+      and is_ledger_truth_status(je.status)
+      and je.entry_date >= p_period_start
+      and je.entry_date <= p_period_end
+  )
+  select
+    a.id,
+    a.account_number,
+    a.account_name,
+    a.category,
+    a.normal_balance,
+    coalesce(sum(ml.debit), 0)::numeric(18,2),
+    coalesce(sum(ml.credit), 0)::numeric(18,2),
+    account_signed_balance(
+      a.normal_balance,
+      coalesce(sum(ml.debit), 0),
+      coalesce(sum(ml.credit), 0)
+    )
+  from accounts a
+  left join matched_lines ml on ml.account_id = a.id
+  where a.company_id = p_company_id
+    and a.category in ('income', 'expense')
+  group by a.id, a.account_number, a.account_name, a.category, a.normal_balance
+  having account_signed_balance(
+           a.normal_balance,
+           coalesce(sum(ml.debit), 0),
+           coalesce(sum(ml.credit), 0)
+         ) <> 0
+  order by a.category, a.account_number;
+end;
+$$;
+
+revoke all on function get_profit_and_loss(uuid, date, date) from public;
+revoke all on function get_profit_and_loss(uuid, date, date) from authenticated;
+revoke all on function get_profit_and_loss(uuid, date, date) from anon;
+grant execute on function get_profit_and_loss(uuid, date, date) to service_role;
+
+-- [feature-spec-1.1.H1.md decision #5] General Ledger — line-level listing
+-- with per-account running balance. Not an aggregate report.
+-- Status: is_ledger_truth_status (#4). Order: account_number, entry_date,
+-- entry_number, line_number. Running balance is ALWAYS true cumulative
+-- (partitioned by account); date filters only limit which rows are
+-- returned — they do NOT reset the running balance to zero.
+-- Pagination: deferred (same as GET /accounts and GET /journal-entries).
+-- SECURITY INVOKER + §5.1 grants.
+create or replace function get_general_ledger(
+  p_company_id uuid,
+  p_account_id uuid default null,
+  p_date_from date default null,
+  p_date_to date default null
+)
+returns table (
+  journal_line_id uuid,
+  journal_entry_id uuid,
+  entry_number bigint,
+  entry_date date,
+  narration text,
+  entry_status journal_entry_status,
+  account_id uuid,
+  account_number char(4),
+  account_name text,
+  normal_balance normal_balance_type,
+  line_number smallint,
+  debit numeric(18,2),
+  credit numeric(18,2),
+  line_balance numeric(18,2),
+  running_balance numeric(18,2)
+)
+language plpgsql
+security invoker
+stable
+set search_path = public, pg_temp
+as $$
+begin
+  if p_company_id is null then
+    raise exception 'COMPANY_ID_REQUIRED';
+  end if;
+
+  if p_date_from is not null and p_date_to is not null and p_date_to < p_date_from then
+    raise exception 'INVALID_DATE_RANGE';
+  end if;
+
+  if p_account_id is not null then
+    if not exists (
+      select 1 from accounts a
+       where a.id = p_account_id
+         and a.company_id = p_company_id
+    ) then
+      raise exception 'ACCOUNT_COMPANY_MISMATCH';
+    end if;
+  end if;
+
+  return query
+  with ledger_lines as (
+    select
+      jl.id as journal_line_id,
+      je.id as journal_entry_id,
+      je.entry_number,
+      je.entry_date,
+      je.narration,
+      je.status as entry_status,
+      a.id as account_id,
+      a.account_number,
+      a.account_name,
+      a.normal_balance,
+      jl.line_number,
+      jl.debit,
+      jl.credit,
+      account_signed_balance(a.normal_balance, jl.debit, jl.credit) as line_balance
+    from journal_lines jl
+    join journal_entries je on je.id = jl.journal_entry_id
+    join accounts a on a.id = jl.account_id
+    where je.company_id = p_company_id
+      and a.company_id = p_company_id
+      and is_ledger_truth_status(je.status)
+      and (p_account_id is null or jl.account_id = p_account_id)
+  ),
+  with_running as (
+    select
+      ll.*,
+      sum(ll.line_balance) over (
+        partition by ll.account_id
+        order by ll.entry_date, ll.entry_number, ll.line_number
+        rows between unbounded preceding and current row
+      )::numeric(18,2) as running_balance
+    from ledger_lines ll
+  )
+  select
+    wr.journal_line_id,
+    wr.journal_entry_id,
+    wr.entry_number,
+    wr.entry_date,
+    wr.narration,
+    wr.entry_status,
+    wr.account_id,
+    wr.account_number,
+    wr.account_name,
+    wr.normal_balance,
+    wr.line_number,
+    wr.debit,
+    wr.credit,
+    wr.line_balance,
+    wr.running_balance
+  from with_running wr
+  where (p_date_from is null or wr.entry_date >= p_date_from)
+    and (p_date_to is null or wr.entry_date <= p_date_to)
+  order by wr.account_number, wr.entry_date, wr.entry_number, wr.line_number;
+end;
+$$;
+
+revoke all on function get_general_ledger(uuid, uuid, date, date) from public;
+revoke all on function get_general_ledger(uuid, uuid, date, date) from authenticated;
+revoke all on function get_general_ledger(uuid, uuid, date, date) from anon;
+grant execute on function get_general_ledger(uuid, uuid, date, date) to service_role;
 
 -- ============================================================================
 -- 9b. ADVISORY-LOCK JOURNAL RPCs (entry_number / opening balance / year-end)
@@ -1181,27 +1638,21 @@ begin
       a.normal_balance,
       round(sum(jl.debit)::numeric, 2) as total_debit,
       round(sum(jl.credit)::numeric, 2) as total_credit,
-      case
-        when a.normal_balance = 'debit' then
-          round((sum(jl.debit) - sum(jl.credit))::numeric, 2)
-        else
-          round((sum(jl.credit) - sum(jl.debit))::numeric, 2)
-      end as balance
+      -- [feature-spec-1.1.H1.md decision #3 / #4] lockstep with get_profit_and_loss:
+      -- same signed-balance helper and is_ledger_truth_status (posted ∪ reversed).
+      -- posted-only would drop reversed originals while keeping reversing entries,
+      -- producing a wrong RE transfer after mid-year reversals (H1-5 sweep).
+      account_signed_balance(a.normal_balance, sum(jl.debit), sum(jl.credit)) as balance
     from journal_lines jl
     join journal_entries je on je.id = jl.journal_entry_id
     join accounting_periods ap on ap.id = je.period_id
     join accounts a on a.id = jl.account_id
    where je.company_id = p_company_id
-     and je.status = 'posted'
+     and is_ledger_truth_status(je.status)
      and ap.fiscal_year = p_fiscal_year
      and a.category in ('income', 'expense')
    group by a.id, a.category, a.normal_balance
-  having case
-           when a.normal_balance = 'debit' then
-             round((sum(jl.debit) - sum(jl.credit))::numeric, 2)
-           else
-             round((sum(jl.credit) - sum(jl.debit))::numeric, 2)
-         end <> 0
+  having account_signed_balance(a.normal_balance, sum(jl.debit), sum(jl.credit)) <> 0
   loop
     if r.category = 'income' then
       insert into tmp_ye_lines(line_number, account_id, debit, credit, description)

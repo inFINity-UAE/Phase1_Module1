@@ -25,6 +25,7 @@ import {
   RecurringJournalTemplateLinesController,
   RecurringJournalTemplatesController,
 } from '../recurring-journal-templates/recurring-journal-templates.controller';
+import { ReportsController } from '../reports/reports.controller';
 import { REQUIRE_COMPANY_MEMBERSHIP_KEY } from '../auth/decorators/require-company-membership.decorator';
 import { SupabaseService } from '../database/supabase.service';
 import { CompanyRole } from '../common/enums/company-role.enum';
@@ -52,6 +53,7 @@ const HTTP_CONTROLLERS: Type[] = [
   RecurringJournalTemplatesController,
   RecurringJournalTemplateLinesController,
   AuditLogController,
+  ReportsController,
 ];
 
 /**
@@ -501,6 +503,22 @@ const HTTP_CONTROLLERS: Type[] = [
           path: `/recurring-journal-template-lines/${foreignTemplateLineId}`,
         },
         { method: 'GET', path: `/audit-log?company_id=${foreignCompanyId}` },
+        {
+          method: 'GET',
+          path: `/reports/trial-balance?company_id=${foreignCompanyId}&period_id=${foreignPeriodId}`,
+        },
+        {
+          method: 'GET',
+          path: `/reports/balance-sheet?company_id=${foreignCompanyId}&as_of_date=2026-01-31`,
+        },
+        {
+          method: 'GET',
+          path: `/reports/profit-and-loss?company_id=${foreignCompanyId}&period_start=2026-01-01&period_end=2026-01-31`,
+        },
+        {
+          method: 'GET',
+          path: `/reports/general-ledger?company_id=${foreignCompanyId}`,
+        },
       ];
 
       const failures: string[] = [];
@@ -551,6 +569,36 @@ const HTTP_CONTROLLERS: Type[] = [
 
       const audit = await http('GET', `/audit-log?company_id=${memberCompanyId}`);
       expect(audit.status).toBe(200);
+
+      const { data: memberPeriod } = await supabase.client
+        .from('accounting_periods')
+        .select('id')
+        .eq('company_id', memberCompanyId)
+        .eq('period_start', '2026-01-01')
+        .single();
+      const periodTb = await http(
+        'GET',
+        `/reports/trial-balance?company_id=${memberCompanyId}&period_id=${memberPeriod!.id}`,
+      );
+      expect(periodTb.status).toBe(200);
+
+      const balanceSheet = await http(
+        'GET',
+        `/reports/balance-sheet?company_id=${memberCompanyId}&as_of_date=2026-01-31`,
+      );
+      expect(balanceSheet.status).toBe(200);
+
+      const pnl = await http(
+        'GET',
+        `/reports/profit-and-loss?company_id=${memberCompanyId}&period_start=2026-01-01&period_end=2026-01-31`,
+      );
+      expect(pnl.status).toBe(200);
+
+      const gl = await http(
+        'GET',
+        `/reports/general-ledger?company_id=${memberCompanyId}`,
+      );
+      expect(gl.status).toBe(200);
 
       const runDue = await http('POST', '/recurring-journal-templates/run-due', {
         company_id: memberCompanyId,

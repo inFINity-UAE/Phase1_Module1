@@ -1,0 +1,30 @@
+import { IsBoolean, IsOptional, IsUUID } from 'class-validator';
+import { Transform } from 'class-transformer';
+
+/**
+ * [feature-spec-1.1.H1.md decision #1] Period Trial Balance query.
+ * company_id + period_id required; include_zero_balance defaults false.
+ */
+export class TrialBalanceQueryDto {
+  @IsUUID()
+  company_id!: string;
+
+  @IsUUID()
+  period_id!: string;
+
+  @IsOptional()
+  @Transform(({ value }) => {
+    if (value === undefined || value === null || value === '') {
+      return undefined;
+    }
+    if (value === true || value === 'true' || value === '1') {
+      return true;
+    }
+    if (value === false || value === 'false' || value === '0') {
+      return false;
+    }
+    return value;
+  })
+  @IsBoolean()
+  include_zero_balance?: boolean;
+}

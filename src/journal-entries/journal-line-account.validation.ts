@@ -16,6 +16,31 @@ export type JournalLineAccountRow = {
   category?: string;
 };
 
+/**
+ * [feature-spec.md §4.8 / decision #35 company-match half; feature-spec-1.1.H1.md #5]
+ * Report filter paths: account must exist and belong to company_id.
+ * Does NOT require is_active — historical GL may include inactive accounts.
+ */
+export function assertAccountBelongsToCompany(
+  companyId: string,
+  accountId: string,
+  account:
+    | Pick<JournalLineAccountRow, 'id' | 'company_id' | 'account_number'>
+    | null
+    | undefined,
+): void {
+  if (!account) {
+    throw new BadRequestException(
+      `Account ${accountId} was not found — cannot filter a report against a missing account`,
+    );
+  }
+  if (account.company_id !== companyId) {
+    throw new BadRequestException(
+      `Account ${account.account_number ?? accountId} belongs to a different company than the report request`,
+    );
+  }
+}
+
 export function assertAccountsUsableForCompany(
   companyId: string,
   accountIds: string[],

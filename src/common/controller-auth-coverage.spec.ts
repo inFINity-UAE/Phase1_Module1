@@ -20,11 +20,14 @@ import { CompanyMembersService } from '../company-members/company-members.servic
 import { CompanyMembershipGuard } from '../auth/guards/company-membership.guard';
 import { SupabaseAuthGuard } from '../auth/guards/supabase-auth.guard';
 import { CompanyRole } from './enums/company-role.enum';
+import { ReportsController } from '../reports/reports.controller';
+import { ReportsService } from '../reports/reports.service';
 
 /**
- * [feature-spec.md decisions #24/#27/#41] Controllers reject unauthenticated
- * requests (401) and succeed for a verified Bearer session with membership.
- * Regression list covers all 38 guarded HTTP routes across 7 controllers.
+ * [feature-spec.md decisions #24/#27/#41; feature-spec-1.1.H1.md #1]
+ * Controllers reject unauthenticated requests (401) and succeed for a
+ * verified Bearer session with membership. Regression list covers all
+ * 42 guarded HTTP routes across 8 controllers.
  */
 describe('Controller auth coverage (decision #24)', () => {
   let app: INestApplication;
@@ -48,8 +51,24 @@ describe('Controller auth coverage (decision #24)', () => {
     attachments: [],
   };
 
-  /** Canonical 38-route list — keep in sync with company-membership.guard.integration.spec.ts */
+  /** Canonical 42-route list — keep in sync with company-membership.guard.integration.spec.ts */
   const ALL_GUARDED_ROUTES: Array<{ method: string; path: string; body?: unknown }> = [
+    {
+      method: 'GET',
+      path: `/reports/trial-balance?company_id=${companyId}&period_id=${periodId}`,
+    },
+    {
+      method: 'GET',
+      path: `/reports/balance-sheet?company_id=${companyId}&as_of_date=2026-01-31`,
+    },
+    {
+      method: 'GET',
+      path: `/reports/profit-and-loss?company_id=${companyId}&period_start=2026-01-01&period_end=2026-01-31`,
+    },
+    {
+      method: 'GET',
+      path: `/reports/general-ledger?company_id=${companyId}`,
+    },
     { method: 'GET', path: `/accounts?company_id=${companyId}` },
     { method: 'GET', path: `/accounts/${accountId}` },
     {
@@ -257,6 +276,27 @@ describe('Controller auth coverage (decision #24)', () => {
       find: jest.fn().mockResolvedValue([]),
     };
 
+    const reportsService = {
+      getTrialBalance: jest.fn().mockResolvedValue([]),
+      getBalanceSheet: jest.fn().mockResolvedValue({
+        as_of_date: '2026-01-31',
+        accounts: [],
+        total_assets: 0,
+        total_liabilities: 0,
+        total_equity: 0,
+        is_balanced: true,
+      }),
+      getProfitAndLoss: jest.fn().mockResolvedValue({
+        period_start: '2026-01-01',
+        period_end: '2026-01-31',
+        accounts: [],
+        total_income: 0,
+        total_expense: 0,
+        net_profit: 0,
+      }),
+      getGeneralLedger: jest.fn().mockResolvedValue([]),
+    };
+
     const module: TestingModule = await Test.createTestingModule({
       controllers: [
         AccountsController,
@@ -266,6 +306,7 @@ describe('Controller auth coverage (decision #24)', () => {
         RecurringJournalTemplatesController,
         RecurringJournalTemplateLinesController,
         AuditLogController,
+        ReportsController,
       ],
       providers: [
         SupabaseAuthGuard,
@@ -275,6 +316,7 @@ describe('Controller auth coverage (decision #24)', () => {
         { provide: JournalEntriesService, useValue: journalEntriesService },
         { provide: RecurringJournalTemplatesService, useValue: recurringService },
         { provide: AuditLogService, useValue: auditLogService },
+        { provide: ReportsService, useValue: reportsService },
         {
           provide: SupabaseService,
           useValue: {
@@ -330,8 +372,8 @@ describe('Controller auth coverage (decision #24)', () => {
     return { status: response.status, body: await response.text() };
   }
 
-  it('covers all 38 guarded HTTP routes', () => {
-    expect(ALL_GUARDED_ROUTES).toHaveLength(38);
+  it('covers all 42 guarded HTTP routes', () => {
+    expect(ALL_GUARDED_ROUTES).toHaveLength(42);
   });
 
   it.each(ALL_GUARDED_ROUTES)(

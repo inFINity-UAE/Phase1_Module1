@@ -5,6 +5,7 @@ import { AccountingPeriodsModule } from './accounting-periods/accounting-periods
 import { JournalEntriesModule } from './journal-entries/journal-entries.module';
 import { RecurringJournalTemplatesModule } from './recurring-journal-templates/recurring-journal-templates.module';
 import { AuditLogModule } from './audit-log/audit-log.module';
+import { ReportsModule } from './reports/reports.module';
 
 @Module({
   imports: [
@@ -14,6 +15,7 @@ import { AuditLogModule } from './audit-log/audit-log.module';
     JournalEntriesModule,
     RecurringJournalTemplatesModule,
     AuditLogModule,
+    ReportsModule,
   ],
 })
 export class AppModule {}

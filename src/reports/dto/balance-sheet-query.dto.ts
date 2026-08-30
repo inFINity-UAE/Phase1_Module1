@@ -1,0 +1,14 @@
+import { IsDateString, IsOptional, IsUUID } from 'class-validator';
+
+/**
+ * [feature-spec-1.1.H1.md decision #2] Balance Sheet query.
+ * company_id required; as_of_date optional — Nest defaults to server today.
+ */
+export class BalanceSheetQueryDto {
+  @IsUUID()
+  company_id!: string;
+
+  @IsOptional()
+  @IsDateString({ strict: true })
+  as_of_date?: string;
+}
