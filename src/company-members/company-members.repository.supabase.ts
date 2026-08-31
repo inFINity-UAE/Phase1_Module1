@@ -123,4 +123,88 @@ export class SupabaseCompanyMembersRepository implements CompanyMembersRepositor
     }
     return parent.company_id ?? null;
   }
+
+  async findCompanyIdByCustomerId(customerId: string): Promise<string | null> {
+    const { data, error } = await this.supabase.client
+      .from('customers')
+      .select('company_id')
+      .eq('id', customerId)
+      .maybeSingle();
+
+    if (error) {
+      throw error;
+    }
+
+    return (data?.company_id as string | undefined) ?? null;
+  }
+
+  async findCompanyIdByQuotationId(quotationId: string): Promise<string | null> {
+    const { data, error } = await this.supabase.client
+      .from('quotations')
+      .select('company_id')
+      .eq('id', quotationId)
+      .maybeSingle();
+
+    if (error) {
+      throw error;
+    }
+
+    return (data?.company_id as string | undefined) ?? null;
+  }
+
+  async findCompanyIdByQuotationLineId(lineId: string): Promise<string | null> {
+    const { data, error } = await this.supabase.client
+      .from('quotation_lines')
+      .select('quotation_id, quotations!inner(company_id)')
+      .eq('id', lineId)
+      .maybeSingle();
+
+    if (error) {
+      throw error;
+    }
+
+    const parent = data?.quotations as { company_id?: string } | { company_id?: string }[] | null;
+    if (!parent) {
+      return null;
+    }
+    if (Array.isArray(parent)) {
+      return parent[0]?.company_id ?? null;
+    }
+    return parent.company_id ?? null;
+  }
+
+  async findCompanyIdByInvoiceId(invoiceId: string): Promise<string | null> {
+    const { data, error } = await this.supabase.client
+      .from('invoices')
+      .select('company_id')
+      .eq('id', invoiceId)
+      .maybeSingle();
+
+    if (error) {
+      throw error;
+    }
+
+    return (data?.company_id as string | undefined) ?? null;
+  }
+
+  async findCompanyIdByInvoiceLineId(lineId: string): Promise<string | null> {
+    const { data, error } = await this.supabase.client
+      .from('invoice_lines')
+      .select('invoice_id, invoices!inner(company_id)')
+      .eq('id', lineId)
+      .maybeSingle();
+
+    if (error) {
+      throw error;
+    }
+
+    const parent = data?.invoices as { company_id?: string } | { company_id?: string }[] | null;
+    if (!parent) {
+      return null;
+    }
+    if (Array.isArray(parent)) {
+      return parent[0]?.company_id ?? null;
+    }
+    return parent.company_id ?? null;
+  }
 }

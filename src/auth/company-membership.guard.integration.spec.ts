@@ -17,6 +17,11 @@ import { AddressInfo } from 'net';
 import { randomUUID } from 'crypto';
 import { AppModule } from '../app.module';
 import { AccountsController } from '../accounts/accounts.controller';
+import { CustomersController } from '../customers/customers.controller';
+import { QuotationsController } from '../quotations/quotations.controller';
+import { QuotationLinesController } from '../quotations/quotation-lines.controller';
+import { InvoicesController } from '../invoices/invoices.controller';
+import { InvoiceLinesController } from '../invoices/invoice-lines.controller';
 import { AccountingPeriodsController } from '../accounting-periods/accounting-periods.controller';
 import { AuditLogController } from '../audit-log/audit-log.controller';
 import { JournalEntriesController } from '../journal-entries/journal-entries.controller';
@@ -47,6 +52,11 @@ const hasSupabase = Boolean(
 
 const HTTP_CONTROLLERS: Type[] = [
   AccountsController,
+  CustomersController,
+  QuotationsController,
+  QuotationLinesController,
+  InvoicesController,
+  InvoiceLinesController,
   AccountingPeriodsController,
   JournalEntriesController,
   JournalLinesController,
@@ -77,6 +87,9 @@ const HTTP_CONTROLLERS: Type[] = [
     let foreignLineId = '';
     let foreignTemplateId = '';
     let foreignTemplateLineId = '';
+    let foreignCustomerId = '';
+    let foreignInvoiceId = '';
+    let foreignInvoiceLineId = '';
     let memberAccountId = '';
 
     beforeAll(async () => {
@@ -240,6 +253,54 @@ const HTTP_CONTROLLERS: Type[] = [
         throw tplLineErr ?? new Error('foreign template line insert failed');
       }
       foreignTemplateLineId = tplLine.id as string;
+
+      const { data: foreignCustomer, error: custErr } = await supabase.client
+        .from('customers')
+        .insert({
+          company_id: foreignCompanyId,
+          customer_name: `foreign-customer-${randomUUID()}`,
+          trn: null,
+        })
+        .select('id')
+        .single();
+      if (custErr || !foreignCustomer) {
+        throw custErr ?? new Error('foreign customer insert failed');
+      }
+      foreignCustomerId = foreignCustomer.id as string;
+
+      const { data: foreignInvoice, error: invErr } = await supabase.client
+        .from('invoices')
+        .insert({
+          company_id: foreignCompanyId,
+          customer_id: foreignCustomerId,
+          invoice_date: '2026-06-01',
+          payment_terms: 'net_30',
+          status: 'draft',
+          created_by: INTEGRATION_USER_ID,
+        })
+        .select('id')
+        .single();
+      if (invErr || !foreignInvoice) {
+        throw invErr ?? new Error('foreign invoice insert failed');
+      }
+      foreignInvoiceId = foreignInvoice.id as string;
+
+      const { data: foreignInvoiceLine, error: invLineErr } = await supabase.client
+        .from('invoice_lines')
+        .insert({
+          invoice_id: foreignInvoiceId,
+          line_number: 1,
+          description: 'foreign probe line',
+          quantity: 1,
+          unit_price: 100,
+          vat_rate: 5,
+        })
+        .select('id')
+        .single();
+      if (invLineErr || !foreignInvoiceLine) {
+        throw invLineErr ?? new Error('foreign invoice line insert failed');
+      }
+      foreignInvoiceLineId = foreignInvoiceLine.id as string;
 
       const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
       const publishableKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!;
@@ -519,6 +580,67 @@ const HTTP_CONTROLLERS: Type[] = [
           method: 'GET',
           path: `/reports/general-ledger?company_id=${foreignCompanyId}`,
         },
+        { method: 'GET', path: `/customers?company_id=${foreignCompanyId}` },
+        { method: 'GET', path: `/customers/${foreignCustomerId}` },
+        {
+          method: 'POST',
+          path: '/customers',
+          body: {
+            company_id: foreignCompanyId,
+            customer_name: 'Should fail',
+          },
+        },
+        {
+          method: 'PATCH',
+          path: `/customers/${foreignCustomerId}`,
+          body: { customer_name: 'Nope' },
+        },
+        { method: 'PATCH', path: `/customers/${foreignCustomerId}/deactivate` },
+        { method: 'GET', path: `/invoices?company_id=${foreignCompanyId}` },
+        { method: 'GET', path: `/invoices/${foreignInvoiceId}` },
+        {
+          method: 'POST',
+          path: '/invoices',
+          body: {
+            company_id: foreignCompanyId,
+            customer_id: foreignCustomerId,
+            invoice_date: '2026-06-01',
+            payment_terms: 'net_30',
+          },
+        },
+        {
+          method: 'PATCH',
+          path: `/invoices/${foreignInvoiceId}`,
+          body: { notes: 'Nope' },
+        },
+        { method: 'DELETE', path: `/invoices/${foreignInvoiceId}` },
+        { method: 'POST', path: `/invoices/${foreignInvoiceId}/issue`, body: {} },
+        {
+          method: 'POST',
+          path: `/invoices/${foreignInvoiceId}/void`,
+          body: { void_reason: 'Nope' },
+        },
+        { method: 'POST', path: `/invoices/${foreignInvoiceId}/send` },
+        { method: 'POST', path: `/invoices/${foreignInvoiceId}/mark-viewed` },
+        { method: 'POST', path: `/invoices/${foreignInvoiceId}/write-off` },
+        {
+          method: 'POST',
+          path: '/invoice-lines',
+          body: {
+            invoice_id: foreignInvoiceId,
+            line_number: 2,
+            description: 'Nope',
+            quantity: 1,
+            unit_price: 1,
+            vat_rate: 5,
+          },
+        },
+        {
+          method: 'PATCH',
+          path: `/invoice-lines/${foreignInvoiceLineId}`,
+          body: { description: 'Nope' },
+        },
+        { method: 'DELETE', path: `/invoice-lines/${foreignInvoiceLineId}` },
       ];
 
       const failures: string[] = [];

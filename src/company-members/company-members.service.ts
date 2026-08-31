@@ -76,6 +76,23 @@ export class CompanyMembersService {
             resourceId,
           );
         break;
+      case 'customer':
+        companyId = await this.companyMembersRepository.findCompanyIdByCustomerId(resourceId);
+        break;
+      case 'quotation':
+        companyId = await this.companyMembersRepository.findCompanyIdByQuotationId(resourceId);
+        break;
+      case 'quotation_line':
+        companyId =
+          await this.companyMembersRepository.findCompanyIdByQuotationLineId(resourceId);
+        break;
+      case 'invoice':
+        companyId = await this.companyMembersRepository.findCompanyIdByInvoiceId(resourceId);
+        break;
+      case 'invoice_line':
+        companyId =
+          await this.companyMembersRepository.findCompanyIdByInvoiceLineId(resourceId);
+        break;
       default: {
         const _exhaustive: never = resource;
         throw new NotFoundException(`Unknown resource kind ${_exhaustive}`);

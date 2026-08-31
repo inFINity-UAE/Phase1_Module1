@@ -3,6 +3,9 @@ import { ScheduleModule } from '@nestjs/schedule';
 import { DatabaseModule } from './database/database.module';
 import { AccountsModule } from './accounts/accounts.module';
 import { AccountingPeriodsModule } from './accounting-periods/accounting-periods.module';
+import { CustomersModule } from './customers/customers.module';
+import { QuotationsModule } from './quotations/quotations.module';
+import { InvoicesModule } from './invoices/invoices.module';
 import { JournalEntriesModule } from './journal-entries/journal-entries.module';
 import { RecurringJournalTemplatesModule } from './recurring-journal-templates/recurring-journal-templates.module';
 import { AuditLogModule } from './audit-log/audit-log.module';
@@ -14,6 +17,9 @@ import { ReportsModule } from './reports/reports.module';
     DatabaseModule,
     AccountsModule,
     AccountingPeriodsModule,
+    CustomersModule,
+    QuotationsModule,
+    InvoicesModule,
     JournalEntriesModule,
     RecurringJournalTemplatesModule,
     AuditLogModule,

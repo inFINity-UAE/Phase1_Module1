@@ -614,6 +614,941 @@ create trigger trg_log_journal_entry_change
   after insert or update on journal_entries
   for each row execute function log_journal_entry_change();
 
+-- ============================================================================
+-- 7. CUSTOMERS (Module 1.1.C — feature-spec-1.1.C.md §1.1)
+-- ============================================================================
+
+create table customers (
+  id                     uuid primary key default gen_random_uuid(),
+  company_id             uuid not null references companies(id) on delete cascade,
+  customer_name          text not null,
+  trn                    text,                            -- nullable; FTA Tax Registration Number
+  email                  text,
+  phone                  text,
+  billing_address        text,
+  default_payment_terms  text,                            -- §5 enum lands with invoices; text default for now
+  is_active              boolean not null default true,   -- soft deactivate; no hard delete
+  created_at             timestamptz not null default now(),
+  updated_at             timestamptz not null default now()
+);
+
+create index idx_customers_company on customers(company_id);
+
+-- [feature-spec-1.1.C.md decision #1] Partial unique — duplicate TRN within one company = same legal entity twice
+create unique index customers_company_trn_unique
+  on customers(company_id, trn)
+  where trn is not null;
+
+-- ============================================================================
+-- 7b. QUOTATIONS (Module 1.1.C — feature-spec-1.1.C.md §1.2, §2.1, §3)
+-- ============================================================================
+
+create type quotation_status as enum (
+  'draft',
+  'sent',
+  'viewed',
+  'accepted',
+  'declined',
+  'expired'
+);
+
+create table quotations (
+  id                       uuid primary key default gen_random_uuid(),
+  company_id               uuid not null references companies(id) on delete cascade,
+  customer_id              uuid not null references customers(id),
+  quotation_number         text not null,
+  quotation_date           date not null,
+  valid_until              date,
+  status                   quotation_status not null default 'draft',
+  subtotal                 numeric(18,2) not null default 0,
+  vat_total                numeric(18,2) not null default 0,
+  grand_total              numeric(18,2) not null default 0,
+  notes                    text,
+  converted_to_invoice_id  uuid,
+  created_by               uuid not null,
+  created_at               timestamptz not null default now(),
+  updated_at               timestamptz not null default now(),
+
+  unique (company_id, quotation_number)
+);
+
+create index idx_quotations_company on quotations(company_id);
+create index idx_quotations_customer on quotations(customer_id);
+create index idx_quotations_status on quotations(company_id, status);
+
+create table quotation_lines (
+  id                uuid primary key default gen_random_uuid(),
+  quotation_id      uuid not null references quotations(id) on delete cascade,
+  line_number       smallint not null,
+  description       text not null,
+  quantity          numeric(18,4) not null check (quantity > 0),
+  unit_price        numeric(18,2) not null check (unit_price >= 0),
+  discount_percent  numeric(5,2) check (discount_percent is null or (discount_percent > 0 and discount_percent <= 100)),
+  discount_amount   numeric(18,2) check (discount_amount is null or discount_amount > 0),
+  vat_rate          numeric(5,2) not null check (vat_rate >= 0 and vat_rate <= 100),
+  line_total        numeric(18,2) not null default 0,
+
+  unique (quotation_id, line_number),
+
+  -- [feature-spec-1.1.C.md decision #2] percent XOR amount, or neither (0 discount)
+  check (
+    (discount_percent is null and discount_amount is null)
+    or (discount_percent is not null and discount_amount is null)
+    or (discount_percent is null and discount_amount is not null)
+  )
+);
+
+create index idx_quotation_lines_quotation on quotation_lines(quotation_id);
+
+-- [feature-spec-1.1.C.md decision #16] quo: advisory lock; format QUO-YYYY-NNNN
+create or replace function allocate_next_quotation_number(
+  p_company_id uuid,
+  p_quotation_date date default current_date
+)
+returns text
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  v_year int;
+  v_seq  int;
+begin
+  if p_company_id is null then
+    raise exception 'COMPANY_ID_REQUIRED';
+  end if;
+
+  perform pg_advisory_xact_lock(hashtext('quo:' || p_company_id::text));
+
+  v_year := extract(year from coalesce(p_quotation_date, current_date))::int;
+
+  select coalesce(
+    max(
+      nullif(
+        regexp_replace(quotation_number, '^QUO-' || v_year::text || '-', ''),
+        quotation_number
+      )::int
+    ),
+    0
+  ) + 1
+    into v_seq
+    from quotations
+   where company_id = p_company_id
+     and quotation_number ~ ('^QUO-' || v_year::text || '-[0-9]+$');
+
+  return format('QUO-%s-%s', v_year, lpad(v_seq::text, 4, '0'));
+end;
+$$;
+
+revoke all on function allocate_next_quotation_number(uuid, date) from public;
+revoke all on function allocate_next_quotation_number(uuid, date) from authenticated;
+revoke all on function allocate_next_quotation_number(uuid, date) from anon;
+grant execute on function allocate_next_quotation_number(uuid, date) to service_role;
+
+create or replace function assign_quotation_number()
+returns trigger
+language plpgsql
+security invoker
+set search_path = public, pg_temp
+as $$
+begin
+  if new.quotation_number is null or btrim(new.quotation_number) = '' then
+    new.quotation_number := allocate_next_quotation_number(new.company_id, new.quotation_date);
+  end if;
+  return new;
+end;
+$$;
+
+create trigger trg_assign_quotation_number
+  before insert on quotations
+  for each row execute function assign_quotation_number();
+
+-- Line net / VAT / inclusive total helper
+create or replace function compute_quotation_line_amounts(
+  p_quantity numeric,
+  p_unit_price numeric,
+  p_discount_percent numeric,
+  p_discount_amount numeric,
+  p_vat_rate numeric,
+  out line_net numeric,
+  out line_vat numeric,
+  out line_total numeric
+)
+language plpgsql
+immutable
+security invoker
+set search_path = public, pg_temp
+as $$
+declare
+  v_gross    numeric(18,2);
+  v_discount numeric(18,2);
+begin
+  v_gross := round(p_quantity * p_unit_price, 2);
+
+  if p_discount_percent is not null then
+    v_discount := round(v_gross * p_discount_percent / 100, 2);
+  elsif p_discount_amount is not null then
+    v_discount := p_discount_amount;
+  else
+    v_discount := 0;
+  end if;
+
+  line_net := round(v_gross - v_discount, 2);
+  line_vat := round(line_net * p_vat_rate / 100, 2);
+  line_total := line_net + line_vat;
+end;
+$$;
+
+-- [feature-spec-1.1.C.md decision #3] Recompute header totals from lines while draft.
+create or replace function recalculate_quotation_totals(p_quotation_id uuid)
+returns void
+language plpgsql
+security invoker
+set search_path = public, pg_temp
+as $$
+declare
+  v_status quotation_status;
+  v_subtotal numeric(18,2) := 0;
+  v_vat_total numeric(18,2) := 0;
+  v_line record;
+  v_net numeric(18,2);
+  v_vat numeric(18,2);
+  v_total numeric(18,2);
+begin
+  select status into v_status
+    from quotations
+   where id = p_quotation_id;
+
+  if not found or v_status <> 'draft' then
+    return;
+  end if;
+
+  for v_line in
+    select quantity, unit_price, discount_percent, discount_amount, vat_rate
+      from quotation_lines
+     where quotation_id = p_quotation_id
+     order by line_number
+  loop
+    select * into v_net, v_vat, v_total
+      from compute_quotation_line_amounts(
+        v_line.quantity,
+        v_line.unit_price,
+        v_line.discount_percent,
+        v_line.discount_amount,
+        v_line.vat_rate
+      );
+    v_subtotal := v_subtotal + v_net;
+    v_vat_total := v_vat_total + v_vat;
+  end loop;
+
+  perform set_config('app.quotation_recalc_in_progress', 'true', true);
+
+  -- [feature-spec-1.1.C.md §1.2] Diagnostic only: integration tests set
+  -- app.quotation_recalc_trace=true in the same transaction to assert this
+  -- function runs exactly once per line mutation (no header→line cascade).
+  if current_setting('app.quotation_recalc_trace', true) = 'true' then
+    perform set_config(
+      'app.quotation_recalc_call_count',
+      (coalesce(nullif(current_setting('app.quotation_recalc_call_count', true), ''), '0')::int + 1)::text,
+      true
+    );
+  end if;
+
+  update quotations
+     set subtotal = v_subtotal,
+         vat_total = v_vat_total,
+         grand_total = v_subtotal + v_vat_total,
+         updated_at = now()
+   where id = p_quotation_id
+     and status = 'draft';
+
+  perform set_config('app.quotation_recalc_in_progress', '', true);
+end;
+$$;
+
+create or replace function set_quotation_line_computed_fields()
+returns trigger
+language plpgsql
+security invoker
+set search_path = public, pg_temp
+as $$
+declare
+  v_net numeric(18,2);
+  v_vat numeric(18,2);
+  v_total numeric(18,2);
+begin
+  select * into v_net, v_vat, v_total
+    from compute_quotation_line_amounts(
+      new.quantity,
+      new.unit_price,
+      new.discount_percent,
+      new.discount_amount,
+      new.vat_rate
+    );
+  new.line_total := v_total;
+  return new;
+end;
+$$;
+
+create trigger trg_set_quotation_line_computed_fields
+  before insert or update on quotation_lines
+  for each row execute function set_quotation_line_computed_fields();
+
+create or replace function refresh_quotation_totals_from_lines()
+returns trigger
+language plpgsql
+security invoker
+set search_path = public, pg_temp
+as $$
+begin
+  if current_setting('app.quotation_recalc_trace', true) = 'true' then
+    perform set_config(
+      'app.quotation_line_trigger_count',
+      (coalesce(nullif(current_setting('app.quotation_line_trigger_count', true), ''), '0')::int + 1)::text,
+      true
+    );
+  end if;
+
+  perform recalculate_quotation_totals(coalesce(new.quotation_id, old.quotation_id));
+  return coalesce(new, old);
+end;
+$$;
+
+create trigger trg_refresh_quotation_totals_from_lines
+  after insert or update or delete on quotation_lines
+  for each row execute function refresh_quotation_totals_from_lines();
+
+-- [feature-spec-1.1.C.md decision #3] Block line mutations once parent leaves draft.
+create or replace function prevent_nondraft_quotation_line_mutation()
+returns trigger
+language plpgsql
+security invoker
+set search_path = public, pg_temp
+as $$
+declare
+  v_status quotation_status;
+begin
+  select status into v_status
+    from quotations
+   where id = coalesce(new.quotation_id, old.quotation_id);
+
+  if v_status <> 'draft' then
+    raise exception 'QUOTATION_LINE_MUTATION_BLOCKED';
+  end if;
+
+  return coalesce(new, old);
+end;
+$$;
+
+create trigger trg_prevent_nondraft_quotation_line_mutation
+  before insert or update or delete on quotation_lines
+  for each row execute function prevent_nondraft_quotation_line_mutation();
+
+-- Block client writes to computed totals; allow recalc trigger via session GUC.
+create or replace function prevent_quotation_computed_totals_mutation()
+returns trigger
+language plpgsql
+security invoker
+set search_path = public, pg_temp
+as $$
+begin
+  if current_setting('app.quotation_recalc_in_progress', true) = 'true' then
+    return new;
+  end if;
+
+  if new.subtotal is distinct from old.subtotal
+     or new.vat_total is distinct from old.vat_total
+     or new.grand_total is distinct from old.grand_total then
+    raise exception 'QUOTATION_TOTALS_CLIENT_MUTATION_BLOCKED';
+  end if;
+
+  return new;
+end;
+$$;
+
+create trigger trg_prevent_quotation_computed_totals_mutation
+  before update on quotations
+  for each row execute function prevent_quotation_computed_totals_mutation();
+
+-- [feature-spec-1.1.C.md decision #3] Header metadata locked once non-draft (status workflow allowed).
+create or replace function prevent_nondraft_quotation_header_mutation()
+returns trigger
+language plpgsql
+security invoker
+set search_path = public, pg_temp
+as $$
+begin
+  if old.status = 'draft' then
+    return new;
+  end if;
+
+  if new.customer_id is distinct from old.customer_id
+     or new.quotation_date is distinct from old.quotation_date
+     or new.valid_until is distinct from old.valid_until
+     or new.notes is distinct from old.notes
+     or new.quotation_number is distinct from old.quotation_number then
+    raise exception 'QUOTATION_HEADER_MUTATION_BLOCKED';
+  end if;
+
+  return new;
+end;
+$$;
+
+create trigger trg_prevent_nondraft_quotation_header_mutation
+  before update on quotations
+  for each row execute function prevent_nondraft_quotation_header_mutation();
+
+-- Integration-only: same-transaction trace for recalc trigger depth (not a product API).
+create or replace function integration_verify_quotation_recalc_fires_once(
+  p_line_id uuid,
+  p_quantity numeric
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+begin
+  perform set_config('app.quotation_recalc_trace', 'true', true);
+  perform set_config('app.quotation_recalc_call_count', '0', true);
+  perform set_config('app.quotation_line_trigger_count', '0', true);
+
+  update quotation_lines
+     set quantity = p_quantity
+   where id = p_line_id;
+
+  return jsonb_build_object(
+    'line_trigger_fires', current_setting('app.quotation_line_trigger_count', true)::int,
+    'recalc_calls', current_setting('app.quotation_recalc_call_count', true)::int
+  );
+end;
+$$;
+
+revoke all on function integration_verify_quotation_recalc_fires_once(uuid, numeric) from public;
+revoke all on function integration_verify_quotation_recalc_fires_once(uuid, numeric) from authenticated;
+revoke all on function integration_verify_quotation_recalc_fires_once(uuid, numeric) from anon;
+grant execute on function integration_verify_quotation_recalc_fires_once(uuid, numeric) to service_role;
+
+revoke all on function assign_quotation_number() from public;
+revoke all on function assign_quotation_number() from authenticated;
+revoke all on function assign_quotation_number() from anon;
+grant execute on function assign_quotation_number() to service_role;
+
+revoke all on function compute_quotation_line_amounts(numeric, numeric, numeric, numeric, numeric) from public;
+revoke all on function compute_quotation_line_amounts(numeric, numeric, numeric, numeric, numeric) from authenticated;
+revoke all on function compute_quotation_line_amounts(numeric, numeric, numeric, numeric, numeric) from anon;
+grant execute on function compute_quotation_line_amounts(numeric, numeric, numeric, numeric, numeric) to service_role;
+
+revoke all on function recalculate_quotation_totals(uuid) from public;
+revoke all on function recalculate_quotation_totals(uuid) from authenticated;
+revoke all on function recalculate_quotation_totals(uuid) from anon;
+grant execute on function recalculate_quotation_totals(uuid) to service_role;
+
+revoke all on function set_quotation_line_computed_fields() from public;
+revoke all on function set_quotation_line_computed_fields() from authenticated;
+revoke all on function set_quotation_line_computed_fields() from anon;
+grant execute on function set_quotation_line_computed_fields() to service_role;
+
+revoke all on function refresh_quotation_totals_from_lines() from public;
+revoke all on function refresh_quotation_totals_from_lines() from authenticated;
+revoke all on function refresh_quotation_totals_from_lines() from anon;
+grant execute on function refresh_quotation_totals_from_lines() to service_role;
+
+revoke all on function prevent_nondraft_quotation_line_mutation() from public;
+revoke all on function prevent_nondraft_quotation_line_mutation() from authenticated;
+revoke all on function prevent_nondraft_quotation_line_mutation() from anon;
+grant execute on function prevent_nondraft_quotation_line_mutation() to service_role;
+
+revoke all on function prevent_quotation_computed_totals_mutation() from public;
+revoke all on function prevent_quotation_computed_totals_mutation() from authenticated;
+revoke all on function prevent_quotation_computed_totals_mutation() from anon;
+grant execute on function prevent_quotation_computed_totals_mutation() to service_role;
+
+revoke all on function prevent_nondraft_quotation_header_mutation() from public;
+revoke all on function prevent_nondraft_quotation_header_mutation() from authenticated;
+revoke all on function prevent_nondraft_quotation_header_mutation() from anon;
+grant execute on function prevent_nondraft_quotation_header_mutation() to service_role;
+
+-- ============================================================================
+-- 7c. INVOICES (Module 1.1.C — feature-spec-1.1.C.md §1.3, §2.2, §3, §5, §6.2)
+-- Numbering at Issue (#8), not INSERT (#16 quotations). Ledger posting §7
+-- deferred to Batch 2 — journal_entry_id stays null after Issue in this pass.
+-- ============================================================================
+
+create type payment_terms_type as enum (
+  'net_7', 'net_15', 'net_30', 'net_60', 'custom', 'cod'
+);
+
+create type invoice_type as enum (
+  'tax_invoice', 'simplified_tax_invoice', 'proforma'
+);
+
+create type invoice_status as enum (
+  'draft',
+  'issued',
+  'sent',
+  'viewed',
+  'partially_paid',
+  'paid',
+  'overdue',
+  'written_off',
+  'void'
+);
+
+create table invoices (
+  id                    uuid primary key default gen_random_uuid(),
+  company_id            uuid not null references companies(id),
+  customer_id           uuid not null references customers(id),
+  invoice_number        text,
+  invoice_type          invoice_type,
+  invoice_date          date not null,
+  due_date              date,
+  payment_terms         payment_terms_type not null default 'net_30',
+  custom_days           int,
+  status                invoice_status not null default 'draft',
+  subtotal              numeric(18,2) not null default 0,
+  vat_total             numeric(18,2) not null default 0,
+  grand_total           numeric(18,2) not null default 0,
+  amount_paid           numeric(18,2) not null default 0,
+  source_quotation_id   uuid references quotations(id),
+  journal_entry_id      uuid references journal_entries(id),
+  void_reason           text,
+  created_by            uuid not null,
+  created_at            timestamptz not null default now(),
+  updated_at            timestamptz not null default now(),
+  constraint invoices_custom_days_required check (
+    payment_terms <> 'custom' or (custom_days is not null and custom_days > 0)
+  ),
+  constraint invoices_void_reason_required check (
+    status <> 'void' or (void_reason is not null and btrim(void_reason) <> '')
+  )
+);
+
+create unique index invoices_company_number_unique
+  on invoices(company_id, invoice_number)
+  where invoice_number is not null;
+
+create index idx_invoices_company on invoices(company_id);
+create index idx_invoices_customer on invoices(customer_id);
+create index idx_invoices_status on invoices(company_id, status);
+
+create table invoice_lines (
+  id                 uuid primary key default gen_random_uuid(),
+  invoice_id         uuid not null references invoices(id) on delete cascade,
+  line_number        smallint not null,
+  description        text not null,
+  quantity           numeric(18,4) not null,
+  unit_price         numeric(18,2) not null,
+  discount_percent   numeric(5,2),
+  discount_amount    numeric(18,2),
+  vat_rate           numeric(5,2) not null,
+  is_service         boolean not null default false,
+  income_account_id  uuid references accounts(id),
+  line_total         numeric(18,2) not null default 0,
+  unique (invoice_id, line_number),
+  constraint invoice_lines_discount_xor check (
+    not (discount_percent is not null and discount_amount is not null)
+  )
+);
+
+create index idx_invoice_lines_invoice on invoice_lines(invoice_id);
+
+-- [feature-spec-1.1.C.md decision #8] inv: lock; format INV-YYYY-NNNN; Issue only.
+create or replace function allocate_next_invoice_number(
+  p_company_id uuid,
+  p_invoice_date date default current_date
+)
+returns text
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  v_year int;
+  v_seq  int;
+begin
+  if p_company_id is null then
+    raise exception 'COMPANY_ID_REQUIRED';
+  end if;
+
+  perform pg_advisory_xact_lock(hashtext('inv:' || p_company_id::text));
+
+  v_year := extract(year from coalesce(p_invoice_date, current_date))::int;
+
+  select coalesce(
+    max(
+      nullif(
+        regexp_replace(invoice_number, '^INV-' || v_year::text || '-', ''),
+        invoice_number
+      )::int
+    ),
+    0
+  ) + 1
+    into v_seq
+    from invoices
+   where company_id = p_company_id
+     and invoice_number ~ ('^INV-' || v_year::text || '-[0-9]+$');
+
+  return format('INV-%s-%s', v_year, lpad(v_seq::text, 4, '0'));
+end;
+$$;
+
+revoke all on function allocate_next_invoice_number(uuid, date) from public;
+revoke all on function allocate_next_invoice_number(uuid, date) from authenticated;
+revoke all on function allocate_next_invoice_number(uuid, date) from anon;
+grant execute on function allocate_next_invoice_number(uuid, date) to service_role;
+
+-- Shared line math — same function as quotations (feature-spec-1.1.C.md §1.3 / §1.2).
+
+create or replace function suggest_invoice_line_income_account()
+returns trigger
+language plpgsql
+security invoker
+set search_path = public, pg_temp
+as $$
+declare
+  v_company_id uuid;
+  v_account_number char(4);
+  v_account_id uuid;
+begin
+  if new.income_account_id is not null then
+    return new;
+  end if;
+
+  select company_id into v_company_id from invoices where id = new.invoice_id;
+  if v_company_id is null then
+    return new;
+  end if;
+
+  -- [feature-spec-1.1.C.md §1.3 decision #4] COA segmentation by VAT treatment.
+  if new.vat_rate = 5 then
+    if coalesce(new.is_service, false) then
+      v_account_number := '4040';
+    else
+      v_account_number := '4000';
+    end if;
+  elsif new.vat_rate = 0 then
+    v_account_number := '4010';
+  else
+    v_account_number := '4020';
+  end if;
+
+  select id into v_account_id
+    from accounts
+   where company_id = v_company_id
+     and account_number = v_account_number
+   limit 1;
+
+  if v_account_id is not null then
+    new.income_account_id := v_account_id;
+  end if;
+
+  return new;
+end;
+$$;
+
+create trigger trg_suggest_invoice_line_income_account
+  before insert or update on invoice_lines
+  for each row execute function suggest_invoice_line_income_account();
+
+create or replace function set_invoice_line_computed_fields()
+returns trigger
+language plpgsql
+security invoker
+set search_path = public, pg_temp
+as $$
+declare
+  v_net numeric(18,2);
+  v_vat numeric(18,2);
+  v_total numeric(18,2);
+begin
+  select * into v_net, v_vat, v_total
+    from compute_quotation_line_amounts(
+      new.quantity,
+      new.unit_price,
+      new.discount_percent,
+      new.discount_amount,
+      new.vat_rate
+    );
+  new.line_total := v_total;
+  return new;
+end;
+$$;
+
+create trigger trg_set_invoice_line_computed_fields
+  before insert or update on invoice_lines
+  for each row execute function set_invoice_line_computed_fields();
+
+create or replace function recalculate_invoice_totals(p_invoice_id uuid)
+returns void
+language plpgsql
+security invoker
+set search_path = public, pg_temp
+as $$
+declare
+  v_status invoice_status;
+  v_subtotal numeric(18,2) := 0;
+  v_vat_total numeric(18,2) := 0;
+  v_line record;
+  v_net numeric(18,2);
+  v_vat numeric(18,2);
+  v_total numeric(18,2);
+begin
+  select status into v_status from invoices where id = p_invoice_id;
+
+  if not found or v_status <> 'draft' then
+    return;
+  end if;
+
+  for v_line in
+    select quantity, unit_price, discount_percent, discount_amount, vat_rate
+      from invoice_lines
+     where invoice_id = p_invoice_id
+     order by line_number
+  loop
+    select * into v_net, v_vat, v_total
+      from compute_quotation_line_amounts(
+        v_line.quantity,
+        v_line.unit_price,
+        v_line.discount_percent,
+        v_line.discount_amount,
+        v_line.vat_rate
+      );
+    v_subtotal := v_subtotal + v_net;
+    v_vat_total := v_vat_total + v_vat;
+  end loop;
+
+  perform set_config('app.invoice_recalc_in_progress', 'true', true);
+
+  update invoices
+     set subtotal = v_subtotal,
+         vat_total = v_vat_total,
+         grand_total = v_subtotal + v_vat_total,
+         updated_at = now()
+   where id = p_invoice_id
+     and status = 'draft';
+
+  perform set_config('app.invoice_recalc_in_progress', '', true);
+end;
+$$;
+
+create or replace function refresh_invoice_totals_from_lines()
+returns trigger
+language plpgsql
+security invoker
+set search_path = public, pg_temp
+as $$
+begin
+  perform recalculate_invoice_totals(coalesce(new.invoice_id, old.invoice_id));
+  return coalesce(new, old);
+end;
+$$;
+
+create trigger trg_refresh_invoice_totals_from_lines
+  after insert or update or delete on invoice_lines
+  for each row execute function refresh_invoice_totals_from_lines();
+
+create or replace function prevent_nondraft_invoice_line_mutation()
+returns trigger
+language plpgsql
+security invoker
+set search_path = public, pg_temp
+as $$
+declare
+  v_status invoice_status;
+begin
+  select status into v_status
+    from invoices
+   where id = coalesce(new.invoice_id, old.invoice_id);
+
+  if v_status = 'draft' then
+    return coalesce(new, old);
+  end if;
+
+  raise exception 'INVOICE_LINE_MUTATION_BLOCKED';
+end;
+$$;
+
+create trigger trg_prevent_nondraft_invoice_line_mutation
+  before insert or update or delete on invoice_lines
+  for each row execute function prevent_nondraft_invoice_line_mutation();
+
+create or replace function prevent_invoice_computed_totals_mutation()
+returns trigger
+language plpgsql
+security invoker
+set search_path = public, pg_temp
+as $$
+begin
+  if current_setting('app.invoice_recalc_in_progress', true) = 'true' then
+    return new;
+  end if;
+
+  if new.subtotal is distinct from old.subtotal
+     or new.vat_total is distinct from old.vat_total
+     or new.grand_total is distinct from old.grand_total then
+    raise exception 'INVOICE_TOTALS_CLIENT_MUTATION_BLOCKED';
+  end if;
+
+  return new;
+end;
+$$;
+
+create trigger trg_prevent_invoice_computed_totals_mutation
+  before update on invoices
+  for each row execute function prevent_invoice_computed_totals_mutation();
+
+create or replace function prevent_nondraft_invoice_header_mutation()
+returns trigger
+language plpgsql
+security invoker
+set search_path = public, pg_temp
+as $$
+begin
+  if old.status = 'draft' then
+    return new;
+  end if;
+
+  if new.customer_id is distinct from old.customer_id
+     or new.invoice_date is distinct from old.invoice_date
+     or new.payment_terms is distinct from old.payment_terms
+     or new.custom_days is distinct from old.custom_days
+     or new.invoice_number is distinct from old.invoice_number
+     or new.invoice_type is distinct from old.invoice_type
+     or new.due_date is distinct from old.due_date
+     or new.source_quotation_id is distinct from old.source_quotation_id then
+    raise exception 'INVOICE_HEADER_MUTATION_BLOCKED';
+  end if;
+
+  return new;
+end;
+$$;
+
+create trigger trg_prevent_nondraft_invoice_header_mutation
+  before update on invoices
+  for each row execute function prevent_nondraft_invoice_header_mutation();
+
+-- [feature-spec-1.1.C.md §2.2 / §6.2 / decision #8] Issue: number, due_date,
+-- invoice_type — NO journal posting in this pass (Batch 2 wires §7).
+create or replace function issue_invoice(
+  p_invoice_id uuid,
+  p_invoice_type_override invoice_type default null
+)
+returns invoices
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  v_invoice invoices%rowtype;
+  v_customer_trn text;
+  v_auto_type invoice_type;
+  v_final_type invoice_type;
+  v_due_date date;
+  v_number text;
+begin
+  select * into v_invoice from invoices where id = p_invoice_id for update;
+  if not found then
+    raise exception 'INVOICE_NOT_FOUND';
+  end if;
+
+  if v_invoice.status <> 'draft' then
+    raise exception 'INVOICE_NOT_DRAFT';
+  end if;
+
+  if not exists (select 1 from invoice_lines where invoice_id = p_invoice_id) then
+    raise exception 'INVOICE_REQUIRES_LINES';
+  end if;
+
+  select trn into v_customer_trn from customers where id = v_invoice.customer_id;
+
+  if v_customer_trn is null or btrim(v_customer_trn) = '' then
+    v_auto_type := 'simplified_tax_invoice';
+  elsif v_invoice.grand_total > 10000 then
+    v_auto_type := 'tax_invoice';
+  else
+    v_auto_type := 'simplified_tax_invoice';
+  end if;
+
+  if p_invoice_type_override is not null then
+    if p_invoice_type_override = 'simplified_tax_invoice'
+       and v_auto_type = 'tax_invoice' then
+      raise exception 'INVOICE_TYPE_OVERRIDE_NOT_PERMITTED';
+    end if;
+    if p_invoice_type_override = 'tax_invoice' then
+      v_final_type := 'tax_invoice';
+    else
+      v_final_type := v_auto_type;
+    end if;
+  else
+    v_final_type := v_auto_type;
+  end if;
+
+  v_due_date := case v_invoice.payment_terms
+    when 'net_7' then v_invoice.invoice_date + 7
+    when 'net_15' then v_invoice.invoice_date + 15
+    when 'net_30' then v_invoice.invoice_date + 30
+    when 'net_60' then v_invoice.invoice_date + 60
+    when 'custom' then v_invoice.invoice_date + v_invoice.custom_days
+    when 'cod' then v_invoice.invoice_date
+  end;
+
+  v_number := allocate_next_invoice_number(v_invoice.company_id, v_invoice.invoice_date);
+
+  update invoices
+     set status = 'issued',
+         invoice_number = v_number,
+         invoice_type = v_final_type,
+         due_date = v_due_date,
+         updated_at = now()
+   where id = p_invoice_id
+  returning * into v_invoice;
+
+  -- journal_entry_id intentionally left null — Batch 2 §7 ledger posting.
+  return v_invoice;
+end;
+$$;
+
+revoke all on function issue_invoice(uuid, invoice_type) from public;
+revoke all on function issue_invoice(uuid, invoice_type) from authenticated;
+revoke all on function issue_invoice(uuid, invoice_type) from anon;
+grant execute on function issue_invoice(uuid, invoice_type) to service_role;
+
+revoke all on function suggest_invoice_line_income_account() from public;
+revoke all on function suggest_invoice_line_income_account() from authenticated;
+revoke all on function suggest_invoice_line_income_account() from anon;
+grant execute on function suggest_invoice_line_income_account() to service_role;
+
+revoke all on function set_invoice_line_computed_fields() from public;
+revoke all on function set_invoice_line_computed_fields() from authenticated;
+revoke all on function set_invoice_line_computed_fields() from anon;
+grant execute on function set_invoice_line_computed_fields() to service_role;
+
+revoke all on function recalculate_invoice_totals(uuid) from public;
+revoke all on function recalculate_invoice_totals(uuid) from authenticated;
+revoke all on function recalculate_invoice_totals(uuid) from anon;
+grant execute on function recalculate_invoice_totals(uuid) to service_role;
+
+revoke all on function refresh_invoice_totals_from_lines() from public;
+revoke all on function refresh_invoice_totals_from_lines() from authenticated;
+revoke all on function refresh_invoice_totals_from_lines() from anon;
+grant execute on function refresh_invoice_totals_from_lines() to service_role;
+
+revoke all on function prevent_nondraft_invoice_line_mutation() from public;
+revoke all on function prevent_nondraft_invoice_line_mutation() from authenticated;
+revoke all on function prevent_nondraft_invoice_line_mutation() from anon;
+grant execute on function prevent_nondraft_invoice_line_mutation() to service_role;
+
+revoke all on function prevent_invoice_computed_totals_mutation() from public;
+revoke all on function prevent_invoice_computed_totals_mutation() from authenticated;
+revoke all on function prevent_invoice_computed_totals_mutation() from anon;
+grant execute on function prevent_invoice_computed_totals_mutation() to service_role;
+
+revoke all on function prevent_nondraft_invoice_header_mutation() from public;
+revoke all on function prevent_nondraft_invoice_header_mutation() from authenticated;
+revoke all on function prevent_nondraft_invoice_header_mutation() from anon;
+grant execute on function prevent_nondraft_invoice_header_mutation() to service_role;
+
 -- [feature-spec.md decision #48 / §7.16 finding #7] §5.1 EXECUTE-revoke checklist
 -- on trigger helpers (hygiene — not PostgREST RPCs; triggers fire via engine).
 -- Empirical proof: scripts/trigger-execute-empirical-test.mjs (PGlite).
@@ -687,6 +1622,11 @@ alter table recurring_journal_templates enable row level security;
 alter table recurring_journal_template_lines enable row level security;
 alter table audit_log enable row level security;
 alter table company_settings enable row level security;
+alter table customers enable row level security;
+alter table quotations enable row level security;
+alter table quotation_lines enable row level security;
+alter table invoices enable row level security;
+alter table invoice_lines enable row level security;
 
 create policy company_isolation_accounts on accounts
   using (company_id = (select current_setting('app.current_company_id', true))::uuid);
@@ -705,6 +1645,31 @@ create policy company_isolation_audit_log on audit_log
 
 create policy company_isolation_settings on company_settings
   using (company_id = (select current_setting('app.current_company_id', true))::uuid);
+
+create policy company_isolation_customers on customers
+  using (company_id = (select current_setting('app.current_company_id', true))::uuid);
+
+create policy company_isolation_quotations on quotations
+  using (company_id = (select current_setting('app.current_company_id', true))::uuid);
+
+create policy company_isolation_quotation_lines on quotation_lines
+  using (
+    quotation_id in (
+      select id from quotations
+      where company_id = (select current_setting('app.current_company_id', true))::uuid
+    )
+  );
+
+create policy company_isolation_invoices on invoices
+  using (company_id = (select current_setting('app.current_company_id', true))::uuid);
+
+create policy company_isolation_invoice_lines on invoice_lines
+  using (
+    invoice_id in (
+      select id from invoices
+      where company_id = (select current_setting('app.current_company_id', true))::uuid
+    )
+  );
 
 -- journal_lines and template_lines inherit isolation via their parent entry/template
 create policy company_isolation_journal_lines on journal_lines

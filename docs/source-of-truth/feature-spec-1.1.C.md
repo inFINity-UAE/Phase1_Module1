@@ -12,7 +12,7 @@ from a numbered, dated decision there. Section 10 lists genuinely open
 items still to be resolved before or during build — everything else in
 this document is settled, not provisional.
 
-**Scope for this pass (C1):** quotations, tax invoices, credit notes, and
+**Scope for this pass (C1):** quotations (**C1-2**), tax invoices (**C1-3**), credit notes, and
 their ledger integration. Everything else from the source feature list's
 section C is explicitly out of scope — see §9.
 
@@ -40,6 +40,17 @@ index, same shape as `accounts(company_id, account_number)`. Two
 customer records sharing a TRN within one company would represent the
 same legal entity recorded twice. *(Decision #1)*
 
+`trn` is set at creation only — not patchable afterward. Changing a
+customer's TRN after documents exist would effectively re-identify the
+legal entity; immutability matches decision #1's intent and avoids silent
+invoice-type drift (§6.2). To correct a wrong TRN: deactivate this
+record and create a new one. *(Decision #17)*
+
+`is_active = false` is a soft deactivate (`PATCH …/deactivate`), not a
+hard delete. Future quotation/invoice modules must reject **new**
+documents referencing inactive customers; existing quotations/invoices
+are never retroactively altered. *(Decision #1 implementation note)*
+
 `customers.trn` is a functional field, not just contact metadata — its
 presence or absence directly drives invoice-type selection (§6.2).
 
@@ -64,12 +75,19 @@ XOR-style pattern `journal_lines` already uses for debit/credit.
 *(Decision #2)*
 
 `subtotal`/`vat_total`/`grand_total` are DB-computed from the current
-line items via trigger whenever `status = 'draft'`, never client-set —
+line items via `recalculate_quotation_totals` (AFTER INSERT/UPDATE/DELETE
+on `quotation_lines` while parent `status = 'draft'`), never client-set —
 consistent with Module 1.1.A decision #10's "never trust client input
-for what the backend can derive." Once non-draft, the header (and its
-now-final totals) locks via the same mechanism
-`trg_prevent_nondraft_header_mutation` uses for journal entries
-(Module 1.1.A decision #38) — same pattern, new object. *(Decision #3)*
+for what the backend can derive." The header UPDATE does not re-fire
+line triggers (no recursion): `quotations` has no AFTER trigger on
+`quotation_lines`, and the only quotation-line triggers are BEFORE
+(`prevent_nondraft_*`, `set_quotation_line_computed_fields`) plus this
+single AFTER refresh — verified by `integration_verify_quotation_recalc_fires_once`
+(same-transaction trace: one line UPDATE → one AFTER fire → one recalc).
+Once non-draft, the header (and its now-final totals) locks via
+`prevent_nondraft_quotation_header_mutation` and
+`prevent_quotation_computed_totals_mutation` (session GUC allows only
+the recalc trigger to write totals). *(Decision #3)*
 
 ### 1.3 `invoices` + `invoice_lines`
 
@@ -151,13 +169,13 @@ left as a dangling, uncorrected ledger entry.
 
 ## 3. Numbering
 
-Numbering is allocated on the `Draft → Issued` transition, not at Draft
-creation — confirmed against FTA-compliance guidance (a number is
-assigned at issuance, not the draft stage) and matching the exact
-pattern Module 1.1.A already uses for `entry_number`
-(`allocate_next_entry_number`). This makes the sequence gap-free by
-construction for anything never issued; `Void` (§2.2) is the documented
-exception for a number that was issued and then cancelled.
+Numbering is allocated on the `Draft → Issued` transition for **invoices**
+(not at draft creation) — confirmed against FTA-compliance guidance and
+matching Module 1.1.A's `entry_number` pattern (`allocate_next_entry_number`).
+**Quotations** are different: `quotation_number` is allocated at row
+creation (BEFORE INSERT trigger), not deferred to Sent or any later
+transition — a quotation is a customer-facing document from first save.
+*(Decision #16)*
 
 Two RPCs, `allocate_next_quotation_number(company_id)` and
 `allocate_next_invoice_number(company_id)`, follow the same
@@ -285,7 +303,9 @@ deferred items.
 | Gap | Status | Detail |
 |---|---|---|
 | Product/service catalog default income-account mapping | **Deferred** | §1.3's VAT-rate suggestion is a per-line default; a catalog-driven default (a specific product always maps to a specific account) needs its own entity, not yet scoped |
-| Discount CHECK constraint exact wording | **Open, minor** | §1.2 states the intent (mutually exclusive); exact SQL needs to also handle the "neither set" case cleanly during implementation |
+| Discount CHECK constraint exact wording | **Closed** | §1.2 CHECK: percent XOR amount, or neither — implemented on `quotation_lines` |
+| Invoice ledger posting at Issue (§7) | **Deferred — Batch 2** | C1-3 Issue allocates number, due_date, invoice_type only; `journal_entry_id` stays null; `create_invoice_journal_entry` not wired |
+| Void auto-reversal of journal entry (§2.2) | **Deferred — Batch 2** | C1-3 records `void_reason` + status only; reversal call blocked until posting exists — no stub against null `journal_entry_id` |
 
 ---
 
@@ -295,16 +315,18 @@ deferred items.
 |---|------|---------|-----------|
 | 1 | 2026-08-30 | `customers` unique on `(company_id, trn)` where `trn` not null | §1.1 |
 | 2 | 2026-08-30 | Discount stored as percent XOR amount, mutually exclusive CHECK | §1.2 |
-| 3 | 2026-08-30 | Totals DB-computed while draft, locked on non-draft (extends to invoices) | §1.2, §1.3 |
-| 4 | 2026-08-30 | VAT rate auto-suggests income account per finalized COA's existing segmentation | §1.3 |
+| 3 | 2026-08-30 | Totals DB-computed while draft, locked on non-draft (**extended to invoices — C1-3**) | §1.2, §1.3 |
+| 4 | 2026-08-30 | VAT rate auto-suggests income account per finalized COA's existing segmentation (**+ `is_service` on invoice_lines — C1-3**) | §1.3 |
 | 5 | 2026-08-30 | Credit notes support line-level linkage; DB-enforced cumulative credit cap | §1.4 |
 | 6 | 2026-08-30 | Quotation status lifecycle, `Expired` scheduled | §2.1 |
-| 7 | 2026-08-30 | Invoice status lifecycle adds `Issued` and `Void`; void requires reason, auto-reverses journal entry | §2.2 |
-| 8 | 2026-08-30 | Numbering allocated at Issue, not Draft; `quo:`/`inv:` advisory-lock namespaces | §3 |
+| 7 | 2026-08-30 | Invoice status lifecycle adds `Issued` and `Void`; void requires reason (**journal auto-reversal deferred Batch 2 — C1-3**) | §2.2 |
+| 8 | 2026-08-30 | Numbering allocated at Issue (invoices), at INSERT (quotations #16); `quo:`/`inv:` locks (**C1-3 invoices**) | §3 |
 | 9 | 2026-08-30 | Quotation-to-invoice conversion lands in Draft, never auto-Issued | §4 |
-| 10 | 2026-08-30 | Payment terms enum; `due_date` server-derived | §5 |
-| 11 | 2026-08-30 | Tax invoice vs. simplified: two-branch (TRN presence + AED 10,000 VAT-inclusive threshold), per FTA Art. 59(5) | §6.2 |
-| 12 | 2026-08-30 | Invoice posting: AR (1100) / income / discounts (4060) / VAT Payable (2200), existing COA accounts, no new control accounts needed | §7 |
+| 10 | 2026-08-30 | Payment terms enum; `due_date` server-derived at Issue (**C1-3**) | §5 |
+| 11 | 2026-08-30 | Tax invoice vs. simplified: two-branch (TRN + AED 10,000 VAT-inclusive threshold), FTA Art. 59(5) (**C1-3**) | §6.2 |
+| 12 | 2026-08-30 | Invoice posting: AR (1100) / income / discounts (4060) / VAT Payable (2200) (**deferred Batch 2 — C1-3 scope boundary**) | §7 |
 | 13 | 2026-08-30 | `journal_entry_type` extended with `sales_invoice`, `credit_note` | §7 |
 | 14 | 2026-08-30 | Credit notes use a dedicated posting path, not `reverse_journal_entry` | §7 |
 | 15 | 2026-08-30 | Expired/Overdue reuse Module 1.1.A's #62–#63 scheduler, confirmed live and race-safe before adoption | §8 |
+| 16 | 2026-08-31 | `quotation_number` allocated at quotation INSERT (BEFORE INSERT → `allocate_next_quotation_number` / `quo:` lock), not deferred to Sent or later — distinct from invoice numbering at Issue (#8) | §3, §1.2 |
+| 17 | 2026-08-31 | `customers.trn` immutable after create — set on POST only; wrong TRN → deactivate + new customer; avoids duplicate-legal-entity ambiguity (#1) and invoice-type drift (§6.2) | §1.1 |

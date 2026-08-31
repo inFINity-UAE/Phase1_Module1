@@ -19,7 +19,7 @@ repeated inline.
 |---|---|---|
 | Hard-close / reopen HTTP; close checklist (Rules §1.22) | **Stub** | Schema columns reserved; not gaps |
 
-All §7.16 / §7.26 audit findings are closed (#41–#48, #51–#54). Auth: 42/42 routes guarded (#41, #53, #56 + H1 reports incl. GL). `--runInBand` is **not** required (#37). System-account UPDATE DB backstop closed (#58). Integrity sweep #59: no open product defects; hard-close/reopen remains the only stub. `v_trial_balance` status-filter live bug closed (#60). Year-end P&L aggregation uses `is_ledger_truth_status` (#61) — lockstep with H1 reports. Recurring templates: unattended daily Nest `@Cron` (#62); concurrent due-generation race closed via `rjt:` advisory-lock RPC (#63).
+All §7.16 / §7.26 audit findings are closed (#41–#48, #51–#54). Auth: **72/72** routes guarded across 13 controllers (#41, #53, #56 + H1 reports + Module 1.1.C customers/quotations/invoices). `--runInBand` is **not** required (#37). System-account UPDATE DB backstop closed (#58). Integrity sweep #59 closed its scope; hard-close/reopen remains the only stub. `v_trial_balance` status-filter live bug closed (#60). Year-end P&L aggregation uses `is_ledger_truth_status` (#61); Nest fiscal-year P&L read aligned via `get_profit_and_loss` RPC (#64). Recurring templates: unattended daily Nest `@Cron` (#62); concurrent due-generation race closed via `rjt:` advisory-lock RPC (#63). Module 1.1.C: customers (#C1-1) + quotations (#C1-2) + invoices (#C1-3) landed.
 
 **Fresh DB setup:** run `schema.sql` top-to-bottom (includes §12 table grants — no separate apply scripts).
 
@@ -245,7 +245,10 @@ P&L balances closed into account **3100** are aggregated from
 (`posted` ∪ `reversed`) and belong to periods of that fiscal year —
 same predicate as H1 reporting / `v_trial_balance` (#60 / #61). Signed
 balances use `account_signed_balance` (lockstep with
-`get_profit_and_loss`).
+`get_profit_and_loss`). Nest fiscal-year P&L verification reads
+(`getProfitAndLossBalancesForFiscalYear`) delegate to that same RPC for
+the fiscal year's date bounds — no independent Nest status filter
+(#64).
 
 ### 4.5 Period create / list / update (#30)
 
@@ -743,24 +746,27 @@ to keep applying to any future fixed-company test setup.)*
 
 ### 7.2 Verification baseline
 
-**Current (2026-08-30, post-#63 recurring due-generation concurrency):**
+**Current (2026-08-31, post–Module 1.1.C C1-3 invoices) — recount, not incremental drift:**
 
 | Check | Result |
 |---|---|
 | npm run build | Pass |
-| Full suite | **~42 suites** (was ~41 after #62; +recurring concurrency integration) |
+| Full suite | **48 suites** / **495 tests** — **495/495 pass** after C1-3 (`npx jest`, 2026-08-31) |
 | COA verify | node scripts/verify-reset-health.mjs — **7/7** on demo …0002 |
-| Auth regression | **42/42** routes (controller-auth-coverage.spec.ts; H1 TB/BS/P&L/GL) |
+| Auth regression | **72/72** routes (`controller-auth-coverage.spec.ts`; 13 controllers incl. customers + quotations + invoices) |
 | Fresh DB setup | schema.sql top-to-bottom + seed_finalized_coa_demo_company_0002.sql |
 | Excel TC1–TC14 | **14 PASS / 0 PARTIAL / 0 FAIL** (incl. #55/#56/#57 deltas) |
 | `v_trial_balance` | `security_invoker=true` confirmed live; status filter uses `is_ledger_truth_status` (#60) |
 | Recurring schedule | Nest `@Cron` EVERY_DAY_AT_1AM → `runDueGenerations` per company (#62); due claim via `generate_due_recurring_entry` / `rjt:` (#63) |
+| Module 1.1.C | customers C1-1 + quotations C1-2 + invoices C1-3 (see feature-spec-1.1.C.md) |
+| Nest ledger-truth audit | #64 — grep of Nest `posted`-only filters: one bug fixed (`getProfitAndLossBalancesForFiscalYear`); remaining hits classified (period-edit guard, test counters — not aggregation) |
 
-Corrected 30/314 (2026-08-28, post-#54) → 33/333 after #55–#58 → **34/339** after #59
-→ **39 suites** after H1 reports + #60 → **+2** scheduler suites (#62) → **+1**
-recurring concurrency suite (#63).
-Auth **38 → 42** with H1 report routes. Older decision-log entries (#26–#49)
-record suite counts *at decision time*.
+**§7.2 drift correction:** The post-#63 row still said **42/42** auth and **~42 suites** — that was already stale *before* C1-1/C1-2 (H1-era **42** routes never picked up **+5** customers or **+12** quotations). Authoritative recount above supersedes all prior §7.2 suite/auth totals; do not increment from the old 42 baseline.
+
+Historical test-count chain (decision-time snapshots, not maintained incrementally):
+30/314 (2026-08-28, post-#54) → 33/333 (#55–#58) → **34/339** (#59) → **39 suites** (H1 + #60) → **+2** scheduler (#62) → **+1** recurring concurrency (#63) → **+2** customers (#C1-1) → **+1** quotations (#C1-2) → **+1** invoices (#C1-3) = **48 suites** verified 2026-08-31.
+Auth: **38 → 42** (H1 report routes, 2026-08-29) → **47** (+5 customers, C1-1) → **59** (+12 quotations, C1-2) → **72** (+13 invoices, C1-3).
+Older decision-log entries (#26–#49) record suite counts *at decision time* only.
 
 ### 7.3 Gap audit closure index
 
@@ -849,3 +855,4 @@ topical section referenced.
 | 61 | 2026-08-30 | `create_year_end_closing_entry` P&L aggregation switched from `status = 'posted'` to `is_ledger_truth_status` (posted ∪ reversed) + `account_signed_balance`, lockstep with H1 P&L; posted-only dropped reversed originals while keeping reversing entries and transferred the wrong amount to 3100 (found by H1-5 cross-report sweep) | §6, §4.4 |
 | 62 | 2026-08-30 | Recurring templates: add Nest `@nestjs/schedule` daily `@Cron` (`RecurringJournalSchedulerService`, 01:00 UTC) iterating every company with ≥1 active template via existing `runDueGenerations`; per-company failure isolation + run summary logs; manual `POST …/run-due` and `…/generate` unchanged. Concurrent scheduled+manual race left open in this pass (closed by #63). Closes the “no unattended scheduler” gap vs §3’s prior overstated reading | §3, §4.1, §7.2 |
 | 63 | 2026-08-30 | Recurring due generation: `generate_due_recurring_entry` SECURITY DEFINER RPC with `pg_advisory_xact_lock(hashtext('rjt:' \|\| template_id))` — re-reads `next_run_date` under lock, skips if already claimed, inserts draft via `insert_journal_entry_draft`, advances schedule in the same transaction. Cron (#62) and manual run-due/generate share the RPC; Nest `#52` post unchanged (balance-delete reverts schedule). Concurrent same-template / cron-vs-manual → one entry; different templates do not serialize. Follows #20 `ob:`/`ye:` pattern | §3, §4.1, §6, §7.2 |
+| 64 | 2026-08-31 | Nest `getProfitAndLossBalancesForFiscalYear` still used hand-rolled `status = posted` aggregation after #61 moved year-end close + H1 to `is_ledger_truth_status`; broke Stage 11 E2E (`plAfterClose` phantom −4,000 after reversal). Fix: delegate to `get_profit_and_loss` RPC for fiscal-year date bounds — no fifth Nest copy of ledger-truth rules. TS Nest grep audit (same discipline as post-#61 SQL sweep): only other `posted`-only hits are `hasPostedJournalActivity` (period header-edit guard, §4.5 — correct) and Excel TC8 recurring entry counter (not ledger aggregation) | §4.4, §7.2 |

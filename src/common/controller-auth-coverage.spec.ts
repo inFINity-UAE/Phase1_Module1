@@ -3,6 +3,14 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { AddressInfo } from 'net';
 import { AccountsController } from '../accounts/accounts.controller';
 import { AccountsService } from '../accounts/accounts.service';
+import { CustomersController } from '../customers/customers.controller';
+import { CustomersService } from '../customers/customers.service';
+import { QuotationsController } from '../quotations/quotations.controller';
+import { QuotationLinesController } from '../quotations/quotation-lines.controller';
+import { QuotationsService } from '../quotations/quotations.service';
+import { InvoicesController } from '../invoices/invoices.controller';
+import { InvoiceLinesController } from '../invoices/invoice-lines.controller';
+import { InvoicesService } from '../invoices/invoices.service';
 import { AccountingPeriodsController } from '../accounting-periods/accounting-periods.controller';
 import { AccountingPeriodsService } from '../accounting-periods/accounting-periods.service';
 import { AuditLogController } from '../audit-log/audit-log.controller';
@@ -27,7 +35,7 @@ import { ReportsService } from '../reports/reports.service';
  * [feature-spec.md decisions #24/#27/#41; feature-spec-1.1.H1.md #1]
  * Controllers reject unauthenticated requests (401) and succeed for a
  * verified Bearer session with membership. Regression list covers all
- * 42 guarded HTTP routes across 8 controllers.
+ * 72 guarded HTTP routes across 13 controllers.
  */
 describe('Controller auth coverage (decision #24)', () => {
   let app: INestApplication;
@@ -44,6 +52,11 @@ describe('Controller auth coverage (decision #24)', () => {
   const templateId = 'dddddddd-dddd-dddd-dddd-dddddddddddd';
   const templateLineId = 'eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee';
   const journalLineId = 'ffffffff-ffff-ffff-ffff-ffffffffffff';
+  const customerId = '11111111-1111-1111-1111-111111111111';
+  const quotationId = '12121212-1212-1212-1212-121212121212';
+  const quotationLineId = '13131313-1313-1313-1313-131313131313';
+  const invoiceId = '14141414-1414-1414-1414-141414141414';
+  const invoiceLineId = '15151515-1515-1515-1515-151515151515';
 
   const journalEntryDetails = {
     entry: { id: entryId, company_id: companyId },
@@ -86,6 +99,81 @@ describe('Controller auth coverage (decision #24)', () => {
     { method: 'PATCH', path: `/accounts/${accountId}`, body: { account_name: 'Renamed' } },
     { method: 'DELETE', path: `/accounts/${accountId}` },
     { method: 'GET', path: `/accounts/${accountId}/trial-balance` },
+    {
+      method: 'POST',
+      path: '/customers',
+      body: {
+        company_id: companyId,
+        customer_name: 'Auth coverage customer',
+      },
+    },
+    { method: 'GET', path: `/customers?company_id=${companyId}` },
+    { method: 'GET', path: `/customers/${customerId}` },
+    { method: 'PATCH', path: `/customers/${customerId}`, body: { customer_name: 'Renamed' } },
+    { method: 'PATCH', path: `/customers/${customerId}/deactivate` },
+    {
+      method: 'POST',
+      path: '/quotations',
+      body: {
+        company_id: companyId,
+        customer_id: customerId,
+        quotation_date: '2026-03-01',
+      },
+    },
+    { method: 'GET', path: `/quotations?company_id=${companyId}` },
+    { method: 'GET', path: `/quotations/${quotationId}` },
+    { method: 'PATCH', path: `/quotations/${quotationId}`, body: { notes: 'x' } },
+    { method: 'DELETE', path: `/quotations/${quotationId}` },
+    { method: 'POST', path: `/quotations/${quotationId}/send` },
+    { method: 'POST', path: `/quotations/${quotationId}/mark-viewed` },
+    { method: 'POST', path: `/quotations/${quotationId}/accept` },
+    { method: 'POST', path: `/quotations/${quotationId}/decline` },
+    {
+      method: 'POST',
+      path: '/quotation-lines',
+      body: {
+        quotation_id: quotationId,
+        line_number: 1,
+        description: 'Line',
+        quantity: 1,
+        unit_price: 10,
+        vat_rate: 5,
+      },
+    },
+    { method: 'PATCH', path: `/quotation-lines/${quotationLineId}`, body: { quantity: 2 } },
+    { method: 'DELETE', path: `/quotation-lines/${quotationLineId}` },
+    {
+      method: 'POST',
+      path: '/invoices',
+      body: {
+        company_id: companyId,
+        customer_id: customerId,
+        invoice_date: '2026-06-01',
+      },
+    },
+    { method: 'GET', path: `/invoices?company_id=${companyId}` },
+    { method: 'GET', path: `/invoices/${invoiceId}` },
+    { method: 'PATCH', path: `/invoices/${invoiceId}`, body: { payment_terms: 'net_30' } },
+    { method: 'DELETE', path: `/invoices/${invoiceId}` },
+    { method: 'POST', path: `/invoices/${invoiceId}/issue`, body: {} },
+    { method: 'POST', path: `/invoices/${invoiceId}/void`, body: { void_reason: 'Auth probe' } },
+    { method: 'POST', path: `/invoices/${invoiceId}/send` },
+    { method: 'POST', path: `/invoices/${invoiceId}/mark-viewed` },
+    { method: 'POST', path: `/invoices/${invoiceId}/write-off` },
+    {
+      method: 'POST',
+      path: '/invoice-lines',
+      body: {
+        invoice_id: invoiceId,
+        line_number: 1,
+        description: 'Line',
+        quantity: 1,
+        unit_price: 10,
+        vat_rate: 5,
+      },
+    },
+    { method: 'PATCH', path: `/invoice-lines/${invoiceLineId}`, body: { quantity: 2 } },
+    { method: 'DELETE', path: `/invoice-lines/${invoiceLineId}` },
     {
       method: 'POST',
       path: '/accounting-periods',
@@ -215,6 +303,50 @@ describe('Controller auth coverage (decision #24)', () => {
       }),
     };
 
+    const customersService = {
+      findAll: jest.fn().mockResolvedValue([]),
+      findOne: jest.fn().mockResolvedValue({ id: customerId }),
+      create: jest.fn().mockResolvedValue({ id: customerId }),
+      update: jest.fn().mockResolvedValue({ id: customerId }),
+      deactivate: jest.fn().mockResolvedValue({ id: customerId, is_active: false }),
+    };
+
+    const quotationsService = {
+      create: jest.fn().mockResolvedValue({ quotation: { id: quotationId }, lines: [] }),
+      findAll: jest.fn().mockResolvedValue([]),
+      findOne: jest.fn().mockResolvedValue({ quotation: { id: quotationId }, lines: [] }),
+      update: jest.fn().mockResolvedValue({ quotation: { id: quotationId }, lines: [] }),
+      remove: jest.fn().mockResolvedValue(undefined),
+      send: jest.fn().mockResolvedValue({ quotation: { id: quotationId }, lines: [] }),
+      markViewed: jest.fn().mockResolvedValue({ quotation: { id: quotationId }, lines: [] }),
+      accept: jest.fn().mockResolvedValue({ quotation: { id: quotationId }, lines: [] }),
+      decline: jest.fn().mockResolvedValue({ quotation: { id: quotationId }, lines: [] }),
+      createLine: jest.fn().mockResolvedValue({ id: quotationLineId }),
+      updateLine: jest.fn().mockResolvedValue({ id: quotationLineId }),
+      deleteLine: jest.fn().mockResolvedValue(undefined),
+    };
+
+    const invoicesService = {
+      create: jest.fn().mockResolvedValue({ invoice: { id: invoiceId }, lines: [] }),
+      findAll: jest.fn().mockResolvedValue([]),
+      findOne: jest.fn().mockResolvedValue({ invoice: { id: invoiceId }, lines: [] }),
+      update: jest.fn().mockResolvedValue({ invoice: { id: invoiceId }, lines: [] }),
+      remove: jest.fn().mockResolvedValue(undefined),
+      issue: jest.fn().mockResolvedValue({
+        invoice: { id: invoiceId, journal_entry_id: null },
+        lines: [],
+        journal_entry_id: null,
+        ledger_posting_status: 'deferred_batch_2',
+      }),
+      void: jest.fn().mockResolvedValue({ invoice: { id: invoiceId }, lines: [] }),
+      send: jest.fn().mockResolvedValue({ invoice: { id: invoiceId }, lines: [] }),
+      markViewed: jest.fn().mockResolvedValue({ invoice: { id: invoiceId }, lines: [] }),
+      writeOff: jest.fn().mockResolvedValue({ invoice: { id: invoiceId }, lines: [] }),
+      createLine: jest.fn().mockResolvedValue({ id: invoiceLineId }),
+      updateLine: jest.fn().mockResolvedValue({ id: invoiceLineId }),
+      deleteLine: jest.fn().mockResolvedValue(undefined),
+    };
+
     const accountingPeriodsService = {
       create: jest.fn().mockResolvedValue({ id: periodId }),
       findAll: jest.fn().mockResolvedValue([]),
@@ -300,6 +432,11 @@ describe('Controller auth coverage (decision #24)', () => {
     const module: TestingModule = await Test.createTestingModule({
       controllers: [
         AccountsController,
+        CustomersController,
+        QuotationsController,
+        QuotationLinesController,
+        InvoicesController,
+        InvoiceLinesController,
         AccountingPeriodsController,
         JournalEntriesController,
         JournalLinesController,
@@ -312,6 +449,9 @@ describe('Controller auth coverage (decision #24)', () => {
         SupabaseAuthGuard,
         CompanyMembershipGuard,
         { provide: AccountsService, useValue: accountsService },
+        { provide: CustomersService, useValue: customersService },
+        { provide: QuotationsService, useValue: quotationsService },
+        { provide: InvoicesService, useValue: invoicesService },
         { provide: AccountingPeriodsService, useValue: accountingPeriodsService },
         { provide: JournalEntriesService, useValue: journalEntriesService },
         { provide: RecurringJournalTemplatesService, useValue: recurringService },
@@ -372,8 +512,8 @@ describe('Controller auth coverage (decision #24)', () => {
     return { status: response.status, body: await response.text() };
   }
 
-  it('covers all 42 guarded HTTP routes', () => {
-    expect(ALL_GUARDED_ROUTES).toHaveLength(42);
+  it('covers all 59 guarded HTTP routes', () => {
+    expect(ALL_GUARDED_ROUTES).toHaveLength(72);
   });
 
   it.each(ALL_GUARDED_ROUTES)(

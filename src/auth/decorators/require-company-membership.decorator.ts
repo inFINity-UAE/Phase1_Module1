@@ -15,12 +15,17 @@ export type CompanyMembershipSource =
         | 'account'
         | 'accounting_period'
         | 'recurring_template'
-        | 'recurring_template_line';
+        | 'recurring_template_line'
+        | 'customer'
+        | 'quotation'
+        | 'quotation_line'
+        | 'invoice'
+        | 'invoice_line';
       param?: string;
     }
   | {
       type: 'body_ref';
-      resource: 'journal_entry';
+      resource: 'journal_entry' | 'quotation' | 'invoice';
       field?: string;
     };
 

@@ -20,7 +20,6 @@ import { JournalEntryReversalResult } from './entities/journal-entry-reversal-re
 import { AccountTrialBalance } from './entities/account-trial-balance.entity';
 import { TrialBalanceTotals } from './entities/trial-balance-totals.entity';
 import { ProfitAndLossAccountBalance } from './entities/profit-and-loss-account-balance.entity';
-import { computeAccountBalance } from './year-end-closing.util';
 import {
   InsertGeneratedJournalEntryParams,
   GenerateDueRecurringEntryResult,
@@ -566,8 +565,9 @@ export class SupabaseJournalEntriesRepository implements JournalEntriesRepositor
   }
 
   /**
-   * Sum posted P&L activity for a fiscal year — [Rules §4.11].
-   * Balance-sheet accounts are excluded; only income and expense lines count.
+   * Fiscal-year P&L balances — [Rules §4.11 / feature-spec.md #64].
+   * Delegates to `get_profit_and_loss` RPC (is_ledger_truth_status lockstep
+   * with year-end close #61 and H1 reports) — no Nest-side status filter.
    */
   async getProfitAndLossBalancesForFiscalYear(
     companyId: string,
@@ -575,7 +575,7 @@ export class SupabaseJournalEntriesRepository implements JournalEntriesRepositor
   ): Promise<ProfitAndLossAccountBalance[]> {
     const { data: periods, error: periodError } = await this.supabase.client
       .from('accounting_periods')
-      .select('id')
+      .select('period_start, period_end')
       .eq('company_id', companyId)
       .eq('fiscal_year', fiscalYear);
 
@@ -583,87 +583,41 @@ export class SupabaseJournalEntriesRepository implements JournalEntriesRepositor
       throw periodError;
     }
 
-    const periodIds = (periods ?? []).map((period) => period.id);
-    if (!periodIds.length) {
+    if (!periods?.length) {
       return [];
     }
 
-    const { data: entries, error: entryError } = await this.supabase.client
-      .from('journal_entries')
-      .select('id')
-      .eq('company_id', companyId)
-      .eq('status', JournalEntryStatus.Posted)
-      .in('period_id', periodIds);
-
-    if (entryError) {
-      throw entryError;
-    }
-
-    const entryIds = (entries ?? []).map((entry) => entry.id);
-    if (!entryIds.length) {
-      return [];
-    }
-
-    const { data: lines, error: linesError } = await this.supabase.client
-      .from('journal_lines')
-      .select('account_id, debit, credit, accounts!inner(category, normal_balance)')
-      .in('journal_entry_id', entryIds);
-
-    if (linesError) {
-      throw linesError;
-    }
-
-    const aggregates = new Map<
-      string,
-      {
-        category: AccountCategory;
-        normal_balance: NormalBalance;
-        total_debit: number;
-        total_credit: number;
+    let periodStart = periods[0].period_start as string;
+    let periodEnd = periods[0].period_end as string;
+    for (const period of periods) {
+      const start = period.period_start as string;
+      const end = period.period_end as string;
+      if (start < periodStart) {
+        periodStart = start;
       }
-    >();
-
-    for (const line of lines ?? []) {
-      const accountRaw = line.accounts as unknown;
-      const account = (Array.isArray(accountRaw) ? accountRaw[0] : accountRaw) as {
-        category: AccountCategory;
-        normal_balance: NormalBalance;
-      } | null;
-
-      if (
-        !account ||
-        (account.category !== AccountCategory.Income &&
-          account.category !== AccountCategory.Expense)
-      ) {
-        continue;
+      if (end > periodEnd) {
+        periodEnd = end;
       }
-
-      const existing = aggregates.get(line.account_id) ?? {
-        category: account.category,
-        normal_balance: account.normal_balance,
-        total_debit: 0,
-        total_credit: 0,
-      };
-
-      existing.total_debit += Number(line.debit);
-      existing.total_credit += Number(line.credit);
-      aggregates.set(line.account_id, existing);
     }
 
-    return [...aggregates.entries()]
-      .map(([accountId, totals]) => ({
-        account_id: accountId,
-        category: totals.category,
-        normal_balance: totals.normal_balance,
-        total_debit: totals.total_debit,
-        total_credit: totals.total_credit,
-        balance: computeAccountBalance(
-          totals.normal_balance,
-          totals.total_debit,
-          totals.total_credit,
-        ),
-      }))
-      .filter((row) => row.balance !== 0);
+    const { data, error } = await this.supabase.client.rpc('get_profit_and_loss', {
+      p_company_id: companyId,
+      p_period_start: periodStart,
+      p_period_end: periodEnd,
+    });
+
+    if (error) {
+      throw error;
+    }
+
+    return ((data as Record<string, unknown>[]) ?? []).map((row) => ({
+      account_id: String(row.account_id),
+      category: row.category as AccountCategory,
+      normal_balance: row.normal_balance as NormalBalance,
+      total_debit: Number(row.total_debit),
+      total_credit: Number(row.total_credit),
+      balance: Number(row.balance),
+    }));
   }
 
   async createOpeningBalanceEntry(

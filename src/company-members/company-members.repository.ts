@@ -8,7 +8,12 @@ export type CompanyResourceKind =
   | 'account'
   | 'accounting_period'
   | 'recurring_template'
-  | 'recurring_template_line';
+  | 'recurring_template_line'
+  | 'customer'
+  | 'quotation'
+  | 'quotation_line'
+  | 'invoice'
+  | 'invoice_line';
 
 export interface CompanyMembersRepository {
   findRole(userId: string, companyId: string): Promise<CompanyRole | null>;
@@ -18,4 +23,9 @@ export interface CompanyMembersRepository {
   findCompanyIdByAccountingPeriodId(periodId: string): Promise<string | null>;
   findCompanyIdByRecurringTemplateId(templateId: string): Promise<string | null>;
   findCompanyIdByRecurringTemplateLineId(lineId: string): Promise<string | null>;
+  findCompanyIdByCustomerId(customerId: string): Promise<string | null>;
+  findCompanyIdByQuotationId(quotationId: string): Promise<string | null>;
+  findCompanyIdByQuotationLineId(lineId: string): Promise<string | null>;
+  findCompanyIdByInvoiceId(invoiceId: string): Promise<string | null>;
+  findCompanyIdByInvoiceLineId(lineId: string): Promise<string | null>;
 }
