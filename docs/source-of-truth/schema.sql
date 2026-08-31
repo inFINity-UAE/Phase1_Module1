@@ -1729,6 +1729,228 @@ revoke all on function create_year_end_closing_entry(uuid, integer, uuid, date, 
 grant execute on function create_year_end_closing_entry(uuid, integer, uuid, date, text) to service_role;
 
 -- ============================================================================
+-- 9c. RECURRING DUE GENERATION RPC (advisory lock + claim next_run_date)
+-- [feature-spec.md decision #63] Closes the TOCTOU race #62 flagged:
+-- findDueTemplates snapshot → insert → updateSchedule were separate
+-- transactions. Lock namespace `rjt:` + template_id (per-template; does not
+-- serialize different templates). Lock order: rjt: first, then nested
+-- allocate_next_entry_number company lock via insert_journal_entry_draft.
+-- ============================================================================
+
+-- Advance helper — lockstep with Nest advanceNextRunDate (recurring-run-date.util.ts).
+create or replace function advance_recurring_next_run_date(
+  p_current date,
+  p_frequency recurrence_frequency,
+  p_day_of_month smallint default null
+)
+returns date
+language plpgsql
+immutable
+security invoker
+set search_path = public, pg_temp
+as $$
+declare
+  v_next date;
+  v_day int;
+  v_last int;
+  v_y int;
+  v_m int;
+begin
+  if p_current is null then
+    raise exception 'CURRENT_RUN_DATE_REQUIRED';
+  end if;
+
+  case p_frequency
+    when 'daily' then
+      return p_current + 1;
+    when 'weekly' then
+      return p_current + 7;
+    when 'monthly' then
+      v_day := coalesce(p_day_of_month, extract(day from p_current)::int);
+      v_next := (date_trunc('month', p_current) + interval '1 month')::date;
+      v_y := extract(year from v_next)::int;
+      v_m := extract(month from v_next)::int;
+      v_last := extract(day from (date_trunc('month', v_next) + interval '1 month - 1 day')::date)::int;
+      return make_date(v_y, v_m, least(v_day, v_last));
+    when 'quarterly' then
+      return (p_current + interval '3 months')::date;
+    when 'annually' then
+      return (p_current + interval '1 year')::date;
+    else
+      raise exception 'UNKNOWN_RECURRENCE_FREQUENCY';
+  end case;
+end;
+$$;
+
+revoke all on function advance_recurring_next_run_date(date, recurrence_frequency, smallint) from public;
+revoke all on function advance_recurring_next_run_date(date, recurrence_frequency, smallint) from authenticated;
+revoke all on function advance_recurring_next_run_date(date, recurrence_frequency, smallint) from anon;
+grant execute on function advance_recurring_next_run_date(date, recurrence_frequency, smallint) to service_role;
+
+-- generate_due_recurring_entry
+-- Atomic: rjt: lock → re-read next_run_date → skip if not due → draft insert
+-- → advance schedule. Posting stays in Nest (#52).
+-- Exception tokens: TEMPLATE_NOT_FOUND; skip reasons returned in JSON
+-- (not raised) for TEMPLATE_NOT_DUE / inactive / no lines / no period.
+create or replace function generate_due_recurring_entry(
+  p_template_id uuid,
+  p_as_of_date date
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  v_template       recurring_journal_templates%rowtype;
+  v_period         accounting_periods%rowtype;
+  v_lines_json     jsonb;
+  v_draft          jsonb;
+  v_prev_next      date;
+  v_new_next       date;
+  v_still_active   boolean;
+begin
+  if p_template_id is null then
+    raise exception 'TEMPLATE_ID_REQUIRED';
+  end if;
+  if p_as_of_date is null then
+    raise exception 'AS_OF_DATE_REQUIRED';
+  end if;
+
+  -- [feature-spec.md decision #63 / #20] Namespace lock BEFORE nested allocator.
+  perform pg_advisory_xact_lock(hashtext('rjt:' || p_template_id::text));
+
+  select * into v_template
+    from recurring_journal_templates
+   where id = p_template_id;
+
+  if not found then
+    raise exception 'TEMPLATE_NOT_FOUND';
+  end if;
+
+  if not v_template.is_active then
+    return jsonb_build_object(
+      'skipped', true,
+      'skip_reason', 'TEMPLATE_INACTIVE',
+      'template_id', v_template.id,
+      'next_run_date', to_jsonb(v_template.next_run_date)
+    );
+  end if;
+
+  -- Re-read under lock: concurrent winner already advanced → skip.
+  if v_template.next_run_date > p_as_of_date then
+    return jsonb_build_object(
+      'skipped', true,
+      'skip_reason', 'TEMPLATE_NOT_DUE',
+      'template_id', v_template.id,
+      'next_run_date', to_jsonb(v_template.next_run_date)
+    );
+  end if;
+
+  if v_template.end_date is not null
+     and v_template.next_run_date > v_template.end_date then
+    return jsonb_build_object(
+      'skipped', true,
+      'skip_reason', 'TEMPLATE_PAST_END_DATE',
+      'template_id', v_template.id,
+      'next_run_date', to_jsonb(v_template.next_run_date)
+    );
+  end if;
+
+  select coalesce(
+    jsonb_agg(
+      jsonb_build_object(
+        'line_number', jl.line_number,
+        'account_id', jl.account_id,
+        'debit', jl.debit,
+        'credit', jl.credit,
+        'description', jl.description
+      )
+      order by jl.line_number
+    ),
+    '[]'::jsonb
+  )
+    into v_lines_json
+    from recurring_journal_template_lines jl
+   where jl.template_id = v_template.id;
+
+  if v_lines_json is null or jsonb_array_length(v_lines_json) = 0 then
+    return jsonb_build_object(
+      'skipped', true,
+      'skip_reason', 'TEMPLATE_HAS_NO_LINES',
+      'template_id', v_template.id,
+      'next_run_date', to_jsonb(v_template.next_run_date)
+    );
+  end if;
+
+  select * into v_period
+    from accounting_periods
+   where company_id = v_template.company_id
+     and status = 'open'
+     and period_start <= v_template.next_run_date
+     and period_end >= v_template.next_run_date
+   order by period_start
+   limit 1;
+
+  if not found then
+    return jsonb_build_object(
+      'skipped', true,
+      'skip_reason', 'NO_OPEN_PERIOD_FOR_RUN_DATE',
+      'template_id', v_template.id,
+      'next_run_date', to_jsonb(v_template.next_run_date)
+    );
+  end if;
+
+  v_prev_next := v_template.next_run_date;
+
+  v_draft := insert_journal_entry_draft(
+    v_template.company_id,
+    v_period.id,
+    v_template.next_run_date,
+    'recurring'::journal_entry_type,
+    v_template.narration_template,
+    v_template.created_by,
+    v_lines_json,
+    null,
+    v_template.id,
+    '[]'::jsonb
+  );
+
+  v_new_next := advance_recurring_next_run_date(
+    v_template.next_run_date,
+    v_template.frequency,
+    v_template.day_of_month
+  );
+  v_still_active := v_template.end_date is null or v_new_next <= v_template.end_date;
+
+  update recurring_journal_templates
+     set next_run_date = v_new_next,
+         is_active = v_still_active,
+         updated_at = now()
+   where id = v_template.id
+  returning * into v_template;
+
+  return jsonb_build_object(
+    'skipped', false,
+    'template_id', v_template.id,
+    'template_name', v_template.template_name,
+    'auto_post', v_template.auto_post,
+    'previous_next_run_date', to_jsonb(v_prev_next),
+    'next_run_date', to_jsonb(v_template.next_run_date),
+    'is_active', v_template.is_active,
+    'entry', v_draft->'entry',
+    'lines', v_draft->'lines',
+    'attachments', v_draft->'attachments'
+  );
+end;
+$$;
+
+revoke all on function generate_due_recurring_entry(uuid, date) from public;
+revoke all on function generate_due_recurring_entry(uuid, date) from authenticated;
+revoke all on function generate_due_recurring_entry(uuid, date) from anon;
+grant execute on function generate_due_recurring_entry(uuid, date) to service_role;
+
+-- ============================================================================
 -- 10. REVERSAL RPC — atomic reversal (draft -> lines -> post -> mark original)
 -- ============================================================================
 

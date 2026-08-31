@@ -9,7 +9,6 @@ import {
   handleDatabaseError,
   isPostgrestError,
 } from '../common/errors/database-error.mapper';
-import { RecurrenceFrequency } from '../common/enums/recurrence-frequency.enum';
 import { JournalEntryStatus } from '../common/enums/journal-entry-status.enum';
 import {
   formatUnbalancedPostError,
@@ -28,7 +27,6 @@ import { RecurringGenerationResult } from './entities/recurring-generation-resul
 import { RecurringJournalTemplate } from './entities/recurring-journal-template.entity';
 import { RecurringJournalTemplateLine } from './entities/recurring-journal-template-line.entity';
 import { RecurringJournalTemplateWithLines } from './entities/recurring-journal-template-with-lines.entity';
-import { advanceNextRunDate } from './recurring-run-date.util';
 import {
   RECURRING_JOURNAL_TEMPLATES_REPOSITORY,
   RecurringJournalTemplatesRepository,
@@ -140,6 +138,8 @@ export class RecurringJournalTemplatesService {
    * [feature-spec §4.1 decision #52] auto_post=true uses JournalEntriesService.post() —
    * it does not bypass approval thresholds or soft-close authorization.
    * [feature-spec.md decision #41] Scoped to one company_id — no cross-tenant batch.
+   * [feature-spec.md decision #63] Claim+insert+schedule advance is atomic in
+   * generate_due_recurring_entry (rjt: lock); Nest only orchestrates #52 post.
    */
   async runDueGenerations(
     companyId: string,
@@ -174,96 +174,39 @@ export class RecurringJournalTemplatesService {
     templateWithLines: RecurringJournalTemplateWithLines,
     runDate: string,
   ): Promise<RecurringGenerationResult> {
-    const { template, lines } = templateWithLines;
+    const { template } = templateWithLines;
 
-    if (!template.is_active) {
-      return {
-        template_id: template.id,
-        template_name: template.template_name,
-        journal_entry: null,
-        posted: false,
-        next_run_date: template.next_run_date,
-        error: `Template ${template.template_name} is not active`,
-      };
-    }
-
-    if (template.next_run_date > runDate) {
-      return {
-        template_id: template.id,
-        template_name: template.template_name,
-        journal_entry: null,
-        posted: false,
-        next_run_date: template.next_run_date,
-        error: `Template ${template.template_name} is not due until ${template.next_run_date}`,
-      };
-    }
-
-    if (template.end_date && template.next_run_date > template.end_date) {
-      return {
-        template_id: template.id,
-        template_name: template.template_name,
-        journal_entry: null,
-        posted: false,
-        next_run_date: template.next_run_date,
-        error: `Template ${template.template_name} has passed its end date`,
-      };
-    }
-
-    if (!lines.length) {
-      return {
-        template_id: template.id,
-        template_name: template.template_name,
-        journal_entry: null,
-        posted: false,
-        next_run_date: template.next_run_date,
-        error: `Template ${template.template_name} has no lines`,
-      };
-    }
-
-    const period = await this.templatesRepository.findOpenPeriodForDate(
-      template.company_id,
-      template.next_run_date,
-    );
-
-    if (!period) {
-      return {
-        template_id: template.id,
-        template_name: template.template_name,
-        journal_entry: null,
-        posted: false,
-        next_run_date: template.next_run_date,
-        error:
-          `No open accounting period found for run date ${template.next_run_date} — ` +
-          'generation skipped',
-      };
-    }
-
-    let generated;
-
+    let claim;
     try {
-      generated = await this.journalEntriesRepository.insertGeneratedFromTemplate({
-        company_id: template.company_id,
-        period_id: period.id,
-        entry_date: template.next_run_date,
-        narration: template.narration_template,
-        created_by: template.created_by,
-        recurring_template_id: template.id,
-        lines: lines.map((line) => ({
-          line_number: line.line_number,
-          account_id: line.account_id,
-          debit: line.debit,
-          credit: line.credit,
-          description: line.description,
-        })),
-      });
+      // [feature-spec.md decision #63] Single RPC: lock → re-check due → draft → advance.
+      claim = await this.journalEntriesRepository.generateDueRecurringEntry(
+        template.id,
+        runDate,
+      );
     } catch (error) {
       handleDatabaseError(error);
     }
 
+    if (claim.skipped) {
+      return {
+        template_id: template.id,
+        template_name: template.template_name,
+        journal_entry: null,
+        posted: false,
+        next_run_date: claim.next_run_date,
+        error: this.describeSkipReason(
+          claim.skip_reason,
+          template.template_name,
+          claim.next_run_date,
+        ),
+      };
+    }
+
+    let generated = claim.journal;
     let posted = false;
     let autoPostError: string | undefined;
 
-    if (template.auto_post) {
+    if (claim.auto_post) {
       try {
         // [feature-spec §4.1 decision #52] Same post/approval path as manual entries.
         generated = await this.journalEntriesService.post(
@@ -279,6 +222,12 @@ export class RecurringJournalTemplatesService {
       } catch (error) {
         if (this.isBalancePostFailure(error)) {
           await this.journalEntriesRepository.deleteEntry(generated.entry.id);
+          // RPC already advanced schedule — revert so the due cycle can retry.
+          await this.templatesRepository.updateSchedule(
+            template.id,
+            claim.previous_next_run_date,
+            true,
+          );
 
           const message =
             error instanceof BadRequestException &&
@@ -292,10 +241,10 @@ export class RecurringJournalTemplatesService {
 
           return {
             template_id: template.id,
-            template_name: template.template_name,
+            template_name: claim.template_name,
             journal_entry: null,
             posted: false,
-            next_run_date: template.next_run_date,
+            next_run_date: claim.previous_next_run_date,
             error: message,
           };
         }
@@ -307,13 +256,18 @@ export class RecurringJournalTemplatesService {
             generated;
         } else if (isPostgrestError(error)) {
           await this.journalEntriesRepository.deleteEntry(generated.entry.id);
+          await this.templatesRepository.updateSchedule(
+            template.id,
+            claim.previous_next_run_date,
+            true,
+          );
 
           return {
             template_id: template.id,
-            template_name: template.template_name,
+            template_name: claim.template_name,
             journal_entry: null,
             posted: false,
-            next_run_date: template.next_run_date,
+            next_run_date: claim.previous_next_run_date,
             error: error.message,
           };
         } else {
@@ -322,27 +276,38 @@ export class RecurringJournalTemplatesService {
       }
     }
 
-    const nextRunDate = advanceNextRunDate(
-      template.next_run_date,
-      template.frequency as RecurrenceFrequency,
-      template.day_of_month,
-    );
-    const stillActive = !template.end_date || nextRunDate <= template.end_date;
-
-    const updatedTemplate = await this.templatesRepository.updateSchedule(
-      template.id,
-      nextRunDate,
-      stillActive,
-    );
-
     return {
       template_id: template.id,
-      template_name: template.template_name,
+      template_name: claim.template_name,
       journal_entry: generated,
       posted,
-      next_run_date: updatedTemplate.next_run_date,
+      next_run_date: claim.next_run_date,
       error: autoPostError,
     };
+  }
+
+  private describeSkipReason(
+    reason: string,
+    templateName: string,
+    nextRunDate: string,
+  ): string {
+    switch (reason) {
+      case 'TEMPLATE_INACTIVE':
+        return `Template ${templateName} is not active`;
+      case 'TEMPLATE_NOT_DUE':
+        return `Template ${templateName} is not due until ${nextRunDate}`;
+      case 'TEMPLATE_PAST_END_DATE':
+        return `Template ${templateName} has passed its end date`;
+      case 'TEMPLATE_HAS_NO_LINES':
+        return `Template ${templateName} has no lines`;
+      case 'NO_OPEN_PERIOD_FOR_RUN_DATE':
+        return (
+          `No open accounting period found for run date ${nextRunDate} — ` +
+          'generation skipped'
+        );
+      default:
+        return reason;
+    }
   }
 
   /** [Rules §1.1] Balance rejection — discard generated draft and retry on next schedule run. */

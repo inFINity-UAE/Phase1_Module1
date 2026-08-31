@@ -3,7 +3,6 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { RecurrenceFrequency } from '../common/enums/recurrence-frequency.enum';
 import { JournalEntryStatus } from '../common/enums/journal-entry-status.enum';
 import { JournalEntryType } from '../common/enums/journal-entry-type.enum';
-import { PeriodStatus } from '../common/enums/period-status.enum';
 import {
   JOURNAL_ENTRIES_REPOSITORY,
   JournalEntriesRepository,
@@ -130,23 +129,6 @@ describe('RecurringJournalTemplatesService', () => {
   let journalRepository: jest.Mocked<JournalEntriesRepository>;
   let journalEntriesService: jest.Mocked<Pick<JournalEntriesService, 'post'>>;
 
-  const openPeriod = {
-    id: PERIOD_ID,
-    company_id: COMPANY_ID,
-    period_start: '2026-01-01',
-    period_end: '2026-01-31',
-    fiscal_year: 2026,
-    status: PeriodStatus.Open,
-    soft_closed_by: null,
-    soft_closed_at: null,
-    closed_by: null,
-    closed_at: null,
-    reopened_by: null,
-    reopened_at: null,
-    reopen_reason: null,
-    created_at: '2026-08-22T00:00:00.000Z',
-  };
-
   beforeEach(async () => {
     templatesRepository = {
       insert: jest.fn(),
@@ -158,6 +140,7 @@ describe('RecurringJournalTemplatesService', () => {
       updateLine: jest.fn(),
       deleteLine: jest.fn(),
       findDueTemplates: jest.fn(),
+      listCompanyIdsWithActiveTemplates: jest.fn(),
       findOpenPeriodForDate: jest.fn(),
       updateSchedule: jest.fn(),
     };
@@ -189,6 +172,7 @@ describe('RecurringJournalTemplatesService', () => {
       deleteLine: jest.fn(),
       getTrialBalanceTotals: jest.fn(),
       insertGeneratedFromTemplate: jest.fn(),
+      generateDueRecurringEntry: jest.fn(),
       getCompanySettings: jest.fn(),
       submitForApproval: jest.fn(),
       approveAndPostEntry: jest.fn(),
@@ -211,6 +195,23 @@ describe('RecurringJournalTemplatesService', () => {
     service = module.get(RecurringJournalTemplatesService);
   });
 
+  function claimOk(
+    journal: JournalEntryWithDetails,
+    autoPost: boolean,
+    nextRunDate = '2026-02-28',
+  ) {
+    return {
+      skipped: false as const,
+      template_id: TEMPLATE_ID,
+      template_name: 'Monthly rent accrual',
+      auto_post: autoPost,
+      previous_next_run_date: RUN_DATE,
+      next_run_date: nextRunDate,
+      is_active: true,
+      journal,
+    };
+  }
+
   it('a monthly template with auto_post=false generates a draft entry on its run date and does NOT post it', async () => {
     const template = templateWithLines(false);
     const draft = generatedEntry(JournalEntryStatus.Draft);
@@ -221,21 +222,22 @@ describe('RecurringJournalTemplatesService', () => {
     );
 
     templatesRepository.findByIdWithLines.mockResolvedValue(template);
-    templatesRepository.findOpenPeriodForDate.mockResolvedValue(openPeriod);
-    journalRepository.insertGeneratedFromTemplate.mockResolvedValue(draft);
-    templatesRepository.updateSchedule.mockResolvedValue({
-      ...template.template,
-      next_run_date: nextRunDate,
-    });
+    journalRepository.generateDueRecurringEntry.mockResolvedValue(
+      claimOk(draft, false, nextRunDate),
+    );
 
     const result = await service.generateTemplate(TEMPLATE_ID, RUN_DATE);
 
-    expect(journalRepository.insertGeneratedFromTemplate).toHaveBeenCalled();
+    expect(journalRepository.generateDueRecurringEntry).toHaveBeenCalledWith(
+      TEMPLATE_ID,
+      RUN_DATE,
+    );
     expect(journalEntriesService.post).not.toHaveBeenCalled();
     expect(journalRepository.postEntry).not.toHaveBeenCalled();
     expect(result.posted).toBe(false);
     expect(result.journal_entry?.entry.status).toBe(JournalEntryStatus.Draft);
     expect(result.journal_entry?.entry.recurring_template_id).toBe(TEMPLATE_ID);
+    expect(result.next_run_date).toBe(nextRunDate);
   });
 
   it('a monthly template with auto_post=true generates and posts an entry automatically', async () => {
@@ -249,13 +251,10 @@ describe('RecurringJournalTemplatesService', () => {
     );
 
     templatesRepository.findByIdWithLines.mockResolvedValue(template);
-    templatesRepository.findOpenPeriodForDate.mockResolvedValue(openPeriod);
-    journalRepository.insertGeneratedFromTemplate.mockResolvedValue(draft);
+    journalRepository.generateDueRecurringEntry.mockResolvedValue(
+      claimOk(draft, true, nextRunDate),
+    );
     journalEntriesService.post.mockResolvedValue(posted);
-    templatesRepository.updateSchedule.mockResolvedValue({
-      ...template.template,
-      next_run_date: nextRunDate,
-    });
 
     const result = await service.generateTemplate(TEMPLATE_ID, RUN_DATE);
 
@@ -273,20 +272,13 @@ describe('RecurringJournalTemplatesService', () => {
     const draft = generatedEntry(JournalEntryStatus.Draft);
 
     templatesRepository.findByIdWithLines.mockResolvedValue(template);
-    templatesRepository.findOpenPeriodForDate.mockResolvedValue(openPeriod);
-    journalRepository.insertGeneratedFromTemplate.mockResolvedValue(draft);
-    templatesRepository.updateSchedule.mockResolvedValue({
-      ...template.template,
-      next_run_date: '2026-02-28',
-    });
+    journalRepository.generateDueRecurringEntry.mockResolvedValue(
+      claimOk(draft, false, '2026-02-28'),
+    );
 
     const result = await service.generateTemplate(TEMPLATE_ID, RUN_DATE);
 
-    expect(templatesRepository.updateSchedule).toHaveBeenCalledWith(
-      TEMPLATE_ID,
-      '2026-02-28',
-      true,
-    );
+    expect(templatesRepository.updateSchedule).not.toHaveBeenCalled();
     expect(result.next_run_date).toBe('2026-02-28');
   });
 
@@ -297,14 +289,17 @@ describe('RecurringJournalTemplatesService', () => {
     draft.lines[1].credit = 500;
 
     templatesRepository.findByIdWithLines.mockResolvedValue(template);
-    templatesRepository.findOpenPeriodForDate.mockResolvedValue(openPeriod);
-    journalRepository.insertGeneratedFromTemplate.mockResolvedValue(draft);
+    journalRepository.generateDueRecurringEntry.mockResolvedValue(claimOk(draft, true));
     journalEntriesService.post.mockRejectedValue(
       new BadRequestException(
         formatUnbalancedPostError(draft.entry.entry_number, draft.lines),
       ),
     );
     journalRepository.deleteEntry.mockResolvedValue(undefined);
+    templatesRepository.updateSchedule.mockResolvedValue({
+      ...template.template,
+      next_run_date: RUN_DATE,
+    });
 
     const expectedMessage = formatUnbalancedPostError(
       draft.entry.entry_number,
@@ -314,7 +309,11 @@ describe('RecurringJournalTemplatesService', () => {
     const result = await service.generateTemplate(TEMPLATE_ID, RUN_DATE);
 
     expect(journalRepository.deleteEntry).toHaveBeenCalledWith(ENTRY_ID);
-    expect(templatesRepository.updateSchedule).not.toHaveBeenCalled();
+    expect(templatesRepository.updateSchedule).toHaveBeenCalledWith(
+      TEMPLATE_ID,
+      RUN_DATE,
+      true,
+    );
     expect(result.posted).toBe(false);
     expect(result.journal_entry).toBeNull();
     expect(result.error).toBe(expectedMessage);
@@ -339,23 +338,16 @@ describe('RecurringJournalTemplatesService', () => {
     );
 
     templatesRepository.findByIdWithLines.mockResolvedValue(template);
-    templatesRepository.findOpenPeriodForDate.mockResolvedValue(openPeriod);
-    journalRepository.insertGeneratedFromTemplate.mockResolvedValue(draft);
+    journalRepository.generateDueRecurringEntry.mockResolvedValue(
+      claimOk(draft, true, nextRunDate),
+    );
     journalEntriesService.post.mockResolvedValue(pending);
-    templatesRepository.updateSchedule.mockResolvedValue({
-      ...template.template,
-      next_run_date: nextRunDate,
-    });
 
     const result = await service.generateTemplate(TEMPLATE_ID, RUN_DATE);
 
     expect(journalEntriesService.post).toHaveBeenCalledWith(ENTRY_ID, USER_ID);
     expect(journalRepository.deleteEntry).not.toHaveBeenCalled();
-    expect(templatesRepository.updateSchedule).toHaveBeenCalledWith(
-      TEMPLATE_ID,
-      nextRunDate,
-      true,
-    );
+    expect(templatesRepository.updateSchedule).not.toHaveBeenCalled();
     expect(result.posted).toBe(false);
     expect(result.journal_entry?.entry.status).toBe(JournalEntryStatus.PendingApproval);
     expect(result.error).toMatch(/approval threshold/i);
@@ -372,23 +364,20 @@ describe('RecurringJournalTemplatesService', () => {
     );
 
     templatesRepository.findByIdWithLines.mockResolvedValue(template);
-    templatesRepository.findOpenPeriodForDate.mockResolvedValue(openPeriod);
-    journalRepository.insertGeneratedFromTemplate.mockResolvedValue(draft);
+    journalRepository.generateDueRecurringEntry.mockResolvedValue(
+      claimOk(draft, true, nextRunDate),
+    );
     journalEntriesService.post.mockRejectedValue(
       new BadRequestException(
         'Accounting period 2026-01-01 to 2026-01-31 is soft_closed — provide soft_closed_override_reason to post a correction',
       ),
     );
     journalRepository.findByIdWithDetails.mockResolvedValue(draft);
-    templatesRepository.updateSchedule.mockResolvedValue({
-      ...template.template,
-      next_run_date: nextRunDate,
-    });
 
     const result = await service.generateTemplate(TEMPLATE_ID, RUN_DATE);
 
     expect(journalRepository.deleteEntry).not.toHaveBeenCalled();
-    expect(templatesRepository.updateSchedule).toHaveBeenCalled();
+    expect(templatesRepository.updateSchedule).not.toHaveBeenCalled();
     expect(result.posted).toBe(false);
     expect(result.journal_entry?.entry.status).toBe(JournalEntryStatus.Draft);
     expect(result.error).toMatch(/soft_closed_override_reason/);
@@ -405,18 +394,15 @@ describe('RecurringJournalTemplatesService', () => {
     );
 
     templatesRepository.findByIdWithLines.mockResolvedValue(template);
-    templatesRepository.findOpenPeriodForDate.mockResolvedValue(openPeriod);
-    journalRepository.insertGeneratedFromTemplate.mockResolvedValue(draft);
+    journalRepository.generateDueRecurringEntry.mockResolvedValue(
+      claimOk(draft, true, nextRunDate),
+    );
     journalEntriesService.post.mockRejectedValue(
       new ForbiddenException(
         'Only an Owner may post into a soft-closed period with override',
       ),
     );
     journalRepository.findByIdWithDetails.mockResolvedValue(draft);
-    templatesRepository.updateSchedule.mockResolvedValue({
-      ...template.template,
-      next_run_date: nextRunDate,
-    });
 
     const result = await service.generateTemplate(TEMPLATE_ID, RUN_DATE);
 

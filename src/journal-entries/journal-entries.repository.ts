@@ -113,7 +113,33 @@ export interface JournalEntriesRepository {
   insertGeneratedFromTemplate(
     params: InsertGeneratedJournalEntryParams,
   ): Promise<JournalEntryWithDetails>;
+  /**
+   * [feature-spec.md decision #63] Atomic due-claim + draft insert + schedule
+   * advance under `rjt:` advisory lock.
+   */
+  generateDueRecurringEntry(
+    templateId: string,
+    asOfDate: string,
+  ): Promise<GenerateDueRecurringEntryResult>;
 }
+
+export type GenerateDueRecurringEntryResult =
+  | {
+      skipped: true;
+      skip_reason: string;
+      template_id: string;
+      next_run_date: string;
+    }
+  | {
+      skipped: false;
+      template_id: string;
+      template_name: string;
+      auto_post: boolean;
+      previous_next_run_date: string;
+      next_run_date: string;
+      is_active: boolean;
+      journal: JournalEntryWithDetails;
+    };
 
 export interface InsertGeneratedJournalEntryParams {
   company_id: string;

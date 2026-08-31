@@ -345,6 +345,28 @@ export class SupabaseRecurringJournalTemplatesRepository
     return due;
   }
 
+  /**
+   * [feature-spec.md decision #62] Distinct company_ids with ≥1 active template.
+   */
+  async listCompanyIdsWithActiveTemplates(): Promise<string[]> {
+    const { data, error } = await this.supabase.client
+      .from('recurring_journal_templates')
+      .select('company_id')
+      .eq('is_active', true);
+
+    if (error) {
+      throw error;
+    }
+
+    return [
+      ...new Set(
+        (data ?? [])
+          .map((row) => row.company_id as string)
+          .filter(Boolean),
+      ),
+    ];
+  }
+
   async findOpenPeriodForDate(
     companyId: string,
     date: string,

@@ -19,7 +19,7 @@ repeated inline.
 |---|---|---|
 | Hard-close / reopen HTTP; close checklist (Rules §1.22) | **Stub** | Schema columns reserved; not gaps |
 
-All §7.16 / §7.26 audit findings are closed (#41–#48, #51–#54). Auth: 41/41 routes guarded (#41, #53, #56 + H1 reports). `--runInBand` is **not** required (#37). System-account UPDATE DB backstop closed (#58). Integrity sweep #59: no open product defects; hard-close/reopen remains the only stub. `v_trial_balance` status-filter live bug closed (#60). Year-end P&L aggregation uses `is_ledger_truth_status` (#61) — lockstep with H1 reports.
+All §7.16 / §7.26 audit findings are closed (#41–#48, #51–#54). Auth: 42/42 routes guarded (#41, #53, #56 + H1 reports incl. GL). `--runInBand` is **not** required (#37). System-account UPDATE DB backstop closed (#58). Integrity sweep #59: no open product defects; hard-close/reopen remains the only stub. `v_trial_balance` status-filter live bug closed (#60). Year-end P&L aggregation uses `is_ledger_truth_status` (#61) — lockstep with H1 reports. Recurring templates: unattended daily Nest `@Cron` (#62); concurrent due-generation race closed via `rjt:` advisory-lock RPC (#63).
 
 **Fresh DB setup:** run `schema.sql` top-to-bottom (includes §12 table grants — no separate apply scripts).
 
@@ -149,7 +149,15 @@ just be wiped, and §7 for the broader pattern this established.)*
 - Manual journal entry with narration, reference number, and document
   attachment
 - Recurring journal entries: depreciation, prepaid amortisation, accruals
-  — set frequency and auto-post
+  — set frequency and auto-post. Generation is **manually triggerable**
+  (`POST …/run-due`, `POST …/generate`) **and** **unattended-scheduled**
+  (Nest `@Cron` daily walk of due `next_run_date` across companies —
+  decision #62). Concurrent cron + manual (or overlapping manual) calls
+  for the **same** template due date produce **exactly one** journal
+  entry: `generate_due_recurring_entry` claims `next_run_date` under a
+  per-template `rjt:` advisory lock (#63 / #20). `auto_post` still only
+  controls whether a generated entry attempts `JournalEntriesService.post()`
+  (#52); it is not a bypass of approval/soft-close rules.
 - Journal approval workflow: Owner must approve entries above a
   configurable AED threshold
 - Period soft-close with override permission for corrections by authorised
@@ -192,7 +200,11 @@ applies. *(Decision #55)*
 may automatically *attempt* posting; it does **not** bypass approval
 thresholds, soft-close authorization, or any other §4.1 posting rule.
 Recurring auto-post uses the same `JournalEntriesService.post()` path as
-manual entries. *(Decision #52)*
+manual entries. *(Decision #52)* Unattended due-template discovery is
+`RecurringJournalSchedulerService` (daily `@Cron`); manual HTTP
+run-due/generate remain available. *(Decision #62)* Both paths call
+`generate_due_recurring_entry` so a due cycle cannot double-generate
+under concurrent load. *(Decision #63)*
 
 ### 4.2 Reversals
 
@@ -651,10 +663,10 @@ with the human-readable immutability message. *(Decision #56)*
 
 ## 6. Concurrency — Advisory-Lock RPCs
 
-Three check-then-act patterns had no atomicity guarantee under concurrent
-load: `getNextEntryNumber()`, opening-balance creation, and year-end
-closing. Fixed via `pg_advisory_xact_lock`-based `SECURITY DEFINER` RPCs
-(grants follow §5.1's checklist exactly on all five):
+Check-then-act patterns that had no atomicity guarantee under concurrent
+load (entry-number allocation, opening-balance, year-end closing, and
+recurring due generation) are fixed via `pg_advisory_xact_lock`-based
+`SECURITY DEFINER` RPCs (grants follow §5.1's checklist exactly):
 
 | RPC | Purpose |
 |---|---|
@@ -662,16 +674,18 @@ closing. Fixed via `pg_advisory_xact_lock`-based `SECURITY DEFINER` RPCs
 | `insert_journal_entry_draft(...)` | Atomic draft insert (manual + recurring-generated entries) using the allocator above. |
 | `create_opening_balance_entry(...)` | Full check→period-lookup→allocate→insert→post sequence, one transaction. |
 | `create_year_end_closing_entry(...)` | Full check→P&L-line-build→allocate→insert→post sequence, one transaction. |
+| `generate_due_recurring_entry(template_id, as_of_date)` | Full lock→re-read `next_run_date`→skip-if-claimed→draft insert→advance schedule sequence, one transaction. Cron (#62) and manual run-due/generate share this RPC. Nest still posts via `#52` after a successful claim. |
 | `reverse_journal_entry(...)` | Existing reversal RPC, updated to call the shared allocator instead of its own inline `max+1`. |
 
 **Lock key convention:**
 - Entry-number allocation: `hashtext(company_id)` — global per company.
 - Opening balance: `hashtext('ob:' || company_id || ':' || fiscal_year)`.
 - Year-end closing: `hashtext('ye:' || company_id || ':' || fiscal_year)`.
-- `ob:` and `ye:` namespaces do **not** block each other — no rule
-  requires opening-balance and year-end operations to serialize against
-  one another.
-- **Lock order is always: namespace lock (`ob:`/`ye:`) first, then the
+- Recurring due generation: `hashtext('rjt:' || template_id)` — **per template**, not per company (two different templates for the same company may generate concurrently).
+- `ob:`, `ye:`, and `rjt:` namespaces do **not** block each other — no rule
+  requires opening-balance, year-end, and recurring operations to serialize
+  against one another across those namespaces.
+- **Lock order is always: namespace lock (`ob:`/`ye:`/`rjt:`) first, then the
   nested entry-number lock** — this ordering is fixed to avoid deadlocks
   between concurrent operations.
 
@@ -729,21 +743,23 @@ to keep applying to any future fixed-company test setup.)*
 
 ### 7.2 Verification baseline
 
-**Current (2026-08-30, post-#60 `v_trial_balance` status-filter fix):**
+**Current (2026-08-30, post-#63 recurring due-generation concurrency):**
 
 | Check | Result |
 |---|---|
 | npm run build | Pass |
-| Full suite | **39 suites** (was 34/339 after #59; +H1 report suites + #60 regression) — #60 suite **6/6** verified |
+| Full suite | **~42 suites** (was ~41 after #62; +recurring concurrency integration) |
 | COA verify | node scripts/verify-reset-health.mjs — **7/7** on demo …0002 |
-| Auth regression | **41/41** routes (controller-auth-coverage.spec.ts; H1 TB/BS/P&L) |
+| Auth regression | **42/42** routes (controller-auth-coverage.spec.ts; H1 TB/BS/P&L/GL) |
 | Fresh DB setup | schema.sql top-to-bottom + seed_finalized_coa_demo_company_0002.sql |
 | Excel TC1–TC14 | **14 PASS / 0 PARTIAL / 0 FAIL** (incl. #55/#56/#57 deltas) |
 | `v_trial_balance` | `security_invoker=true` confirmed live; status filter uses `is_ledger_truth_status` (#60) |
+| Recurring schedule | Nest `@Cron` EVERY_DAY_AT_1AM → `runDueGenerations` per company (#62); due claim via `generate_due_recurring_entry` / `rjt:` (#63) |
 
 Corrected 30/314 (2026-08-28, post-#54) → 33/333 after #55–#58 → **34/339** after #59
-→ **39 suites** after H1 reports + #60 (exact full-suite test total: re-count on next full green run).
-Auth **38 → 41** with H1 report routes. Older decision-log entries (#26–#49)
+→ **39 suites** after H1 reports + #60 → **+2** scheduler suites (#62) → **+1**
+recurring concurrency suite (#63).
+Auth **38 → 42** with H1 report routes. Older decision-log entries (#26–#49)
 record suite counts *at decision time*.
 
 ### 7.3 Gap audit closure index
@@ -831,3 +847,5 @@ topical section referenced.
 | 59 | 2026-08-29 | Integrity sweep: live behavioral re-verify of enums/constraints/triggers/RPC tokens/RLS proxies; permanentized Jest coverage for previously untested branches (system delete, draft delete allow, zero-line post, equity/income band mismatch, JOURNAL_DRAFT_REQUIRES_LINES, NO_OPEN/NO_PERIOD, OB income on first line, reverse-a-reversal); Excel TC13/TC14 extended for #57/#56 line delete; no product defects found — catalog SQL (pg_enum / role_routine_grants / security_invoker reloption) still requires DATABASE_URL | §7.2 |
 | 60 | 2026-08-30 | `v_trial_balance` status filter was a no-op (status in LEFT JOIN ON); rewritten to sum only `is_ledger_truth_status` lines via subquery LEFT JOIN; `security_invoker` retained; live `GET /accounts/:id/trial-balance` regression coverage | §5.4, §4.16, §7.2 |
 | 61 | 2026-08-30 | `create_year_end_closing_entry` P&L aggregation switched from `status = 'posted'` to `is_ledger_truth_status` (posted ∪ reversed) + `account_signed_balance`, lockstep with H1 P&L; posted-only dropped reversed originals while keeping reversing entries and transferred the wrong amount to 3100 (found by H1-5 cross-report sweep) | §6, §4.4 |
+| 62 | 2026-08-30 | Recurring templates: add Nest `@nestjs/schedule` daily `@Cron` (`RecurringJournalSchedulerService`, 01:00 UTC) iterating every company with ≥1 active template via existing `runDueGenerations`; per-company failure isolation + run summary logs; manual `POST …/run-due` and `…/generate` unchanged. Concurrent scheduled+manual race left open in this pass (closed by #63). Closes the “no unattended scheduler” gap vs §3’s prior overstated reading | §3, §4.1, §7.2 |
+| 63 | 2026-08-30 | Recurring due generation: `generate_due_recurring_entry` SECURITY DEFINER RPC with `pg_advisory_xact_lock(hashtext('rjt:' \|\| template_id))` — re-reads `next_run_date` under lock, skips if already claimed, inserts draft via `insert_journal_entry_draft`, advances schedule in the same transaction. Cron (#62) and manual run-due/generate share the RPC; Nest `#52` post unchanged (balance-delete reverts schedule). Concurrent same-template / cron-vs-manual → one entry; different templates do not serialize. Follows #20 `ob:`/`ye:` pattern | §3, §4.1, §6, §7.2 |

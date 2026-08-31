@@ -5,19 +5,25 @@ import {
   RecurringJournalTemplateLinesController,
   RecurringJournalTemplatesController,
 } from './recurring-journal-templates.controller';
+import { RecurringJournalSchedulerService } from './recurring-journal-scheduler.service';
 import { RecurringJournalTemplatesService } from './recurring-journal-templates.service';
 import { RECURRING_JOURNAL_TEMPLATES_REPOSITORY } from './recurring-journal-templates.repository';
 import { SupabaseRecurringJournalTemplatesRepository } from './recurring-journal-templates.repository.supabase';
 
 @Module({
   imports: [JournalEntriesModule, AuthModule],
-  controllers: [RecurringJournalTemplatesController, RecurringJournalTemplateLinesController],
+  controllers: [
+    RecurringJournalTemplatesController,
+    RecurringJournalTemplateLinesController,
+  ],
   providers: [
     RecurringJournalTemplatesService,
+    RecurringJournalSchedulerService,
     {
       provide: RECURRING_JOURNAL_TEMPLATES_REPOSITORY,
       useClass: SupabaseRecurringJournalTemplatesRepository,
     },
   ],
+  exports: [RecurringJournalTemplatesService, RecurringJournalSchedulerService],
 })
 export class RecurringJournalTemplatesModule {}

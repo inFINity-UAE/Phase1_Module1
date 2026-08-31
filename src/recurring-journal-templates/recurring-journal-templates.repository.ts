@@ -37,6 +37,11 @@ export interface RecurringJournalTemplatesRepository {
     asOfDate: string,
     companyId: string,
   ): Promise<RecurringJournalTemplateWithLines[]>;
+  /**
+   * [feature-spec.md decision #62] Company ids that have at least one
+   * active recurring template — scheduled runner iterates these.
+   */
+  listCompanyIdsWithActiveTemplates(): Promise<string[]>;
   findOpenPeriodForDate(
     companyId: string,
     date: string,

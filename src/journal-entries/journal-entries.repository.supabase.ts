@@ -23,6 +23,7 @@ import { ProfitAndLossAccountBalance } from './entities/profit-and-loss-account-
 import { computeAccountBalance } from './year-end-closing.util';
 import {
   InsertGeneratedJournalEntryParams,
+  GenerateDueRecurringEntryResult,
   CreateJournalEntryWithActor,
   CreateOpeningBalanceWithActor,
   CreateYearEndClosingWithActor,
@@ -1097,5 +1098,64 @@ export class SupabaseJournalEntriesRepository implements JournalEntriesRepositor
       p_lines: params.lines,
       p_recurring_template_id: params.recurring_template_id,
     });
+  }
+
+  /**
+   * [feature-spec.md decision #63] Due generation under `rjt:` lock —
+   * cron (#62) and manual run-due/generate share this RPC.
+   */
+  async generateDueRecurringEntry(
+    templateId: string,
+    asOfDate: string,
+  ): Promise<GenerateDueRecurringEntryResult> {
+    const { data, error } = await this.supabase.client.rpc(
+      'generate_due_recurring_entry',
+      {
+        p_template_id: templateId,
+        p_as_of_date: asOfDate,
+      },
+    );
+
+    if (error) {
+      throw error;
+    }
+
+    const payload = data as {
+      skipped: boolean;
+      skip_reason?: string;
+      template_id: string;
+      template_name?: string;
+      auto_post?: boolean;
+      previous_next_run_date?: string;
+      next_run_date: string;
+      is_active?: boolean;
+      entry?: JournalEntry;
+      lines?: JournalLine[];
+      attachments?: JournalAttachment[];
+    };
+
+    if (payload.skipped) {
+      return {
+        skipped: true,
+        skip_reason: payload.skip_reason ?? 'TEMPLATE_NOT_DUE',
+        template_id: payload.template_id,
+        next_run_date: String(payload.next_run_date),
+      };
+    }
+
+    return {
+      skipped: false,
+      template_id: payload.template_id,
+      template_name: payload.template_name ?? '',
+      auto_post: Boolean(payload.auto_post),
+      previous_next_run_date: String(payload.previous_next_run_date),
+      next_run_date: String(payload.next_run_date),
+      is_active: payload.is_active !== false,
+      journal: this.parseJournalPayload({
+        entry: payload.entry,
+        lines: payload.lines,
+        attachments: payload.attachments,
+      }),
+    };
   }
 }

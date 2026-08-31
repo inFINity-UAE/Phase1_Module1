@@ -189,6 +189,7 @@ describe('JournalEntriesService', () => {
       approveAndPostEntry: jest.fn(),
       rejectEntry: jest.fn(),
       insertGeneratedFromTemplate: jest.fn(),
+      generateDueRecurringEntry: jest.fn(),
       postEntry: jest.fn(),
       reverseEntry: jest.fn(),
       insertLine: jest.fn(),
