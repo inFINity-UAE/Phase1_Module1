@@ -67,8 +67,12 @@ export class InvoicesController {
 
   @Post(':id/void')
   @RequireCompanyMembership({ type: 'param', resource: 'invoice' })
-  void(@Param('id', ParseUUIDPipe) id: string, @Body() dto: VoidInvoiceDto) {
-    return this.invoicesService.void(id, dto);
+  void(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: VoidInvoiceDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.invoicesService.void(id, dto, user.id);
   }
 
   @Post(':id/send')

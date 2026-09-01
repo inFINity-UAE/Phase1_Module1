@@ -1,0 +1,8 @@
+-- apply_create_credit_note_journal_entry.sql
+-- Prerequisite: journal_entry_type includes 'credit_note' (apply_journal_entry_type_sales_invoice_credit_note.sql).
+-- Source of truth: docs/source-of-truth/schema.sql (create_credit_note_journal_entry, issue_credit_note).
+--
+-- Migration note (2026-09-01):
+-- 1. create_credit_note_journal_entry — mirror of B1 invoice posting; does NOT use reverse_journal_entry.
+-- 2. issue_credit_note calls it in the same transaction and sets credit_notes.journal_entry_id.
+-- 3. No new advisory lock namespace — operates under issue_credit_note's existing FOR UPDATE row lock.

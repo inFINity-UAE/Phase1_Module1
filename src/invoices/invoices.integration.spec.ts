@@ -10,6 +10,8 @@ import { CustomersService } from '../customers/customers.service';
 import { DatabaseModule } from '../database/database.module';
 import { SupabaseService } from '../database/supabase.service';
 import { getAccountIdByNumber } from '../e2e/e2e-company.setup';
+import { JournalEntryStatus } from '../common/enums/journal-entry-status.enum';
+import { JournalEntryType } from '../common/enums/journal-entry-type.enum';
 import { InvoiceStatus } from './common/enums/invoice-status.enum';
 import { InvoiceType } from './common/enums/invoice-type.enum';
 import { PaymentTermsType } from './common/enums/payment-terms-type.enum';
@@ -79,6 +81,16 @@ const INVOICE_DATE = '2026-06-01';
         await supabase.client.from('invoices').delete().eq('id', id);
         const journalEntryId = inv?.journal_entry_id as string | null | undefined;
         if (journalEntryId) {
+          const { data: originalJe } = await supabase.client
+            .from('journal_entries')
+            .select('reversed_by_entry_id')
+            .eq('id', journalEntryId)
+            .maybeSingle();
+          const reversalId = originalJe?.reversed_by_entry_id as string | null | undefined;
+          if (reversalId) {
+            await supabase.client.from('journal_lines').delete().eq('journal_entry_id', reversalId);
+            await supabase.client.from('journal_entries').delete().eq('id', reversalId);
+          }
           await supabase.client.from('journal_lines').delete().eq('journal_entry_id', journalEntryId);
           await supabase.client.from('journal_entries').delete().eq('id', journalEntryId);
         }
@@ -227,16 +239,81 @@ const INVOICE_DATE = '2026-06-01';
       const draft = await createDraftInvoice(customerWithTrnId);
       await invoicesService.issue(draft.invoice.id);
 
-      await expect(invoicesService.void(draft.invoice.id, { void_reason: '   ' })).rejects.toThrow(
-        BadRequestException,
-      );
+      await expect(
+        invoicesService.void(draft.invoice.id, { void_reason: '   ' }, USER_ID),
+      ).rejects.toThrow(BadRequestException);
 
-      const voided = await invoicesService.void(draft.invoice.id, {
-        void_reason: 'Customer cancelled before payment',
-      });
+      const voided = await invoicesService.void(
+        draft.invoice.id,
+        { void_reason: 'Customer cancelled before payment' },
+        USER_ID,
+      );
       expect(voided.invoice.status).toBe(InvoiceStatus.Void);
       expect(voided.invoice.void_reason).toBe('Customer cancelled before payment');
       expect(voided.invoice.journal_entry_id).toBeTruthy();
+      expect(voided.ledger_reversal_status).toBe('reversed');
+    });
+
+    it('void reverses B1 sales_invoice journal entry with swapped debit/credit lines', async () => {
+      const draft = await createDraftInvoice(customerWithTrnId, { unit_price: 100, vat_rate: 5 });
+      const issued = await invoicesService.issue(draft.invoice.id);
+      const originalJournalEntryId = issued.invoice.journal_entry_id!;
+      expect(originalJournalEntryId).toBeTruthy();
+
+      const originalBefore = await supabase.client
+        .from('journal_lines')
+        .select('line_number, account_id, debit, credit')
+        .eq('journal_entry_id', originalJournalEntryId)
+        .order('line_number');
+      expect(originalBefore.error).toBeNull();
+      expect((originalBefore.data ?? []).length).toBeGreaterThan(0);
+
+      const voided = await invoicesService.void(
+        draft.invoice.id,
+        { void_reason: 'Duplicate billing — full reversal' },
+        USER_ID,
+      );
+
+      expect(voided.invoice.status).toBe(InvoiceStatus.Void);
+      expect(voided.ledger_reversal_status).toBe('reversed');
+
+      const { data: originalAfter, error: originalError } = await supabase.client
+        .from('journal_entries')
+        .select('status, reversed_by_entry_id, entry_type')
+        .eq('id', originalJournalEntryId)
+        .single();
+      expect(originalError).toBeNull();
+      expect(originalAfter?.status).toBe(JournalEntryStatus.Reversed);
+      expect(originalAfter?.entry_type).toBe('sales_invoice');
+      expect(originalAfter?.reversed_by_entry_id).toBeTruthy();
+
+      const reversalEntryId = originalAfter!.reversed_by_entry_id as string;
+
+      const { data: reversalEntry, error: reversalEntryError } = await supabase.client
+        .from('journal_entries')
+        .select('status, entry_type, reverses_entry_id')
+        .eq('id', reversalEntryId)
+        .single();
+      expect(reversalEntryError).toBeNull();
+      expect(reversalEntry?.status).toBe(JournalEntryStatus.Posted);
+      expect(reversalEntry?.entry_type).toBe(JournalEntryType.Reversal);
+      expect(reversalEntry?.reverses_entry_id).toBe(originalJournalEntryId);
+
+      const { data: reversalLines, error: reversalLinesError } = await supabase.client
+        .from('journal_lines')
+        .select('line_number, account_id, debit, credit')
+        .eq('journal_entry_id', reversalEntryId)
+        .order('line_number');
+      expect(reversalLinesError).toBeNull();
+      expect(reversalLines).toHaveLength(originalBefore.data!.length);
+
+      for (let i = 0; i < originalBefore.data!.length; i++) {
+        const orig = originalBefore.data![i];
+        const rev = reversalLines![i];
+        expect(rev.account_id).toBe(orig.account_id);
+        expect(Number(rev.debit)).toBe(Number(orig.credit));
+        expect(Number(rev.credit)).toBe(Number(orig.debit));
+      }
     });
 
     it('suggests income_account_id from vat_rate and is_service', async () => {

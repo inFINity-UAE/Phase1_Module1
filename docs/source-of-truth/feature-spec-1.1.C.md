@@ -358,14 +358,14 @@ is silently forgotten between batches.
 | Cumulative credit cap + `cnl:` lock (#5) | `enforce_credit_note_line_cumulative_cap` — C1-4 |
 | `journal_entry_type` enum extension (#13) | `schema.sql` + `apply_journal_entry_type_sales_invoice_credit_note.sql` |
 | Invoice ledger posting at Issue (§7 / #12) | `create_invoice_journal_entry` RPC wired into `issue_invoice` — `invoices.integration.spec.ts` |
+| Credit note ledger posting (§7 / #14) | `create_credit_note_journal_entry` RPC wired into `issue_credit_note` — `credit-notes.integration.spec.ts` |
+| Invoice void → journal auto-reversal (§2.2 / #7) | `void_invoice` RPC calls `reverse_journal_entry` when `journal_entry_id` set — `invoices.integration.spec.ts` |
+| Credit note void → journal auto-reversal (§2.2) | `void_credit_note` RPC calls `reverse_journal_entry` when `journal_entry_id` set — `credit-notes.integration.spec.ts` |
 
 ### Still outstanding
 
 | Gap | Status | Detail |
 |---|---|---|
-| **Credit note ledger posting (§7 / #14)** | **Batch 2** | Dedicated posting RPC not built (must not reuse `reverse_journal_entry` — partial credits); C1-4 `issue_credit_note` allocates number only; `journal_entry_id` stays null; Issue response exposes `ledger_posting_status: 'deferred_batch_2'` |
-| **Invoice void → journal auto-reversal (§2.2 / #7)** | **Batch 2** | C1-3 void records `void_reason` + status only; no reversal call yet — `journal_entry_id` is now populated at Issue so void reversal can wire to `reverse_journal_entry` or equivalent |
-| **Credit note void → ledger reversal/adjustment (§2.2 pattern)** | **Batch 2** | C1-4 void records `void_reason` + status only; same Batch 2 gate as invoice void — depends on credit-note posting path |
 | **Quotation `Expired` scheduled transition (§2.1 / §8 / #6, #15)** | **Batch 2** | Lifecycle + enum exist; no `valid_until`-driven RPC, no scheduler registration on Module 1.1.A's #62–#63 cron infrastructure |
 | **Invoice `Overdue` scheduled transition (§2.2 / §8 / #7, #15)** | **Batch 2** | Lifecycle + enum exist; no `due_date`-driven RPC, no scheduler registration; `amount_paid` column exists but is never updated in Batch 1 |
 | **Invoice `partially_paid` / `paid` + payment application (§2.2)** | **Deferred — Module D (AR)** | Status enum + `amount_paid` column reserved; no transitions into paid states, no payment recording — AR module owns payment application per `Module_1.1_Build_Order_Scope.md` §3 |
@@ -375,9 +375,9 @@ is silently forgotten between batches.
 | **§9 presentation / delivery features** | **Deferred — post-C1** | PDF generation, WhatsApp share, Arabic/English bilingual toggle, automated payment reminder emails, recurring invoice generation, proforma-specific behavior beyond the reserved `invoice_type` enum value, invoice cloning — see §9; wrap stable C1 core, do not build alongside Batch 2 ledger work |
 | **FTA sequential numbering gap detection / audit register** | **Deferred — post-C1** | Build-order §2 flags gap detection and immutable register as FTA-compliance follow-ups distinct from Batch 1's allocate-on-Issue RPCs — not implemented |
 
-**Batch 2 minimum scope (ledger + scheduler):** credit-note posting (#14),
-void reversals (both document types), then Expired/Overdue scheduler hooks.
-Invoice posting (#12) and enum migration (#13) are closed.
+**Batch 2 minimum scope (ledger + scheduler):** Expired/Overdue scheduler
+hooks. Invoice posting (#12), credit-note posting (#14), enum migration (#13),
+invoice void reversal, and credit-note void reversal are closed.
 
 **Explicitly not Batch 2:** Module D payment/write-off ledger work, §9
 presentation features, product catalog — each has its own row above so they
@@ -407,3 +407,4 @@ are not accidentally folded into Batch 2 by default.
 | 16 | 2026-08-31 | `quotation_number` allocated at quotation INSERT (BEFORE INSERT → `allocate_next_quotation_number` / `quo:` lock), not deferred to Sent or later — distinct from invoice numbering at Issue (#8) | §3, §1.2 |
 | 17 | 2026-08-31 | `customers.trn` immutable after create — set on POST only; wrong TRN → deactivate + new customer; avoids duplicate-legal-entity ambiguity (#1) and invoice-type drift (§6.2) | §1.1 |
 | 18 | 2026-08-31 | Credit note numbering at Issue via `allocate_next_credit_note_number` / `crn:` lock, `CRN-YYYY-NNNN` — §3 silent; mirrors invoice pattern (#8) as FTA tax document (#13) (**C1-4**) | §3, §1.4 |
+| 19 | 2026-09-01 | Credit note **void** uses `reverse_journal_entry` (all-or-nothing on the whole document); #14's dedicated posting path applies to **Issue** only (partial relative to invoice) — void does not touch the original invoice's B1 journal | §7, §2.2 |

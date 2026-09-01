@@ -66,7 +66,11 @@ export class CreditNotesController {
 
   @Post(':id/void')
   @RequireCompanyMembership({ type: 'param', resource: 'credit_note' })
-  void(@Param('id', ParseUUIDPipe) id: string, @Body() dto: VoidCreditNoteDto) {
-    return this.creditNotesService.void(id, dto);
+  void(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: VoidCreditNoteDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.creditNotesService.void(id, dto, user.id);
   }
 }

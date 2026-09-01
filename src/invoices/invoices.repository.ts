@@ -28,4 +28,12 @@ export interface InvoicesRepository {
   findCustomerActive(customerId: string): Promise<boolean | null>;
   findCustomerCompanyId(customerId: string): Promise<string | null>;
   issueInvoice(id: string, invoiceTypeOverride?: InvoiceType | null): Promise<Invoice>;
+  voidInvoice(
+    id: string,
+    voidReason: string,
+    createdBy: string,
+  ): Promise<{
+    invoice: Invoice;
+    ledger_reversal_status: 'reversed' | 'skipped_no_posting';
+  }>;
 }

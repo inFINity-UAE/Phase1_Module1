@@ -232,4 +232,33 @@ export class SupabaseInvoicesRepository implements InvoicesRepository {
 
     return data as Invoice;
   }
+
+  async voidInvoice(
+    id: string,
+    voidReason: string,
+    createdBy: string,
+  ): Promise<{
+    invoice: Invoice;
+    ledger_reversal_status: 'reversed' | 'skipped_no_posting';
+  }> {
+    const { data, error } = await this.supabase.client.rpc('void_invoice', {
+      p_invoice_id: id,
+      p_void_reason: voidReason,
+      p_created_by: createdBy,
+    });
+
+    if (error) {
+      throw error;
+    }
+
+    const result = data as {
+      invoice: Invoice;
+      ledger_reversal_status: 'reversed' | 'skipped_no_posting';
+    };
+
+    return {
+      invoice: result.invoice,
+      ledger_reversal_status: result.ledger_reversal_status,
+    };
+  }
 }

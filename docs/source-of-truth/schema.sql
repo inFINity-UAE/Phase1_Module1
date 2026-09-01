@@ -1807,6 +1807,71 @@ revoke all on function issue_invoice(uuid, invoice_type) from authenticated;
 revoke all on function issue_invoice(uuid, invoice_type) from anon;
 grant execute on function issue_invoice(uuid, invoice_type) to service_role;
 
+-- [feature-spec-1.1.C.md §2.2 / §7] Void invoice + optional ledger reversal in one transaction.
+-- Exception tokens: CREATED_BY_REQUIRED, VOID_REASON_REQUIRED, INVOICE_NOT_FOUND,
+-- INVOICE_VOID_NOT_PERMITTED
+create or replace function void_invoice(
+  p_invoice_id uuid,
+  p_void_reason text,
+  p_created_by uuid
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  v_invoice          invoices%rowtype;
+  v_reversal_result  jsonb;
+  v_ledger_status    text;
+begin
+  if p_created_by is null then
+    raise exception 'CREATED_BY_REQUIRED';
+  end if;
+
+  if p_void_reason is null or btrim(p_void_reason) = '' then
+    raise exception 'VOID_REASON_REQUIRED';
+  end if;
+
+  select * into v_invoice from invoices where id = p_invoice_id for update;
+  if not found then
+    raise exception 'INVOICE_NOT_FOUND';
+  end if;
+
+  -- [feature-spec-1.1.C.md §2.2] Same statuses Nest allows Issued → Void (and later CRM states).
+  if v_invoice.status not in ('issued', 'sent', 'viewed', 'overdue') then
+    raise exception 'INVOICE_VOID_NOT_PERMITTED';
+  end if;
+
+  if v_invoice.journal_entry_id is not null then
+    v_reversal_result := reverse_journal_entry(v_invoice.journal_entry_id, p_created_by);
+    v_ledger_status := 'reversed';
+  else
+    v_reversal_result := null;
+    v_ledger_status := 'skipped_no_posting';
+  end if;
+
+  update invoices
+     set status = 'void',
+         void_reason = btrim(p_void_reason),
+         updated_at = now()
+   where id = p_invoice_id
+  returning * into v_invoice;
+
+  return jsonb_build_object(
+    'invoice', to_jsonb(v_invoice),
+    'ledger_reversal_status', v_ledger_status,
+    'reversal', case when v_reversal_result is not null then v_reversal_result->'reversal' else null end,
+    'original_journal', case when v_reversal_result is not null then v_reversal_result->'original' else null end
+  );
+end;
+$$;
+
+revoke all on function void_invoice(uuid, text, uuid) from public;
+revoke all on function void_invoice(uuid, text, uuid) from authenticated;
+revoke all on function void_invoice(uuid, text, uuid) from anon;
+grant execute on function void_invoice(uuid, text, uuid) to service_role;
+
 -- [feature-spec-1.1.C.md §4 decision #9] Accepted quotation → Draft invoice; one-time link.
 create or replace function convert_quotation_to_invoice(
   p_quotation_id uuid,
@@ -2460,7 +2525,266 @@ create trigger trg_prevent_nondraft_credit_note_header_mutation
   before update on credit_notes
   for each row execute function prevent_nondraft_credit_note_header_mutation();
 
--- [feature-spec-1.1.C.md §1.4] Issue: number only — NO journal posting (Batch 2 §7).
+-- [feature-spec-1.1.C.md §7 decision #14] Atomic credit-note ledger posting at Issue.
+-- Mirror of create_invoice_journal_entry — does NOT reuse reverse_journal_entry (partial credits).
+-- Exception tokens: CREATED_BY_REQUIRED, CREDIT_NOTE_NOT_FOUND, CREDIT_NOTE_JOURNAL_ALREADY_POSTED,
+-- CREDIT_NOTE_REQUIRES_LINES, CREDIT_NOTE_POSTING_ACCOUNT_NOT_FOUND,
+-- CREDIT_NOTE_LINE_MISSING_INCOME_ACCOUNT, NO_OPEN_PERIOD_FOR_CREDIT_NOTE_DATE,
+-- CREDIT_NOTE_POSTING_UNBALANCED
+create or replace function create_credit_note_journal_entry(
+  p_credit_note_id uuid,
+  p_created_by uuid,
+  p_reference_number text default null
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  v_cn             credit_notes%rowtype;
+  v_period         accounting_periods%rowtype;
+  v_entry_number   bigint;
+  v_entry          journal_entries%rowtype;
+  v_lines          jsonb;
+  v_line           record;
+  v_ar_id          uuid;
+  v_discount_id    uuid;
+  v_vat_id         uuid;
+  v_line_number    int := 0;
+  v_gross          numeric(18,2);
+  v_discount       numeric(18,2);
+  v_gross_sum      numeric(18,2) := 0;
+  v_discount_sum   numeric(18,2) := 0;
+  v_total_debits   numeric(18,2);
+  v_total_credits  numeric(18,2);
+  v_ref            text;
+begin
+  if p_created_by is null then
+    raise exception 'CREATED_BY_REQUIRED';
+  end if;
+
+  select * into v_cn from credit_notes where id = p_credit_note_id;
+  if not found then
+    raise exception 'CREDIT_NOTE_NOT_FOUND';
+  end if;
+
+  if v_cn.journal_entry_id is not null then
+    raise exception 'CREDIT_NOTE_JOURNAL_ALREADY_POSTED';
+  end if;
+
+  if not exists (select 1 from credit_note_lines where credit_note_id = p_credit_note_id) then
+    raise exception 'CREDIT_NOTE_REQUIRES_LINES';
+  end if;
+
+  select id into v_ar_id
+    from accounts
+   where company_id = v_cn.company_id
+     and account_number = '1100';
+  if v_ar_id is null then
+    raise exception 'CREDIT_NOTE_POSTING_ACCOUNT_NOT_FOUND';
+  end if;
+
+  select id into v_discount_id
+    from accounts
+   where company_id = v_cn.company_id
+     and account_number = '4060';
+  if v_discount_id is null then
+    raise exception 'CREDIT_NOTE_POSTING_ACCOUNT_NOT_FOUND';
+  end if;
+
+  select id into v_vat_id
+    from accounts
+   where company_id = v_cn.company_id
+     and account_number = '2200';
+  if v_vat_id is null then
+    raise exception 'CREDIT_NOTE_POSTING_ACCOUNT_NOT_FOUND';
+  end if;
+
+  -- [schema.sql accounting_periods] Half-open [period_start, period_end).
+  select * into v_period
+    from accounting_periods
+   where company_id = v_cn.company_id
+     and status = 'open'
+     and period_start <= v_cn.credit_note_date
+     and period_end > v_cn.credit_note_date
+   order by period_start
+   limit 1;
+
+  if not found then
+    raise exception 'NO_OPEN_PERIOD_FOR_CREDIT_NOTE_DATE';
+  end if;
+
+  for v_line in
+    select cnl.*
+      from credit_note_lines cnl
+     where cnl.credit_note_id = p_credit_note_id
+     order by cnl.line_number
+  loop
+    if v_line.income_account_id is null then
+      raise exception 'CREDIT_NOTE_LINE_MISSING_INCOME_ACCOUNT';
+    end if;
+
+    v_gross := round(v_line.quantity * v_line.unit_price, 2);
+
+    if v_line.discount_percent is not null then
+      v_discount := round(v_gross * v_line.discount_percent / 100, 2);
+    elsif v_line.discount_amount is not null then
+      v_discount := v_line.discount_amount;
+    else
+      v_discount := 0;
+    end if;
+
+    v_gross_sum := v_gross_sum + v_gross;
+    v_discount_sum := v_discount_sum + v_discount;
+  end loop;
+
+  v_total_debits := v_gross_sum + v_cn.vat_total;
+  v_total_credits := v_cn.grand_total + v_discount_sum;
+
+  if v_total_debits <> v_total_credits then
+    raise exception 'CREDIT_NOTE_POSTING_UNBALANCED';
+  end if;
+
+  v_ref := coalesce(nullif(btrim(p_reference_number), ''), v_cn.credit_note_number);
+
+  v_entry_number := allocate_next_entry_number(v_cn.company_id);
+
+  insert into journal_entries (
+    company_id,
+    entry_number,
+    period_id,
+    entry_date,
+    entry_type,
+    status,
+    narration,
+    reference_number,
+    created_by
+  ) values (
+    v_cn.company_id,
+    v_entry_number,
+    v_period.id,
+    v_cn.credit_note_date,
+    'credit_note',
+    'draft',
+    case
+      when v_ref is not null then 'Credit note ' || v_ref
+      else 'Credit note'
+    end,
+    v_ref,
+    p_created_by
+  )
+  returning * into v_entry;
+
+  v_line_number := v_line_number + 1;
+  insert into journal_lines (
+    journal_entry_id,
+    line_number,
+    account_id,
+    debit,
+    credit,
+    description
+  ) values (
+    v_entry.id,
+    v_line_number,
+    v_ar_id,
+    0,
+    v_cn.grand_total,
+    'Accounts Receivable - Trade'
+  );
+
+  for v_line in
+    select cnl.*
+      from credit_note_lines cnl
+     where cnl.credit_note_id = p_credit_note_id
+     order by cnl.line_number
+  loop
+    v_gross := round(v_line.quantity * v_line.unit_price, 2);
+    v_line_number := v_line_number + 1;
+    insert into journal_lines (
+      journal_entry_id,
+      line_number,
+      account_id,
+      debit,
+      credit,
+      description
+    ) values (
+      v_entry.id,
+      v_line_number,
+      v_line.income_account_id,
+      v_gross,
+      0,
+      v_line.description
+    );
+  end loop;
+
+  if v_discount_sum > 0 then
+    v_line_number := v_line_number + 1;
+    insert into journal_lines (
+      journal_entry_id,
+      line_number,
+      account_id,
+      debit,
+      credit,
+      description
+    ) values (
+      v_entry.id,
+      v_line_number,
+      v_discount_id,
+      0,
+      v_discount_sum,
+      'Sales Discounts Given'
+    );
+  end if;
+
+  if v_cn.vat_total > 0 then
+    v_line_number := v_line_number + 1;
+    insert into journal_lines (
+      journal_entry_id,
+      line_number,
+      account_id,
+      debit,
+      credit,
+      description
+    ) values (
+      v_entry.id,
+      v_line_number,
+      v_vat_id,
+      v_cn.vat_total,
+      0,
+      'VAT Payable - Output VAT'
+    );
+  end if;
+
+  update journal_entries
+     set status = 'posted'
+   where id = v_entry.id
+     and status = 'draft'
+  returning * into v_entry;
+
+  if not found then
+    raise exception 'Failed to post credit note entry %', v_entry_number;
+  end if;
+
+  select coalesce(jsonb_agg(to_jsonb(jl) order by jl.line_number), '[]'::jsonb)
+    into v_lines
+    from journal_lines jl
+   where jl.journal_entry_id = v_entry.id;
+
+  return jsonb_build_object(
+    'entry', to_jsonb(v_entry),
+    'lines', v_lines,
+    'journal_entry_id', v_entry.id
+  );
+end;
+$$;
+
+revoke all on function create_credit_note_journal_entry(uuid, uuid, text) from public;
+revoke all on function create_credit_note_journal_entry(uuid, uuid, text) from authenticated;
+revoke all on function create_credit_note_journal_entry(uuid, uuid, text) from anon;
+grant execute on function create_credit_note_journal_entry(uuid, uuid, text) to service_role;
+
+-- [feature-spec-1.1.C.md §1.4 / decision #18 / §7 decision #14] Issue: numbering + ledger posting.
 create or replace function issue_credit_note(p_credit_note_id uuid)
 returns credit_notes
 language plpgsql
@@ -2471,6 +2795,8 @@ declare
   v_cn credit_notes%rowtype;
   v_inv_status invoice_status;
   v_number text;
+  v_journal_result jsonb;
+  v_journal_entry_id uuid;
 begin
   select * into v_cn from credit_notes where id = p_credit_note_id for update;
   if not found then
@@ -2495,14 +2821,21 @@ begin
 
   v_number := allocate_next_credit_note_number(v_cn.company_id, v_cn.credit_note_date);
 
+  v_journal_result := create_credit_note_journal_entry(
+    p_credit_note_id,
+    v_cn.created_by,
+    v_number
+  );
+  v_journal_entry_id := (v_journal_result->>'journal_entry_id')::uuid;
+
   update credit_notes
      set status = 'issued',
          credit_note_number = v_number,
+         journal_entry_id = v_journal_entry_id,
          updated_at = now()
    where id = p_credit_note_id
   returning * into v_cn;
 
-  -- journal_entry_id intentionally left null — Batch 2 §7 credit-note posting.
   return v_cn;
 end;
 $$;
@@ -2511,6 +2844,72 @@ revoke all on function issue_credit_note(uuid) from public;
 revoke all on function issue_credit_note(uuid) from authenticated;
 revoke all on function issue_credit_note(uuid) from anon;
 grant execute on function issue_credit_note(uuid) to service_role;
+
+-- [feature-spec-1.1.C.md §2.2 / §7 / decision #14 clarified] Void credit note +
+-- optional ledger reversal in one transaction. reverse_journal_entry is correct
+-- here: void is all-or-nothing on the whole document (unlike partial Issue posting).
+-- Exception tokens: CREATED_BY_REQUIRED, VOID_REASON_REQUIRED, CREDIT_NOTE_NOT_FOUND,
+-- CREDIT_NOTE_VOID_NOT_PERMITTED
+create or replace function void_credit_note(
+  p_credit_note_id uuid,
+  p_void_reason text,
+  p_created_by uuid
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  v_cn               credit_notes%rowtype;
+  v_reversal_result  jsonb;
+  v_ledger_status    text;
+begin
+  if p_created_by is null then
+    raise exception 'CREATED_BY_REQUIRED';
+  end if;
+
+  if p_void_reason is null or btrim(p_void_reason) = '' then
+    raise exception 'VOID_REASON_REQUIRED';
+  end if;
+
+  select * into v_cn from credit_notes where id = p_credit_note_id for update;
+  if not found then
+    raise exception 'CREDIT_NOTE_NOT_FOUND';
+  end if;
+
+  if v_cn.status <> 'issued' then
+    raise exception 'CREDIT_NOTE_VOID_NOT_PERMITTED';
+  end if;
+
+  if v_cn.journal_entry_id is not null then
+    v_reversal_result := reverse_journal_entry(v_cn.journal_entry_id, p_created_by);
+    v_ledger_status := 'reversed';
+  else
+    v_reversal_result := null;
+    v_ledger_status := 'skipped_no_posting';
+  end if;
+
+  update credit_notes
+     set status = 'void',
+         void_reason = btrim(p_void_reason),
+         updated_at = now()
+   where id = p_credit_note_id
+  returning * into v_cn;
+
+  return jsonb_build_object(
+    'credit_note', to_jsonb(v_cn),
+    'ledger_reversal_status', v_ledger_status,
+    'reversal', case when v_reversal_result is not null then v_reversal_result->'reversal' else null end,
+    'original_journal', case when v_reversal_result is not null then v_reversal_result->'original' else null end
+  );
+end;
+$$;
+
+revoke all on function void_credit_note(uuid, text, uuid) from public;
+revoke all on function void_credit_note(uuid, text, uuid) from authenticated;
+revoke all on function void_credit_note(uuid, text, uuid) from anon;
+grant execute on function void_credit_note(uuid, text, uuid) to service_role;
 
 -- Integration-only: same-transaction trace for credit note recalc trigger depth (not a product API).
 create or replace function integration_verify_credit_note_recalc_fires_once(

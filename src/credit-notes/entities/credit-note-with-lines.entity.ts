@@ -6,9 +6,10 @@ export class CreditNoteWithLines {
   lines!: CreditNoteLine[];
 }
 
-/** Issue response — ledger posting explicitly deferred (C1-4 / Batch 2). */
-export class CreditNoteIssueResult extends CreditNoteWithLines {
-  /** Always null until Batch 2 §7 wires credit-note posting. */
-  journal_entry_id!: null;
-  ledger_posting_status!: 'deferred_batch_2';
-}
+/** Issue response — includes posted credit-note journal entry on the credit note row. */
+export type CreditNoteIssueResult = CreditNoteWithLines;
+
+/** Void response — includes ledger reversal outcome when B2 posting exists. */
+export type CreditNoteVoidResult = CreditNoteWithLines & {
+  ledger_reversal_status: 'reversed' | 'skipped_no_posting';
+};

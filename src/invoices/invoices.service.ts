@@ -14,7 +14,7 @@ import { IssueInvoiceDto } from './dto/issue-invoice.dto';
 import { UpdateInvoiceLineDto } from './dto/update-invoice-line.dto';
 import { UpdateInvoiceDto } from './dto/update-invoice.dto';
 import { VoidInvoiceDto } from './dto/void-invoice.dto';
-import { InvoiceIssueResult } from './entities/invoice-with-lines.entity';
+import { InvoiceIssueResult, InvoiceVoidResult } from './entities/invoice-with-lines.entity';
 import { InvoiceLine } from './entities/invoice-line.entity';
 import { InvoiceWithLines } from './entities/invoice-with-lines.entity';
 import { Invoice } from './entities/invoice.entity';
@@ -152,11 +152,10 @@ export class InvoicesService {
   }
 
   /**
-   * [feature-spec-1.1.C.md §2.2] Void requires void_reason.
-   * TODO Batch 2: auto-reverse journal_entry_id once §7 posting exists —
-   * do not call reverse against null journal_entry_id in this pass.
+   * [feature-spec-1.1.C.md §2.2 / §7] Void requires void_reason and atomically
+   * reverses journal_entry_id via void_invoice RPC when posting exists.
    */
-  async void(id: string, dto: VoidInvoiceDto): Promise<InvoiceWithLines> {
+  async void(id: string, dto: VoidInvoiceDto, createdBy: string): Promise<InvoiceVoidResult> {
     const current = await this.findOne(id);
     const allowed = STATUS_TRANSITIONS[current.invoice.status] ?? [];
     if (!allowed.includes(InvoiceStatus.Void)) {
@@ -170,8 +169,16 @@ export class InvoicesService {
     }
 
     try {
-      await this.invoicesRepository.updateStatus(id, InvoiceStatus.Void, dto.void_reason.trim());
-      return this.findOne(id);
+      const { ledger_reversal_status } = await this.invoicesRepository.voidInvoice(
+        id,
+        dto.void_reason.trim(),
+        createdBy,
+      );
+      const withLines = await this.findOne(id);
+      return {
+        ...withLines,
+        ledger_reversal_status,
+      };
     } catch (error) {
       handleDatabaseError(error);
     }

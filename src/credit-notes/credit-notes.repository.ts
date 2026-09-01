@@ -28,4 +28,12 @@ export interface CreditNotesRepository {
     status: string;
   } | null>;
   issueCreditNote(id: string): Promise<CreditNote>;
+  voidCreditNote(
+    id: string,
+    voidReason: string,
+    createdBy: string,
+  ): Promise<{
+    credit_note: CreditNote;
+    ledger_reversal_status: 'reversed' | 'skipped_no_posting';
+  }>;
 }

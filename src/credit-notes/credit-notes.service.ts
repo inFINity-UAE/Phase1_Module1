@@ -16,7 +16,7 @@ import { CreateCreditNoteDto } from './dto/create-credit-note.dto';
 import { UpdateCreditNoteLineDto } from './dto/update-credit-note-line.dto';
 import { UpdateCreditNoteDto } from './dto/update-credit-note.dto';
 import { VoidCreditNoteDto } from './dto/void-credit-note.dto';
-import { CreditNoteIssueResult } from './entities/credit-note-with-lines.entity';
+import { CreditNoteIssueResult, CreditNoteVoidResult } from './entities/credit-note-with-lines.entity';
 import { CreditNoteLine } from './entities/credit-note-line.entity';
 import { CreditNoteWithLines } from './entities/credit-note-with-lines.entity';
 import { CreditNote } from './entities/credit-note.entity';
@@ -104,9 +104,8 @@ export class CreditNotesService {
   }
 
   /**
-   * [feature-spec-1.1.C.md §1.4 / decision #18] Draft → Issued: numbering only.
-   * Ledger posting (§7) is **not** wired in C1-4 — journal_entry_id stays null
-   * until Batch 2 credit-note posting path.
+   * [feature-spec-1.1.C.md §1.4 / §7] Draft → Issued: numbering and atomic
+   * credit-note ledger posting via issue_credit_note RPC.
    */
   async issue(id: string): Promise<CreditNoteIssueResult> {
     const current = await this.findOne(id);
@@ -118,22 +117,19 @@ export class CreditNotesService {
 
     try {
       await this.creditNotesRepository.issueCreditNote(id);
-      const issued = await this.findOne(id);
-      return {
-        ...issued,
-        journal_entry_id: null,
-        ledger_posting_status: 'deferred_batch_2',
-      };
+      return this.findOne(id);
     } catch (error) {
       handleDatabaseError(error);
     }
   }
 
   /**
-   * [feature-spec-1.1.C.md §2.2 pattern] Void requires void_reason.
-   * TODO Batch 2: reverse/adjust ledger once §7 posting exists.
+   * [feature-spec-1.1.C.md §2.2 / §7] Void requires void_reason and atomically
+   * reverses journal_entry_id via void_credit_note RPC when posting exists.
+   * Decision #14 applies to Issue (partial posting); void uses reverse_journal_entry
+   * for the whole document — all-or-nothing, same as invoice void (B3).
    */
-  async void(id: string, dto: VoidCreditNoteDto): Promise<CreditNoteWithLines> {
+  async void(id: string, dto: VoidCreditNoteDto, createdBy: string): Promise<CreditNoteVoidResult> {
     const current = await this.findOne(id);
     const allowed = STATUS_TRANSITIONS[current.credit_note.status] ?? [];
     if (!allowed.includes(CreditNoteStatus.Void)) {
@@ -147,12 +143,16 @@ export class CreditNotesService {
     }
 
     try {
-      await this.creditNotesRepository.updateStatus(
+      const { ledger_reversal_status } = await this.creditNotesRepository.voidCreditNote(
         id,
-        CreditNoteStatus.Void,
         dto.void_reason.trim(),
+        createdBy,
       );
-      return this.findOne(id);
+      const withLines = await this.findOne(id);
+      return {
+        ...withLines,
+        ledger_reversal_status,
+      };
     } catch (error) {
       handleDatabaseError(error);
     }
