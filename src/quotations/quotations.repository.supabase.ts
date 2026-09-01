@@ -131,6 +131,7 @@ export class SupabaseQuotationsRepository implements QuotationsRepository {
         discount_percent: dto.discount_percent ?? null,
         discount_amount: dto.discount_amount ?? null,
         vat_rate: dto.vat_rate,
+        is_service: dto.is_service ?? false,
       })
       .select()
       .single();
@@ -205,5 +206,18 @@ export class SupabaseQuotationsRepository implements QuotationsRepository {
       throw error;
     }
     return (data?.company_id as string | undefined) ?? null;
+  }
+
+  async convertToInvoice(quotationId: string, createdBy: string): Promise<string> {
+    const { data, error } = await this.supabase.client.rpc('convert_quotation_to_invoice', {
+      p_quotation_id: quotationId,
+      p_created_by: createdBy,
+    });
+
+    if (error) {
+      throw error;
+    }
+
+    return data as string;
   }
 }

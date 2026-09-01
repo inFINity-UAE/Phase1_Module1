@@ -13,6 +13,8 @@ import { UpdateQuotationDto } from './dto/update-quotation.dto';
 import { QuotationWithLines } from './entities/quotation-with-lines.entity';
 import { QuotationLine } from './entities/quotation-line.entity';
 import { Quotation } from './entities/quotation.entity';
+import { InvoiceWithLines } from '../invoices/entities/invoice-with-lines.entity';
+import { InvoicesService } from '../invoices/invoices.service';
 import {
   QUOTATIONS_REPOSITORY,
   QuotationsRepository,
@@ -32,6 +34,7 @@ export class QuotationsService {
   constructor(
     @Inject(QUOTATIONS_REPOSITORY)
     private readonly quotationsRepository: QuotationsRepository,
+    private readonly invoicesService: InvoicesService,
   ) {}
 
   async create(dto: CreateQuotationDto, createdBy: string): Promise<QuotationWithLines> {
@@ -125,6 +128,18 @@ export class QuotationsService {
 
   async decline(id: string): Promise<QuotationWithLines> {
     return this.transition(id, QuotationStatus.Declined);
+  }
+
+  /** [feature-spec-1.1.C.md §4 decision #9] Accepted quotation → Draft invoice via RPC. */
+  async convert(id: string, createdBy: string): Promise<InvoiceWithLines> {
+    await this.findOne(id);
+
+    try {
+      const invoiceId = await this.quotationsRepository.convertToInvoice(id, createdBy);
+      return this.invoicesService.findOne(invoiceId);
+    } catch (error) {
+      handleDatabaseError(error);
+    }
   }
 
   async createLine(dto: CreateQuotationLineDto & { quotation_id: string }): Promise<QuotationLine> {

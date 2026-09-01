@@ -36,13 +36,17 @@ create type normal_balance_type as enum ('debit', 'credit');
 
 create type period_status as enum ('open', 'soft_closed', 'closed');
 
+-- [feature-spec-1.1.C.md decision #13 / Batch 2 prerequisite] Module 1.1.C
+-- ledger posting entry classification — additive only; no existing rows use these values.
 create type journal_entry_type as enum (
   'manual',
   'recurring',
   'reversal',
   'opening_balance',
   'year_end_closing',
-  'system'
+  'system',
+  'sales_invoice',
+  'credit_note'
 );
 
 create type journal_entry_status as enum (
@@ -686,6 +690,7 @@ create table quotation_lines (
   discount_percent  numeric(5,2) check (discount_percent is null or (discount_percent > 0 and discount_percent <= 100)),
   discount_amount   numeric(18,2) check (discount_amount is null or discount_amount > 0),
   vat_rate          numeric(5,2) not null check (vat_rate >= 0 and vat_rate <= 100),
+  is_service        boolean not null default false,
   line_total        numeric(18,2) not null default 0,
 
   unique (quotation_id, line_number),
@@ -1320,6 +1325,17 @@ begin
 
   perform set_config('app.invoice_recalc_in_progress', 'true', true);
 
+  -- [feature-spec-1.1.C.md §1.3] Diagnostic only: integration tests set
+  -- app.invoice_recalc_trace=true in the same transaction to assert this
+  -- function runs exactly once per line mutation (no header→line cascade).
+  if current_setting('app.invoice_recalc_trace', true) = 'true' then
+    perform set_config(
+      'app.invoice_recalc_call_count',
+      (coalesce(nullif(current_setting('app.invoice_recalc_call_count', true), ''), '0')::int + 1)::text,
+      true
+    );
+  end if;
+
   update invoices
      set subtotal = v_subtotal,
          vat_total = v_vat_total,
@@ -1339,6 +1355,14 @@ security invoker
 set search_path = public, pg_temp
 as $$
 begin
+  if current_setting('app.invoice_recalc_trace', true) = 'true' then
+    perform set_config(
+      'app.invoice_line_trigger_count',
+      (coalesce(nullif(current_setting('app.invoice_line_trigger_count', true), ''), '0')::int + 1)::text,
+      true
+    );
+  end if;
+
   perform recalculate_invoice_totals(coalesce(new.invoice_id, old.invoice_id));
   return coalesce(new, old);
 end;
@@ -1428,8 +1452,268 @@ create trigger trg_prevent_nondraft_invoice_header_mutation
   before update on invoices
   for each row execute function prevent_nondraft_invoice_header_mutation();
 
--- [feature-spec-1.1.C.md §2.2 / §6.2 / decision #8] Issue: number, due_date,
--- invoice_type — NO journal posting in this pass (Batch 2 wires §7).
+-- [feature-spec-1.1.C.md §7 decision #12] Atomic sales-invoice ledger posting at Issue.
+-- Exception tokens: CREATED_BY_REQUIRED, INVOICE_NOT_FOUND, INVOICE_JOURNAL_ALREADY_POSTED,
+-- INVOICE_REQUIRES_LINES, INVOICE_POSTING_ACCOUNT_NOT_FOUND, INVOICE_LINE_MISSING_INCOME_ACCOUNT,
+-- NO_OPEN_PERIOD_FOR_INVOICE_DATE, INVOICE_POSTING_UNBALANCED
+create or replace function create_invoice_journal_entry(
+  p_invoice_id uuid,
+  p_created_by uuid,
+  p_reference_number text default null
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  v_invoice        invoices%rowtype;
+  v_period         accounting_periods%rowtype;
+  v_entry_number   bigint;
+  v_entry          journal_entries%rowtype;
+  v_lines          jsonb;
+  v_line           record;
+  v_ar_id          uuid;
+  v_discount_id    uuid;
+  v_vat_id         uuid;
+  v_line_number    int := 0;
+  v_gross          numeric(18,2);
+  v_discount       numeric(18,2);
+  v_net            numeric(18,2);
+  v_vat            numeric(18,2);
+  v_total          numeric(18,2);
+  v_gross_sum      numeric(18,2) := 0;
+  v_discount_sum   numeric(18,2) := 0;
+  v_total_debits   numeric(18,2);
+  v_total_credits  numeric(18,2);
+  v_ref            text;
+begin
+  if p_created_by is null then
+    raise exception 'CREATED_BY_REQUIRED';
+  end if;
+
+  select * into v_invoice from invoices where id = p_invoice_id;
+  if not found then
+    raise exception 'INVOICE_NOT_FOUND';
+  end if;
+
+  if v_invoice.journal_entry_id is not null then
+    raise exception 'INVOICE_JOURNAL_ALREADY_POSTED';
+  end if;
+
+  if not exists (select 1 from invoice_lines where invoice_id = p_invoice_id) then
+    raise exception 'INVOICE_REQUIRES_LINES';
+  end if;
+
+  select id into v_ar_id
+    from accounts
+   where company_id = v_invoice.company_id
+     and account_number = '1100';
+  if v_ar_id is null then
+    raise exception 'INVOICE_POSTING_ACCOUNT_NOT_FOUND';
+  end if;
+
+  select id into v_discount_id
+    from accounts
+   where company_id = v_invoice.company_id
+     and account_number = '4060';
+  if v_discount_id is null then
+    raise exception 'INVOICE_POSTING_ACCOUNT_NOT_FOUND';
+  end if;
+
+  select id into v_vat_id
+    from accounts
+   where company_id = v_invoice.company_id
+     and account_number = '2200';
+  if v_vat_id is null then
+    raise exception 'INVOICE_POSTING_ACCOUNT_NOT_FOUND';
+  end if;
+
+  -- [schema.sql accounting_periods] Half-open [period_start, period_end).
+  select * into v_period
+    from accounting_periods
+   where company_id = v_invoice.company_id
+     and status = 'open'
+     and period_start <= v_invoice.invoice_date
+     and period_end > v_invoice.invoice_date
+   order by period_start
+   limit 1;
+
+  if not found then
+    raise exception 'NO_OPEN_PERIOD_FOR_INVOICE_DATE';
+  end if;
+
+  for v_line in
+    select il.*
+      from invoice_lines il
+     where il.invoice_id = p_invoice_id
+     order by il.line_number
+  loop
+    if v_line.income_account_id is null then
+      raise exception 'INVOICE_LINE_MISSING_INCOME_ACCOUNT';
+    end if;
+
+    v_gross := round(v_line.quantity * v_line.unit_price, 2);
+
+    if v_line.discount_percent is not null then
+      v_discount := round(v_gross * v_line.discount_percent / 100, 2);
+    elsif v_line.discount_amount is not null then
+      v_discount := v_line.discount_amount;
+    else
+      v_discount := 0;
+    end if;
+
+    v_gross_sum := v_gross_sum + v_gross;
+    v_discount_sum := v_discount_sum + v_discount;
+  end loop;
+
+  v_total_debits := v_invoice.grand_total + v_discount_sum;
+  v_total_credits := v_gross_sum + v_invoice.vat_total;
+
+  if v_total_debits <> v_total_credits then
+    raise exception 'INVOICE_POSTING_UNBALANCED';
+  end if;
+
+  v_ref := coalesce(nullif(btrim(p_reference_number), ''), v_invoice.invoice_number);
+
+  v_entry_number := allocate_next_entry_number(v_invoice.company_id);
+
+  insert into journal_entries (
+    company_id,
+    entry_number,
+    period_id,
+    entry_date,
+    entry_type,
+    status,
+    narration,
+    reference_number,
+    created_by
+  ) values (
+    v_invoice.company_id,
+    v_entry_number,
+    v_period.id,
+    v_invoice.invoice_date,
+    'sales_invoice',
+    'draft',
+    case
+      when v_ref is not null then 'Sales invoice ' || v_ref
+      else 'Sales invoice'
+    end,
+    v_ref,
+    p_created_by
+  )
+  returning * into v_entry;
+
+  v_line_number := v_line_number + 1;
+  insert into journal_lines (
+    journal_entry_id,
+    line_number,
+    account_id,
+    debit,
+    credit,
+    description
+  ) values (
+    v_entry.id,
+    v_line_number,
+    v_ar_id,
+    v_invoice.grand_total,
+    0,
+    'Accounts Receivable - Trade'
+  );
+
+  for v_line in
+    select il.*
+      from invoice_lines il
+     where il.invoice_id = p_invoice_id
+     order by il.line_number
+  loop
+    v_gross := round(v_line.quantity * v_line.unit_price, 2);
+    v_line_number := v_line_number + 1;
+    insert into journal_lines (
+      journal_entry_id,
+      line_number,
+      account_id,
+      debit,
+      credit,
+      description
+    ) values (
+      v_entry.id,
+      v_line_number,
+      v_line.income_account_id,
+      0,
+      v_gross,
+      v_line.description
+    );
+  end loop;
+
+  if v_discount_sum > 0 then
+    v_line_number := v_line_number + 1;
+    insert into journal_lines (
+      journal_entry_id,
+      line_number,
+      account_id,
+      debit,
+      credit,
+      description
+    ) values (
+      v_entry.id,
+      v_line_number,
+      v_discount_id,
+      v_discount_sum,
+      0,
+      'Sales Discounts Given'
+    );
+  end if;
+
+  if v_invoice.vat_total > 0 then
+    v_line_number := v_line_number + 1;
+    insert into journal_lines (
+      journal_entry_id,
+      line_number,
+      account_id,
+      debit,
+      credit,
+      description
+    ) values (
+      v_entry.id,
+      v_line_number,
+      v_vat_id,
+      0,
+      v_invoice.vat_total,
+      'VAT Payable - Output VAT'
+    );
+  end if;
+
+  update journal_entries
+     set status = 'posted'
+   where id = v_entry.id
+     and status = 'draft'
+  returning * into v_entry;
+
+  if not found then
+    raise exception 'Failed to post sales invoice entry %', v_entry_number;
+  end if;
+
+  select coalesce(jsonb_agg(to_jsonb(jl) order by jl.line_number), '[]'::jsonb)
+    into v_lines
+    from journal_lines jl
+   where jl.journal_entry_id = v_entry.id;
+
+  return jsonb_build_object(
+    'entry', to_jsonb(v_entry),
+    'lines', v_lines,
+    'journal_entry_id', v_entry.id
+  );
+end;
+$$;
+
+revoke all on function create_invoice_journal_entry(uuid, uuid, text) from public;
+revoke all on function create_invoice_journal_entry(uuid, uuid, text) from authenticated;
+revoke all on function create_invoice_journal_entry(uuid, uuid, text) from anon;
+grant execute on function create_invoice_journal_entry(uuid, uuid, text) to service_role;
+
+-- [feature-spec-1.1.C.md §2.2 / §6.2 / decision #8 / §7 decision #12] Issue:
+-- number, due_date, invoice_type, and sales-invoice ledger posting.
 create or replace function issue_invoice(
   p_invoice_id uuid,
   p_invoice_type_override invoice_type default null
@@ -1446,6 +1730,8 @@ declare
   v_final_type invoice_type;
   v_due_date date;
   v_number text;
+  v_journal_result jsonb;
+  v_journal_entry_id uuid;
 begin
   select * into v_invoice from invoices where id = p_invoice_id for update;
   if not found then
@@ -1495,16 +1781,23 @@ begin
 
   v_number := allocate_next_invoice_number(v_invoice.company_id, v_invoice.invoice_date);
 
+  v_journal_result := create_invoice_journal_entry(
+    p_invoice_id,
+    v_invoice.created_by,
+    v_number
+  );
+  v_journal_entry_id := (v_journal_result->>'journal_entry_id')::uuid;
+
   update invoices
      set status = 'issued',
          invoice_number = v_number,
          invoice_type = v_final_type,
          due_date = v_due_date,
+         journal_entry_id = v_journal_entry_id,
          updated_at = now()
    where id = p_invoice_id
   returning * into v_invoice;
 
-  -- journal_entry_id intentionally left null — Batch 2 §7 ledger posting.
   return v_invoice;
 end;
 $$;
@@ -1513,6 +1806,167 @@ revoke all on function issue_invoice(uuid, invoice_type) from public;
 revoke all on function issue_invoice(uuid, invoice_type) from authenticated;
 revoke all on function issue_invoice(uuid, invoice_type) from anon;
 grant execute on function issue_invoice(uuid, invoice_type) to service_role;
+
+-- [feature-spec-1.1.C.md §4 decision #9] Accepted quotation → Draft invoice; one-time link.
+create or replace function convert_quotation_to_invoice(
+  p_quotation_id uuid,
+  p_created_by uuid
+)
+returns uuid
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  v_quotation quotations%rowtype;
+  v_invoice_id uuid;
+  v_line quotation_lines%rowtype;
+begin
+  if p_created_by is null then
+    raise exception 'CREATED_BY_REQUIRED';
+  end if;
+
+  select * into v_quotation
+    from quotations
+   where id = p_quotation_id
+     for update;
+
+  if not found then
+    raise exception 'QUOTATION_NOT_FOUND';
+  end if;
+
+  if v_quotation.status <> 'accepted' then
+    raise exception 'QUOTATION_NOT_ACCEPTED';
+  end if;
+
+  if v_quotation.converted_to_invoice_id is not null then
+    raise exception 'QUOTATION_ALREADY_CONVERTED';
+  end if;
+
+  if not exists (select 1 from quotation_lines where quotation_id = p_quotation_id) then
+    raise exception 'QUOTATION_REQUIRES_LINES';
+  end if;
+
+  insert into invoices (
+    company_id,
+    customer_id,
+    invoice_date,
+    payment_terms,
+    status,
+    source_quotation_id,
+    created_by
+  ) values (
+    v_quotation.company_id,
+    v_quotation.customer_id,
+    v_quotation.quotation_date,
+    'net_30',
+    'draft',
+    p_quotation_id,
+    p_created_by
+  )
+  returning id into v_invoice_id;
+
+  for v_line in
+    select *
+      from quotation_lines
+     where quotation_id = p_quotation_id
+     order by line_number
+  loop
+    insert into invoice_lines (
+      invoice_id,
+      line_number,
+      description,
+      quantity,
+      unit_price,
+      discount_percent,
+      discount_amount,
+      vat_rate,
+      is_service
+    ) values (
+      v_invoice_id,
+      v_line.line_number,
+      v_line.description,
+      v_line.quantity,
+      v_line.unit_price,
+      v_line.discount_percent,
+      v_line.discount_amount,
+      v_line.vat_rate,
+      v_line.is_service
+    );
+  end loop;
+
+  update quotations
+     set converted_to_invoice_id = v_invoice_id,
+         updated_at = now()
+   where id = p_quotation_id;
+
+  return v_invoice_id;
+end;
+$$;
+
+revoke all on function convert_quotation_to_invoice(uuid, uuid) from public;
+revoke all on function convert_quotation_to_invoice(uuid, uuid) from authenticated;
+revoke all on function convert_quotation_to_invoice(uuid, uuid) from anon;
+grant execute on function convert_quotation_to_invoice(uuid, uuid) to service_role;
+
+-- Integration-only: same-transaction trace for invoice recalc trigger depth (not a product API).
+create or replace function integration_verify_invoice_recalc_fires_once(
+  p_line_id uuid,
+  p_quantity numeric
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+begin
+  perform set_config('app.invoice_recalc_trace', 'true', true);
+  perform set_config('app.invoice_recalc_call_count', '0', true);
+  perform set_config('app.invoice_line_trigger_count', '0', true);
+
+  update invoice_lines
+     set quantity = p_quantity
+   where id = p_line_id;
+
+  return jsonb_build_object(
+    'line_trigger_fires', current_setting('app.invoice_line_trigger_count', true)::int,
+    'recalc_calls', current_setting('app.invoice_recalc_call_count', true)::int
+  );
+end;
+$$;
+
+-- Integration-only: Issue transition must not fire line→header recalc cascade.
+create or replace function integration_verify_invoice_issue_no_recalc(
+  p_invoice_id uuid
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+begin
+  perform set_config('app.invoice_recalc_trace', 'true', true);
+  perform set_config('app.invoice_recalc_call_count', '0', true);
+  perform set_config('app.invoice_line_trigger_count', '0', true);
+
+  perform issue_invoice(p_invoice_id);
+
+  return jsonb_build_object(
+    'line_trigger_fires', current_setting('app.invoice_line_trigger_count', true)::int,
+    'recalc_calls', current_setting('app.invoice_recalc_call_count', true)::int
+  );
+end;
+$$;
+
+revoke all on function integration_verify_invoice_recalc_fires_once(uuid, numeric) from public;
+revoke all on function integration_verify_invoice_recalc_fires_once(uuid, numeric) from authenticated;
+revoke all on function integration_verify_invoice_recalc_fires_once(uuid, numeric) from anon;
+grant execute on function integration_verify_invoice_recalc_fires_once(uuid, numeric) to service_role;
+
+revoke all on function integration_verify_invoice_issue_no_recalc(uuid) from public;
+revoke all on function integration_verify_invoice_issue_no_recalc(uuid) from authenticated;
+revoke all on function integration_verify_invoice_issue_no_recalc(uuid) from anon;
+grant execute on function integration_verify_invoice_issue_no_recalc(uuid) to service_role;
 
 revoke all on function suggest_invoice_line_income_account() from public;
 revoke all on function suggest_invoice_line_income_account() from authenticated;
@@ -1548,6 +2002,619 @@ revoke all on function prevent_nondraft_invoice_header_mutation() from public;
 revoke all on function prevent_nondraft_invoice_header_mutation() from authenticated;
 revoke all on function prevent_nondraft_invoice_header_mutation() from anon;
 grant execute on function prevent_nondraft_invoice_header_mutation() to service_role;
+
+-- ============================================================================
+-- 7d. Module 1.1.C — credit notes (feature-spec-1.1.C.md §1.4, decision #5)
+-- ============================================================================
+
+create type credit_note_status as enum ('draft', 'issued', 'void');
+
+create table credit_notes (
+  id                    uuid primary key default gen_random_uuid(),
+  company_id            uuid not null references companies(id),
+  customer_id           uuid not null references customers(id),
+  original_invoice_id   uuid not null references invoices(id),
+  credit_note_number    text,
+  credit_note_date      date not null,
+  status                credit_note_status not null default 'draft',
+  subtotal              numeric(18,2) not null default 0,
+  vat_total             numeric(18,2) not null default 0,
+  grand_total           numeric(18,2) not null default 0,
+  journal_entry_id      uuid references journal_entries(id),
+  void_reason           text,
+  created_by            uuid not null,
+  created_at            timestamptz not null default now(),
+  updated_at            timestamptz not null default now(),
+  constraint credit_notes_void_reason_required check (
+    status <> 'void' or (void_reason is not null and btrim(void_reason) <> '')
+  )
+);
+
+create unique index credit_notes_company_number_unique
+  on credit_notes(company_id, credit_note_number)
+  where credit_note_number is not null;
+
+create index idx_credit_notes_company on credit_notes(company_id);
+create index idx_credit_notes_original_invoice on credit_notes(original_invoice_id);
+create index idx_credit_notes_status on credit_notes(company_id, status);
+
+create table credit_note_lines (
+  id                        uuid primary key default gen_random_uuid(),
+  credit_note_id            uuid not null references credit_notes(id) on delete cascade,
+  line_number               smallint not null,
+  description               text not null,
+  quantity                  numeric(18,4) not null,
+  unit_price                numeric(18,2) not null,
+  discount_percent          numeric(5,2),
+  discount_amount           numeric(18,2),
+  vat_rate                  numeric(5,2) not null,
+  is_service                boolean not null default false,
+  income_account_id         uuid references accounts(id),
+  line_total                numeric(18,2) not null default 0,
+  original_invoice_line_id  uuid references invoice_lines(id),
+  reason                    text,
+  unique (credit_note_id, line_number),
+  constraint credit_note_lines_discount_xor check (
+    not (discount_percent is not null and discount_amount is not null)
+  ),
+  constraint credit_note_lines_reason_required check (
+    original_invoice_line_id is not null
+    or (reason is not null and btrim(reason) <> '')
+  )
+);
+
+create index idx_credit_note_lines_credit_note on credit_note_lines(credit_note_id);
+create index idx_credit_note_lines_original_invoice_line
+  on credit_note_lines(original_invoice_line_id)
+  where original_invoice_line_id is not null;
+
+-- [feature-spec-1.1.C.md decision #18] crn: lock; CRN-YYYY-NNNN; Issue only.
+create or replace function allocate_next_credit_note_number(
+  p_company_id uuid,
+  p_credit_note_date date default current_date
+)
+returns text
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  v_year int;
+  v_seq  int;
+begin
+  if p_company_id is null then
+    raise exception 'COMPANY_ID_REQUIRED';
+  end if;
+
+  perform pg_advisory_xact_lock(hashtext('crn:' || p_company_id::text));
+
+  v_year := extract(year from coalesce(p_credit_note_date, current_date))::int;
+
+  select coalesce(
+    max(
+      nullif(
+        regexp_replace(credit_note_number, '^CRN-' || v_year::text || '-', ''),
+        credit_note_number
+      )::int
+    ),
+    0
+  ) + 1
+    into v_seq
+    from credit_notes
+   where company_id = p_company_id
+     and credit_note_number ~ ('^CRN-' || v_year::text || '-[0-9]+$');
+
+  return format('CRN-%s-%s', v_year, lpad(v_seq::text, 4, '0'));
+end;
+$$;
+
+revoke all on function allocate_next_credit_note_number(uuid, date) from public;
+revoke all on function allocate_next_credit_note_number(uuid, date) from authenticated;
+revoke all on function allocate_next_credit_note_number(uuid, date) from anon;
+grant execute on function allocate_next_credit_note_number(uuid, date) to service_role;
+
+-- [feature-spec-1.1.C.md §1.4 decision #5] Copy VAT treatment from original line on INSERT;
+-- immutable on UPDATE when linked.
+create or replace function copy_credit_note_line_from_invoice_line()
+returns trigger
+language plpgsql
+security invoker
+set search_path = public, pg_temp
+as $$
+declare
+  v_src_vat numeric(5,2);
+  v_src_income uuid;
+  v_src_is_service boolean;
+  v_src_invoice_id uuid;
+  v_cn_invoice_id uuid;
+begin
+  if new.original_invoice_line_id is null then
+    return new;
+  end if;
+
+  if tg_op = 'UPDATE' then
+    if old.original_invoice_line_id is not null then
+      if new.vat_rate is distinct from old.vat_rate
+         or new.income_account_id is distinct from old.income_account_id
+         or new.is_service is distinct from old.is_service then
+        raise exception 'CREDIT_NOTE_LINE_DERIVED_FIELDS_IMMUTABLE';
+      end if;
+    end if;
+    return new;
+  end if;
+
+  select il.vat_rate, il.income_account_id, il.is_service, il.invoice_id
+    into v_src_vat, v_src_income, v_src_is_service, v_src_invoice_id
+    from invoice_lines il
+   where il.id = new.original_invoice_line_id;
+
+  if not found then
+    raise exception 'ORIGINAL_INVOICE_LINE_NOT_FOUND';
+  end if;
+
+  select cn.original_invoice_id
+    into v_cn_invoice_id
+    from credit_notes cn
+   where cn.id = new.credit_note_id;
+
+  if v_cn_invoice_id is distinct from v_src_invoice_id then
+    raise exception 'ORIGINAL_INVOICE_LINE_MISMATCH';
+  end if;
+
+  new.vat_rate := v_src_vat;
+  new.income_account_id := v_src_income;
+  new.is_service := v_src_is_service;
+
+  return new;
+end;
+$$;
+
+create trigger trg_01_copy_credit_note_line_from_invoice
+  before insert or update on credit_note_lines
+  for each row execute function copy_credit_note_line_from_invoice_line();
+
+create or replace function suggest_credit_note_line_income_account()
+returns trigger
+language plpgsql
+security invoker
+set search_path = public, pg_temp
+as $$
+declare
+  v_company_id uuid;
+  v_account_number char(4);
+  v_account_id uuid;
+begin
+  if new.original_invoice_line_id is not null or new.income_account_id is not null then
+    return new;
+  end if;
+
+  select company_id into v_company_id from credit_notes where id = new.credit_note_id;
+  if v_company_id is null then
+    return new;
+  end if;
+
+  if new.vat_rate = 5 then
+    if coalesce(new.is_service, false) then
+      v_account_number := '4040';
+    else
+      v_account_number := '4000';
+    end if;
+  elsif new.vat_rate = 0 then
+    v_account_number := '4010';
+  else
+    v_account_number := '4020';
+  end if;
+
+  select id into v_account_id
+    from accounts
+   where company_id = v_company_id
+     and account_number = v_account_number
+   limit 1;
+
+  if v_account_id is not null then
+    new.income_account_id := v_account_id;
+  end if;
+
+  return new;
+end;
+$$;
+
+create trigger trg_02_suggest_credit_note_line_income_account
+  before insert or update on credit_note_lines
+  for each row execute function suggest_credit_note_line_income_account();
+
+create or replace function set_credit_note_line_computed_fields()
+returns trigger
+language plpgsql
+security invoker
+set search_path = public, pg_temp
+as $$
+declare
+  v_net numeric(18,2);
+  v_vat numeric(18,2);
+  v_total numeric(18,2);
+begin
+  select * into v_net, v_vat, v_total
+    from compute_quotation_line_amounts(
+      new.quantity,
+      new.unit_price,
+      new.discount_percent,
+      new.discount_amount,
+      new.vat_rate
+    );
+  new.line_total := v_total;
+  return new;
+end;
+$$;
+
+create trigger trg_03_set_credit_note_line_computed_fields
+  before insert or update on credit_note_lines
+  for each row execute function set_credit_note_line_computed_fields();
+
+-- [feature-spec-1.1.C.md §1.4 decision #5] Cumulative cap + cnl: advisory lock.
+create or replace function enforce_credit_note_line_cumulative_cap()
+returns trigger
+language plpgsql
+security invoker
+set search_path = public, pg_temp
+as $$
+declare
+  v_original_line_total numeric(18,2);
+  v_credited_so_far numeric(18,2);
+begin
+  if new.original_invoice_line_id is null then
+    return new;
+  end if;
+
+  perform pg_advisory_xact_lock(hashtext('cnl:' || new.original_invoice_line_id::text));
+
+  select il.line_total into v_original_line_total
+    from invoice_lines il
+   where il.id = new.original_invoice_line_id;
+
+  if not found then
+    raise exception 'ORIGINAL_INVOICE_LINE_NOT_FOUND';
+  end if;
+
+  select coalesce(sum(cnl.line_total), 0)
+    into v_credited_so_far
+    from credit_note_lines cnl
+    join credit_notes cn on cn.id = cnl.credit_note_id
+   where cnl.original_invoice_line_id = new.original_invoice_line_id
+     and cn.status <> 'void'
+     and (tg_op = 'INSERT' or cnl.id <> new.id);
+
+  if v_credited_so_far + new.line_total > v_original_line_total then
+    raise exception 'CREDIT_NOTE_LINE_CUMULATIVE_CAP_EXCEEDED';
+  end if;
+
+  return new;
+end;
+$$;
+
+create trigger trg_04_enforce_credit_note_line_cumulative_cap
+  before insert or update on credit_note_lines
+  for each row execute function enforce_credit_note_line_cumulative_cap();
+
+create or replace function recalculate_credit_note_totals(p_credit_note_id uuid)
+returns void
+language plpgsql
+security invoker
+set search_path = public, pg_temp
+as $$
+declare
+  v_status credit_note_status;
+  v_subtotal numeric(18,2) := 0;
+  v_vat_total numeric(18,2) := 0;
+  v_line record;
+  v_net numeric(18,2);
+  v_vat numeric(18,2);
+  v_total numeric(18,2);
+begin
+  select status into v_status from credit_notes where id = p_credit_note_id;
+
+  if not found or v_status <> 'draft' then
+    return;
+  end if;
+
+  for v_line in
+    select quantity, unit_price, discount_percent, discount_amount, vat_rate
+      from credit_note_lines
+     where credit_note_id = p_credit_note_id
+     order by line_number
+  loop
+    select * into v_net, v_vat, v_total
+      from compute_quotation_line_amounts(
+        v_line.quantity,
+        v_line.unit_price,
+        v_line.discount_percent,
+        v_line.discount_amount,
+        v_line.vat_rate
+      );
+    v_subtotal := v_subtotal + v_net;
+    v_vat_total := v_vat_total + v_vat;
+  end loop;
+
+  perform set_config('app.credit_note_recalc_in_progress', 'true', true);
+
+  -- [feature-spec-1.1.C.md §1.4] Diagnostic only: integration tests set
+  -- app.credit_note_recalc_trace=true in the same transaction to assert this
+  -- function runs exactly once per line mutation (no header→line cascade).
+  if current_setting('app.credit_note_recalc_trace', true) = 'true' then
+    perform set_config(
+      'app.credit_note_recalc_call_count',
+      (coalesce(nullif(current_setting('app.credit_note_recalc_call_count', true), ''), '0')::int + 1)::text,
+      true
+    );
+  end if;
+
+  update credit_notes
+     set subtotal = v_subtotal,
+         vat_total = v_vat_total,
+         grand_total = v_subtotal + v_vat_total,
+         updated_at = now()
+   where id = p_credit_note_id
+     and status = 'draft';
+
+  perform set_config('app.credit_note_recalc_in_progress', '', true);
+end;
+$$;
+
+create or replace function refresh_credit_note_totals_from_lines()
+returns trigger
+language plpgsql
+security invoker
+set search_path = public, pg_temp
+as $$
+begin
+  if current_setting('app.credit_note_recalc_trace', true) = 'true' then
+    perform set_config(
+      'app.credit_note_line_trigger_count',
+      (coalesce(nullif(current_setting('app.credit_note_line_trigger_count', true), ''), '0')::int + 1)::text,
+      true
+    );
+  end if;
+
+  perform recalculate_credit_note_totals(coalesce(new.credit_note_id, old.credit_note_id));
+  return coalesce(new, old);
+end;
+$$;
+
+create trigger trg_refresh_credit_note_totals_from_lines
+  after insert or update or delete on credit_note_lines
+  for each row execute function refresh_credit_note_totals_from_lines();
+
+create or replace function prevent_nondraft_credit_note_line_mutation()
+returns trigger
+language plpgsql
+security invoker
+set search_path = public, pg_temp
+as $$
+declare
+  v_status credit_note_status;
+begin
+  select status into v_status
+    from credit_notes
+   where id = coalesce(new.credit_note_id, old.credit_note_id);
+
+  if v_status = 'draft' then
+    return coalesce(new, old);
+  end if;
+
+  raise exception 'CREDIT_NOTE_LINE_MUTATION_BLOCKED';
+end;
+$$;
+
+create trigger trg_prevent_nondraft_credit_note_line_mutation
+  before insert or update or delete on credit_note_lines
+  for each row execute function prevent_nondraft_credit_note_line_mutation();
+
+create or replace function prevent_credit_note_computed_totals_mutation()
+returns trigger
+language plpgsql
+security invoker
+set search_path = public, pg_temp
+as $$
+begin
+  if current_setting('app.credit_note_recalc_in_progress', true) = 'true' then
+    return new;
+  end if;
+
+  if new.subtotal is distinct from old.subtotal
+     or new.vat_total is distinct from old.vat_total
+     or new.grand_total is distinct from old.grand_total then
+    raise exception 'CREDIT_NOTE_TOTALS_CLIENT_MUTATION_BLOCKED';
+  end if;
+
+  return new;
+end;
+$$;
+
+create trigger trg_prevent_credit_note_computed_totals_mutation
+  before update on credit_notes
+  for each row execute function prevent_credit_note_computed_totals_mutation();
+
+create or replace function prevent_nondraft_credit_note_header_mutation()
+returns trigger
+language plpgsql
+security invoker
+set search_path = public, pg_temp
+as $$
+begin
+  if old.status = 'draft' then
+    return new;
+  end if;
+
+  if new.customer_id is distinct from old.customer_id
+     or new.original_invoice_id is distinct from old.original_invoice_id
+     or new.credit_note_date is distinct from old.credit_note_date
+     or new.credit_note_number is distinct from old.credit_note_number then
+    raise exception 'CREDIT_NOTE_HEADER_MUTATION_BLOCKED';
+  end if;
+
+  return new;
+end;
+$$;
+
+create trigger trg_prevent_nondraft_credit_note_header_mutation
+  before update on credit_notes
+  for each row execute function prevent_nondraft_credit_note_header_mutation();
+
+-- [feature-spec-1.1.C.md §1.4] Issue: number only — NO journal posting (Batch 2 §7).
+create or replace function issue_credit_note(p_credit_note_id uuid)
+returns credit_notes
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  v_cn credit_notes%rowtype;
+  v_inv_status invoice_status;
+  v_number text;
+begin
+  select * into v_cn from credit_notes where id = p_credit_note_id for update;
+  if not found then
+    raise exception 'CREDIT_NOTE_NOT_FOUND';
+  end if;
+
+  if v_cn.status <> 'draft' then
+    raise exception 'CREDIT_NOTE_NOT_DRAFT';
+  end if;
+
+  if not exists (select 1 from credit_note_lines where credit_note_id = p_credit_note_id) then
+    raise exception 'CREDIT_NOTE_REQUIRES_LINES';
+  end if;
+
+  select status into v_inv_status from invoices where id = v_cn.original_invoice_id;
+  if v_inv_status is null or v_inv_status = 'draft' then
+    raise exception 'CREDIT_NOTE_ORIGINAL_INVOICE_NOT_ISSUED';
+  end if;
+  if v_inv_status = 'void' then
+    raise exception 'CREDIT_NOTE_ORIGINAL_INVOICE_VOID';
+  end if;
+
+  v_number := allocate_next_credit_note_number(v_cn.company_id, v_cn.credit_note_date);
+
+  update credit_notes
+     set status = 'issued',
+         credit_note_number = v_number,
+         updated_at = now()
+   where id = p_credit_note_id
+  returning * into v_cn;
+
+  -- journal_entry_id intentionally left null — Batch 2 §7 credit-note posting.
+  return v_cn;
+end;
+$$;
+
+revoke all on function issue_credit_note(uuid) from public;
+revoke all on function issue_credit_note(uuid) from authenticated;
+revoke all on function issue_credit_note(uuid) from anon;
+grant execute on function issue_credit_note(uuid) to service_role;
+
+-- Integration-only: same-transaction trace for credit note recalc trigger depth (not a product API).
+create or replace function integration_verify_credit_note_recalc_fires_once(
+  p_line_id uuid,
+  p_quantity numeric
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+begin
+  perform set_config('app.credit_note_recalc_trace', 'true', true);
+  perform set_config('app.credit_note_recalc_call_count', '0', true);
+  perform set_config('app.credit_note_line_trigger_count', '0', true);
+
+  update credit_note_lines
+     set quantity = p_quantity
+   where id = p_line_id;
+
+  return jsonb_build_object(
+    'line_trigger_fires', current_setting('app.credit_note_line_trigger_count', true)::int,
+    'recalc_calls', current_setting('app.credit_note_recalc_call_count', true)::int
+  );
+end;
+$$;
+
+-- Integration-only: Issue transition must not fire line→header recalc cascade.
+create or replace function integration_verify_credit_note_issue_no_recalc(
+  p_credit_note_id uuid
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+begin
+  perform set_config('app.credit_note_recalc_trace', 'true', true);
+  perform set_config('app.credit_note_recalc_call_count', '0', true);
+  perform set_config('app.credit_note_line_trigger_count', '0', true);
+
+  perform issue_credit_note(p_credit_note_id);
+
+  return jsonb_build_object(
+    'line_trigger_fires', current_setting('app.credit_note_line_trigger_count', true)::int,
+    'recalc_calls', current_setting('app.credit_note_recalc_call_count', true)::int
+  );
+end;
+$$;
+
+revoke all on function integration_verify_credit_note_recalc_fires_once(uuid, numeric) from public;
+revoke all on function integration_verify_credit_note_recalc_fires_once(uuid, numeric) from authenticated;
+revoke all on function integration_verify_credit_note_recalc_fires_once(uuid, numeric) from anon;
+grant execute on function integration_verify_credit_note_recalc_fires_once(uuid, numeric) to service_role;
+
+revoke all on function integration_verify_credit_note_issue_no_recalc(uuid) from public;
+revoke all on function integration_verify_credit_note_issue_no_recalc(uuid) from authenticated;
+revoke all on function integration_verify_credit_note_issue_no_recalc(uuid) from anon;
+grant execute on function integration_verify_credit_note_issue_no_recalc(uuid) to service_role;
+
+revoke all on function copy_credit_note_line_from_invoice_line() from public;
+revoke all on function copy_credit_note_line_from_invoice_line() from authenticated;
+revoke all on function copy_credit_note_line_from_invoice_line() from anon;
+grant execute on function copy_credit_note_line_from_invoice_line() to service_role;
+
+revoke all on function suggest_credit_note_line_income_account() from public;
+revoke all on function suggest_credit_note_line_income_account() from authenticated;
+revoke all on function suggest_credit_note_line_income_account() from anon;
+grant execute on function suggest_credit_note_line_income_account() to service_role;
+
+revoke all on function set_credit_note_line_computed_fields() from public;
+revoke all on function set_credit_note_line_computed_fields() from authenticated;
+revoke all on function set_credit_note_line_computed_fields() from anon;
+grant execute on function set_credit_note_line_computed_fields() to service_role;
+
+revoke all on function enforce_credit_note_line_cumulative_cap() from public;
+revoke all on function enforce_credit_note_line_cumulative_cap() from authenticated;
+revoke all on function enforce_credit_note_line_cumulative_cap() from anon;
+grant execute on function enforce_credit_note_line_cumulative_cap() to service_role;
+
+revoke all on function recalculate_credit_note_totals(uuid) from public;
+revoke all on function recalculate_credit_note_totals(uuid) from authenticated;
+revoke all on function recalculate_credit_note_totals(uuid) from anon;
+grant execute on function recalculate_credit_note_totals(uuid) to service_role;
+
+revoke all on function refresh_credit_note_totals_from_lines() from public;
+revoke all on function refresh_credit_note_totals_from_lines() from authenticated;
+revoke all on function refresh_credit_note_totals_from_lines() from anon;
+grant execute on function refresh_credit_note_totals_from_lines() to service_role;
+
+revoke all on function prevent_nondraft_credit_note_line_mutation() from public;
+revoke all on function prevent_nondraft_credit_note_line_mutation() from authenticated;
+revoke all on function prevent_nondraft_credit_note_line_mutation() from anon;
+grant execute on function prevent_nondraft_credit_note_line_mutation() to service_role;
+
+revoke all on function prevent_credit_note_computed_totals_mutation() from public;
+revoke all on function prevent_credit_note_computed_totals_mutation() from authenticated;
+revoke all on function prevent_credit_note_computed_totals_mutation() from anon;
+grant execute on function prevent_credit_note_computed_totals_mutation() to service_role;
+
+revoke all on function prevent_nondraft_credit_note_header_mutation() from public;
+revoke all on function prevent_nondraft_credit_note_header_mutation() from authenticated;
+revoke all on function prevent_nondraft_credit_note_header_mutation() from anon;
+grant execute on function prevent_nondraft_credit_note_header_mutation() to service_role;
 
 -- [feature-spec.md decision #48 / §7.16 finding #7] §5.1 EXECUTE-revoke checklist
 -- on trigger helpers (hygiene — not PostgREST RPCs; triggers fire via engine).
@@ -1627,6 +2694,8 @@ alter table quotations enable row level security;
 alter table quotation_lines enable row level security;
 alter table invoices enable row level security;
 alter table invoice_lines enable row level security;
+alter table credit_notes enable row level security;
+alter table credit_note_lines enable row level security;
 
 create policy company_isolation_accounts on accounts
   using (company_id = (select current_setting('app.current_company_id', true))::uuid);
@@ -1667,6 +2736,17 @@ create policy company_isolation_invoice_lines on invoice_lines
   using (
     invoice_id in (
       select id from invoices
+      where company_id = (select current_setting('app.current_company_id', true))::uuid
+    )
+  );
+
+create policy company_isolation_credit_notes on credit_notes
+  using (company_id = (select current_setting('app.current_company_id', true))::uuid);
+
+create policy company_isolation_credit_note_lines on credit_note_lines
+  using (
+    credit_note_id in (
+      select id from credit_notes
       where company_id = (select current_setting('app.current_company_id', true))::uuid
     )
   );

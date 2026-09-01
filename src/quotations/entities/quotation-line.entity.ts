@@ -9,5 +9,6 @@ export class QuotationLine {
   discount_percent!: number | null;
   discount_amount!: number | null;
   vat_rate!: number;
+  is_service!: boolean;
   line_total!: number;
 }

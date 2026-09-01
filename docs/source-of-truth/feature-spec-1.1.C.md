@@ -12,8 +12,10 @@ from a numbered, dated decision there. Section 10 lists genuinely open
 items still to be resolved before or during build — everything else in
 this document is settled, not provisional.
 
-**Scope for this pass (C1):** quotations (**C1-2**), tax invoices (**C1-3**), credit notes, and
-their ledger integration. Everything else from the source feature list's
+**Scope for this pass (C1 / Batch 1):** customers (**C1-1**), quotations (**C1-2**), tax invoices (**C1-3**),
+credit notes (**C1-4**), quotation-to-invoice conversion (**C1-5**) — **landed 2026-08-31**.
+Ledger posting (§7), scheduled transitions (§8), and presentation/delivery (§9) are
+explicitly out of Batch 1; see §10. Everything else from the source feature list's
 section C is explicitly out of scope — see §9.
 
 **Dependencies confirmed clear before this document was finalized:**
@@ -111,7 +113,10 @@ exempt → `4020`. This is a suggested default, not a hardcoded mapping —
 manually overridable. *(Decision #4)*
 
 Totals rule and locking behavior: same as §1.2's quotation rule,
-applied to invoices. *(Decision #3, extended)*
+applied to invoices — verified by `integration_verify_invoice_recalc_fires_once`
+(one line UPDATE → `{line_trigger_fires: 1, recalc_calls: 1}`) and
+`integration_verify_invoice_issue_no_recalc` (Issue header write →
+`{line_trigger_fires: 0, recalc_calls: 0}`). *(Decision #3, extended)*
 
 ### 1.4 `credit_notes` + `credit_note_lines`
 
@@ -131,7 +136,16 @@ references the invoice it adjusts).
   `original_invoice_line_id` can never exceed that line's original
   `line_total` — enforced where `service_role` can't bypass it, matching
   Module 1.1.A decision #57's RPC-level (not just Nest-level) rejection
-  of invalid opening-balance lines. *(Decision #5)*
+  of invalid opening-balance lines. Cross-note aggregation uses
+  `enforce_credit_note_line_cumulative_cap` with `cnl:` advisory lock per
+  original line (C1-4). *(Decision #5)*
+
+Totals rule and locking behavior: same as §1.2's quotation rule,
+applied to credit notes — verified by
+`integration_verify_credit_note_recalc_fires_once`
+(one line UPDATE → `{line_trigger_fires: 1, recalc_calls: 1}`) and
+`integration_verify_credit_note_issue_no_recalc` (Issue header write →
+`{line_trigger_fires: 0, recalc_calls: 0}`). *(Decision #3, extended via §1.4)*
 
 ---
 
@@ -185,17 +199,44 @@ namespaces `quo:` and `inv:` (`hashtext('quo:' || company_id)` /
 `ye:` pattern. Format: prefix + year + zero-padded sequence (e.g.
 `QUO-2026-0001`). *(Decision #8)*
 
+**Credit notes:** §3 is silent on credit-note numbering; decision **#18**
+allocates `credit_note_number` on `Draft → Issued` via
+`allocate_next_credit_note_number` / `crn:` lock, format `CRN-YYYY-NNNN`
+— mirrors invoice Issue-only numbering because credit notes are FTA tax
+documents (decision #13).
+
 ---
 
 ## 4. Quotation-to-invoice conversion
 
-`convert_quotation_to_invoice(quotation_id, created_by)` copies header
-and line data across, sets the two-way link
-(`invoices.source_quotation_id` / `quotations.converted_to_invoice_id`),
-and lands the new invoice in `Draft` status — never auto-Issued. A human
-confirms before it becomes a real ledger transaction, consistent with
-Module 1.1.A's general philosophy that posting is always a deliberate,
-separately-triggered action. *(Decision #9)*
+`convert_quotation_to_invoice(quotation_id, created_by)` — atomic RPC
+(following Module 1.1.A's pattern, not multi-step Nest orchestration):
+
+- Validates quotation `status = 'accepted'` only (§2.1); all other
+  statuses raise `QUOTATION_NOT_ACCEPTED`.
+- Rejects when `converted_to_invoice_id` is already set
+  (`QUOTATION_ALREADY_CONVERTED`) — one conversion per quotation, never
+  a silent second invoice or link overwrite.
+- Copies `customer_id`, `quotation_date` → `invoice_date`, and every
+  `quotation_line` to a new `invoice` + `invoice_lines` in `draft`
+  status. `quotation_lines` has no `income_account_id` (§1.2 vs §1.3 —
+  intentional; income accounts are invoice-only); converted lines leave
+  `income_account_id` null so `suggest_invoice_line_income_account`
+  applies the same VAT-rate / `is_service` default logic as C1-3
+  (`is_service = false` because quotations carry no service flag).
+- `quotations.notes` has no equivalent on `invoices` (§1.3 lists no
+  notes column) — not copied.
+- Sets two-way link: `invoices.source_quotation_id` and
+  `quotations.converted_to_invoice_id`.
+- Does **not** allocate `invoice_number`, `invoice_type`, or `due_date`
+  (decision #8 / #10 — those happen on the invoice's own Issue
+  transition only).
+
+Nest: `POST /quotations/:id/convert` — standard auth guard stack;
+returns the new invoice with lines.
+
+Verified: `quotations.convert.integration.spec.ts`. *(Decision #9,
+**C1-5**)*
 
 ---
 
@@ -300,12 +341,47 @@ deferred items.
 
 ## 10. Known open items
 
+**Batch 1 (C1-1…C1-5) is closed as of 2026-08-31.** This table is the
+authoritative carry-forward list into Batch 2 and later — same discipline
+as Module 1.1.A's §7.2 / known-open-items pattern: flagged here so nothing
+is silently forgotten between batches.
+
+### Resolved in Batch 1 (not open)
+
+| Item | Where closed |
+|---|---|
+| Discount percent XOR amount CHECK (#2) | `quotation_lines` CHECK + integration test |
+| Quotation / invoice / credit-note totals recalc + lock (#3) | DB triggers + `integration_verify_*_recalc_fires_once` probes |
+| Invoice Issue numbering / due_date / invoice_type (#8, #10, #11) | `issue_invoice` RPC — C1-3 |
+| Credit note Issue numbering (#18) | `issue_credit_note` RPC — C1-4 |
+| Quotation → invoice convert (#9) | `convert_quotation_to_invoice` RPC — C1-5 |
+| Cumulative credit cap + `cnl:` lock (#5) | `enforce_credit_note_line_cumulative_cap` — C1-4 |
+| `journal_entry_type` enum extension (#13) | `schema.sql` + `apply_journal_entry_type_sales_invoice_credit_note.sql` |
+| Invoice ledger posting at Issue (§7 / #12) | `create_invoice_journal_entry` RPC wired into `issue_invoice` — `invoices.integration.spec.ts` |
+
+### Still outstanding
+
 | Gap | Status | Detail |
 |---|---|---|
-| Product/service catalog default income-account mapping | **Deferred** | §1.3's VAT-rate suggestion is a per-line default; a catalog-driven default (a specific product always maps to a specific account) needs its own entity, not yet scoped |
-| Discount CHECK constraint exact wording | **Closed** | §1.2 CHECK: percent XOR amount, or neither — implemented on `quotation_lines` |
-| Invoice ledger posting at Issue (§7) | **Deferred — Batch 2** | C1-3 Issue allocates number, due_date, invoice_type only; `journal_entry_id` stays null; `create_invoice_journal_entry` not wired |
-| Void auto-reversal of journal entry (§2.2) | **Deferred — Batch 2** | C1-3 records `void_reason` + status only; reversal call blocked until posting exists — no stub against null `journal_entry_id` |
+| **Credit note ledger posting (§7 / #14)** | **Batch 2** | Dedicated posting RPC not built (must not reuse `reverse_journal_entry` — partial credits); C1-4 `issue_credit_note` allocates number only; `journal_entry_id` stays null; Issue response exposes `ledger_posting_status: 'deferred_batch_2'` |
+| **Invoice void → journal auto-reversal (§2.2 / #7)** | **Batch 2** | C1-3 void records `void_reason` + status only; no reversal call yet — `journal_entry_id` is now populated at Issue so void reversal can wire to `reverse_journal_entry` or equivalent |
+| **Credit note void → ledger reversal/adjustment (§2.2 pattern)** | **Batch 2** | C1-4 void records `void_reason` + status only; same Batch 2 gate as invoice void — depends on credit-note posting path |
+| **Quotation `Expired` scheduled transition (§2.1 / §8 / #6, #15)** | **Batch 2** | Lifecycle + enum exist; no `valid_until`-driven RPC, no scheduler registration on Module 1.1.A's #62–#63 cron infrastructure |
+| **Invoice `Overdue` scheduled transition (§2.2 / §8 / #7, #15)** | **Batch 2** | Lifecycle + enum exist; no `due_date`-driven RPC, no scheduler registration; `amount_paid` column exists but is never updated in Batch 1 |
+| **Invoice `partially_paid` / `paid` + payment application (§2.2)** | **Deferred — Module D (AR)** | Status enum + `amount_paid` column reserved; no transitions into paid states, no payment recording — AR module owns payment application per `Module_1.1_Build_Order_Scope.md` §3 |
+| **Invoice write-off ledger posting (§2.2 `written_off`)** | **Deferred — Module D (AR)** | C1-3 exposes status transition only (`POST …/write-off`); bad-debt journal + FTA VAT bad-debt relief (6-month rule) straddle D/F per build-order §3 — post write-off journal in D, wire automatic VAT relief in F |
+| **Quotation `is_service` → convert income account (§4 / C1-5)** | **Resolved — Batch 1** | `quotation_lines.is_service` added; `convert_quotation_to_invoice` carries value through to invoice lines — `quotations.convert.integration.spec.ts` |
+| **Product/service catalog default income-account mapping** | **Deferred — unscoped** | §1.3 VAT-rate suggestion is per-line default only; catalog-driven mapping needs its own entity — not scoped in Batch 1 or Batch 2 |
+| **§9 presentation / delivery features** | **Deferred — post-C1** | PDF generation, WhatsApp share, Arabic/English bilingual toggle, automated payment reminder emails, recurring invoice generation, proforma-specific behavior beyond the reserved `invoice_type` enum value, invoice cloning — see §9; wrap stable C1 core, do not build alongside Batch 2 ledger work |
+| **FTA sequential numbering gap detection / audit register** | **Deferred — post-C1** | Build-order §2 flags gap detection and immutable register as FTA-compliance follow-ups distinct from Batch 1's allocate-on-Issue RPCs — not implemented |
+
+**Batch 2 minimum scope (ledger + scheduler):** credit-note posting (#14),
+void reversals (both document types), then Expired/Overdue scheduler hooks.
+Invoice posting (#12) and enum migration (#13) are closed.
+
+**Explicitly not Batch 2:** Module D payment/write-off ledger work, §9
+presentation features, product catalog — each has its own row above so they
+are not accidentally folded into Batch 2 by default.
 
 ---
 
@@ -317,11 +393,11 @@ deferred items.
 | 2 | 2026-08-30 | Discount stored as percent XOR amount, mutually exclusive CHECK | §1.2 |
 | 3 | 2026-08-30 | Totals DB-computed while draft, locked on non-draft (**extended to invoices — C1-3**) | §1.2, §1.3 |
 | 4 | 2026-08-30 | VAT rate auto-suggests income account per finalized COA's existing segmentation (**+ `is_service` on invoice_lines — C1-3**) | §1.3 |
-| 5 | 2026-08-30 | Credit notes support line-level linkage; DB-enforced cumulative credit cap | §1.4 |
+| 5 | 2026-08-30 | Credit notes support line-level linkage; DB-enforced cumulative credit cap (**C1-4 — `cnl:` lock**) | §1.4 |
 | 6 | 2026-08-30 | Quotation status lifecycle, `Expired` scheduled | §2.1 |
 | 7 | 2026-08-30 | Invoice status lifecycle adds `Issued` and `Void`; void requires reason (**journal auto-reversal deferred Batch 2 — C1-3**) | §2.2 |
 | 8 | 2026-08-30 | Numbering allocated at Issue (invoices), at INSERT (quotations #16); `quo:`/`inv:` locks (**C1-3 invoices**) | §3 |
-| 9 | 2026-08-30 | Quotation-to-invoice conversion lands in Draft, never auto-Issued | §4 |
+| 9 | 2026-08-30 | Quotation-to-invoice conversion lands in Draft, never auto-Issued (**C1-5 — `convert_quotation_to_invoice` RPC + `POST /quotations/:id/convert`**) | §4 |
 | 10 | 2026-08-30 | Payment terms enum; `due_date` server-derived at Issue (**C1-3**) | §5 |
 | 11 | 2026-08-30 | Tax invoice vs. simplified: two-branch (TRN + AED 10,000 VAT-inclusive threshold), FTA Art. 59(5) (**C1-3**) | §6.2 |
 | 12 | 2026-08-30 | Invoice posting: AR (1100) / income / discounts (4060) / VAT Payable (2200) (**deferred Batch 2 — C1-3 scope boundary**) | §7 |
@@ -330,3 +406,4 @@ deferred items.
 | 15 | 2026-08-30 | Expired/Overdue reuse Module 1.1.A's #62–#63 scheduler, confirmed live and race-safe before adoption | §8 |
 | 16 | 2026-08-31 | `quotation_number` allocated at quotation INSERT (BEFORE INSERT → `allocate_next_quotation_number` / `quo:` lock), not deferred to Sent or later — distinct from invoice numbering at Issue (#8) | §3, §1.2 |
 | 17 | 2026-08-31 | `customers.trn` immutable after create — set on POST only; wrong TRN → deactivate + new customer; avoids duplicate-legal-entity ambiguity (#1) and invoice-type drift (§6.2) | §1.1 |
+| 18 | 2026-08-31 | Credit note numbering at Issue via `allocate_next_credit_note_number` / `crn:` lock, `CRN-YYYY-NNNN` — §3 silent; mirrors invoice pattern (#8) as FTA tax document (#13) (**C1-4**) | §3, §1.4 |

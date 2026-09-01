@@ -80,4 +80,10 @@ export class QuotationsController {
   decline(@Param('id', ParseUUIDPipe) id: string) {
     return this.quotationsService.decline(id);
   }
+
+  @Post(':id/convert')
+  @RequireCompanyMembership({ type: 'param', resource: 'quotation' })
+  convert(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: AuthenticatedUser) {
+    return this.quotationsService.convert(id, user.id);
+  }
 }

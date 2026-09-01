@@ -13,7 +13,9 @@ export type CompanyResourceKind =
   | 'quotation'
   | 'quotation_line'
   | 'invoice'
-  | 'invoice_line';
+  | 'invoice_line'
+  | 'credit_note'
+  | 'credit_note_line';
 
 export interface CompanyMembersRepository {
   findRole(userId: string, companyId: string): Promise<CompanyRole | null>;
@@ -28,4 +30,6 @@ export interface CompanyMembersRepository {
   findCompanyIdByQuotationLineId(lineId: string): Promise<string | null>;
   findCompanyIdByInvoiceId(invoiceId: string): Promise<string | null>;
   findCompanyIdByInvoiceLineId(lineId: string): Promise<string | null>;
+  findCompanyIdByCreditNoteId(creditNoteId: string): Promise<string | null>;
+  findCompanyIdByCreditNoteLineId(lineId: string): Promise<string | null>;
 }

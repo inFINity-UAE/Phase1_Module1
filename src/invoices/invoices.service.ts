@@ -123,9 +123,8 @@ export class InvoicesService {
   }
 
   /**
-   * [feature-spec-1.1.C.md §2.2 / decision #8] Draft → Issued: numbering,
-   * due_date, invoice_type. Ledger posting (§7) is **not** wired in C1-3 —
-   * journal_entry_id stays null until Batch 2 create_invoice_journal_entry.
+   * [feature-spec-1.1.C.md §2.2 / §7] Draft → Issued: numbering, due_date,
+   * invoice_type, and atomic sales-invoice ledger posting via issue_invoice RPC.
    */
   async issue(id: string, dto?: IssueInvoiceDto): Promise<InvoiceIssueResult> {
     const current = await this.findOne(id);
@@ -146,12 +145,7 @@ export class InvoicesService {
         id,
         dto?.invoice_type_override ?? null,
       );
-      const issued = await this.findOne(id);
-      return {
-        ...issued,
-        journal_entry_id: null,
-        ledger_posting_status: 'deferred_batch_2',
-      };
+      return this.findOne(id);
     } catch (error) {
       handleDatabaseError(error);
     }

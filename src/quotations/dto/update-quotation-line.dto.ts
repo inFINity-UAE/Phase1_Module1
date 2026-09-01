@@ -1,4 +1,4 @@
-import { IsNumber, IsOptional, IsString, Min, MinLength } from 'class-validator';
+import { IsBoolean, IsNumber, IsOptional, IsString, Min, MinLength } from 'class-validator';
 
 export class UpdateQuotationLineDto {
   @IsOptional()
@@ -35,4 +35,8 @@ export class UpdateQuotationLineDto {
   @IsNumber()
   @Min(0)
   vat_rate?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  is_service?: boolean;
 }

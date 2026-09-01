@@ -70,8 +70,18 @@ const INVOICE_DATE = '2026-06-01';
 
     afterAll(async () => {
       for (const id of createdInvoiceIds.reverse()) {
+        const { data: inv } = await supabase.client
+          .from('invoices')
+          .select('journal_entry_id')
+          .eq('id', id)
+          .maybeSingle();
         await supabase.client.from('invoice_lines').delete().eq('invoice_id', id);
         await supabase.client.from('invoices').delete().eq('id', id);
+        const journalEntryId = inv?.journal_entry_id as string | null | undefined;
+        if (journalEntryId) {
+          await supabase.client.from('journal_lines').delete().eq('journal_entry_id', journalEntryId);
+          await supabase.client.from('journal_entries').delete().eq('id', journalEntryId);
+        }
       }
       for (const id of createdCustomerIds.reverse()) {
         await supabase.client.from('customers').delete().eq('id', id);
@@ -126,9 +136,7 @@ const INVOICE_DATE = '2026-06-01';
       const created = await createDraftInvoice(customerWithTrnId);
       const issued = await invoicesService.issue(created.invoice.id);
 
-      expect(issued.ledger_posting_status).toBe('deferred_batch_2');
-      expect(issued.journal_entry_id).toBeNull();
-      expect(issued.invoice.journal_entry_id).toBeNull();
+      expect(issued.invoice.journal_entry_id).toBeTruthy();
       expect(issued.invoice.invoice_number).toMatch(/^INV-2026-\d{4}$/);
 
       await expect(
@@ -228,7 +236,7 @@ const INVOICE_DATE = '2026-06-01';
       });
       expect(voided.invoice.status).toBe(InvoiceStatus.Void);
       expect(voided.invoice.void_reason).toBe('Customer cancelled before payment');
-      expect(voided.invoice.journal_entry_id).toBeNull();
+      expect(voided.invoice.journal_entry_id).toBeTruthy();
     });
 
     it('suggests income_account_id from vat_rate and is_service', async () => {
@@ -279,6 +287,96 @@ const INVOICE_DATE = '2026-06-01';
       expect(service.lines[0].income_account_id).toBe(service4040);
     });
 
+    it('issue posts sales_invoice journal entry with exact debit/credit breakdown (§7)', async () => {
+      const ar1100 = await getAccountIdByNumber(supabase, companyId, '1100');
+      const goods4000 = await getAccountIdByNumber(supabase, companyId, '4000');
+      const service4040 = await getAccountIdByNumber(supabase, companyId, '4040');
+      const zero4010 = await getAccountIdByNumber(supabase, companyId, '4010');
+      const discounts4060 = await getAccountIdByNumber(supabase, companyId, '4060');
+      const vat2200 = await getAccountIdByNumber(supabase, companyId, '2200');
+
+      const created = await invoicesService.create(
+        {
+          company_id: companyId,
+          customer_id: customerWithTrnId,
+          invoice_date: INVOICE_DATE,
+          lines: [
+            {
+              line_number: 1,
+              description: 'Goods line',
+              quantity: 2,
+              unit_price: 100,
+              vat_rate: 5,
+              is_service: false,
+            },
+            {
+              line_number: 2,
+              description: 'Service discounted',
+              quantity: 1,
+              unit_price: 50,
+              discount_percent: 10,
+              vat_rate: 5,
+              is_service: true,
+            },
+            {
+              line_number: 3,
+              description: 'Zero-rated export',
+              quantity: 1,
+              unit_price: 30,
+              vat_rate: 0,
+              is_service: false,
+            },
+          ],
+        },
+        USER_ID,
+      );
+      createdInvoiceIds.push(created.invoice.id);
+
+      expect(Number(created.invoice.subtotal)).toBe(275);
+      expect(Number(created.invoice.vat_total)).toBe(12.25);
+      expect(Number(created.invoice.grand_total)).toBe(287.25);
+
+      const issued = await invoicesService.issue(created.invoice.id);
+      const journalEntryId = issued.invoice.journal_entry_id;
+      expect(journalEntryId).toBeTruthy();
+
+      const { data: entry, error: entryError } = await supabase.client
+        .from('journal_entries')
+        .select('entry_type, status, reference_number')
+        .eq('id', journalEntryId!)
+        .single();
+      expect(entryError).toBeNull();
+      expect(entry?.entry_type).toBe('sales_invoice');
+      expect(entry?.status).toBe('posted');
+      expect(entry?.reference_number).toBe(issued.invoice.invoice_number);
+
+      const { data: lines, error: linesError } = await supabase.client
+        .from('journal_lines')
+        .select('account_id, debit, credit')
+        .eq('journal_entry_id', journalEntryId!)
+        .order('line_number');
+      expect(linesError).toBeNull();
+
+      const pairs = (lines ?? []).map((l) => ({
+        account_id: l.account_id as string,
+        debit: Number(l.debit),
+        credit: Number(l.credit),
+      }));
+
+      expect(pairs).toEqual([
+        { account_id: ar1100, debit: 287.25, credit: 0 },
+        { account_id: goods4000, debit: 0, credit: 200 },
+        { account_id: service4040, debit: 0, credit: 50 },
+        { account_id: zero4010, debit: 0, credit: 30 },
+        { account_id: discounts4060, debit: 5, credit: 0 },
+        { account_id: vat2200, debit: 0, credit: 12.25 },
+      ]);
+
+      const totalDebits = pairs.reduce((sum, p) => sum + p.debit, 0);
+      const totalCredits = pairs.reduce((sum, p) => sum + p.credit, 0);
+      expect(totalDebits).toBe(totalCredits);
+    });
+
     it('concurrent Issue on two drafts yields unique invoice_numbers', async () => {
       const a = await createDraftInvoice(customerWithTrnId);
       const b = await createDraftInvoice(customerWithTrnId);
@@ -291,6 +389,33 @@ const INVOICE_DATE = '2026-06-01';
       expect(issuedA.invoice.invoice_number).toMatch(/^INV-2026-/);
       expect(issuedB.invoice.invoice_number).toMatch(/^INV-2026-/);
       expect(issuedA.invoice.invoice_number).not.toBe(issuedB.invoice.invoice_number);
+    });
+
+    it('recalc trigger fires exactly once per line UPDATE (no header→line cascade)', async () => {
+      const created = await createDraftInvoice(customerWithTrnId);
+
+      const { data, error } = await supabase.client.rpc(
+        'integration_verify_invoice_recalc_fires_once',
+        {
+          p_line_id: created.lines[0].id,
+          p_quantity: 2,
+        },
+      );
+
+      expect(error).toBeNull();
+      expect(data).toEqual({ line_trigger_fires: 1, recalc_calls: 1 });
+    });
+
+    it('Issue transition does not fire line→header recalc cascade', async () => {
+      const created = await createDraftInvoice(customerWithTrnId);
+
+      const { data, error } = await supabase.client.rpc(
+        'integration_verify_invoice_issue_no_recalc',
+        { p_invoice_id: created.invoice.id },
+      );
+
+      expect(error).toBeNull();
+      expect(data).toEqual({ line_trigger_fires: 0, recalc_calls: 0 });
     });
   },
 );

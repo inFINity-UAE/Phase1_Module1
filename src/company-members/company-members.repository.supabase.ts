@@ -207,4 +207,39 @@ export class SupabaseCompanyMembersRepository implements CompanyMembersRepositor
     }
     return parent.company_id ?? null;
   }
+
+  async findCompanyIdByCreditNoteId(creditNoteId: string): Promise<string | null> {
+    const { data, error } = await this.supabase.client
+      .from('credit_notes')
+      .select('company_id')
+      .eq('id', creditNoteId)
+      .maybeSingle();
+
+    if (error) {
+      throw error;
+    }
+
+    return (data?.company_id as string | undefined) ?? null;
+  }
+
+  async findCompanyIdByCreditNoteLineId(lineId: string): Promise<string | null> {
+    const { data, error } = await this.supabase.client
+      .from('credit_note_lines')
+      .select('credit_note_id, credit_notes!inner(company_id)')
+      .eq('id', lineId)
+      .maybeSingle();
+
+    if (error) {
+      throw error;
+    }
+
+    const parent = data?.credit_notes as { company_id?: string } | { company_id?: string }[] | null;
+    if (!parent) {
+      return null;
+    }
+    if (Array.isArray(parent)) {
+      return parent[0]?.company_id ?? null;
+    }
+    return parent.company_id ?? null;
+  }
 }

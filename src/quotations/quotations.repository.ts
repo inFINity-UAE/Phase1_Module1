@@ -26,4 +26,5 @@ export interface QuotationsRepository {
   findQuotationIdByLineId(lineId: string): Promise<string | null>;
   findCustomerActive(customerId: string): Promise<boolean | null>;
   findCustomerCompanyId(customerId: string): Promise<string | null>;
+  convertToInvoice(quotationId: string, createdBy: string): Promise<string>;
 }

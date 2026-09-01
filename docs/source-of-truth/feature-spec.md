@@ -19,7 +19,7 @@ repeated inline.
 |---|---|---|
 | Hard-close / reopen HTTP; close checklist (Rules §1.22) | **Stub** | Schema columns reserved; not gaps |
 
-All §7.16 / §7.26 audit findings are closed (#41–#48, #51–#54). Auth: **72/72** routes guarded across 13 controllers (#41, #53, #56 + H1 reports + Module 1.1.C customers/quotations/invoices). `--runInBand` is **not** required (#37). System-account UPDATE DB backstop closed (#58). Integrity sweep #59 closed its scope; hard-close/reopen remains the only stub. `v_trial_balance` status-filter live bug closed (#60). Year-end P&L aggregation uses `is_ledger_truth_status` (#61); Nest fiscal-year P&L read aligned via `get_profit_and_loss` RPC (#64). Recurring templates: unattended daily Nest `@Cron` (#62); concurrent due-generation race closed via `rjt:` advisory-lock RPC (#63). Module 1.1.C: customers (#C1-1) + quotations (#C1-2) + invoices (#C1-3) landed.
+All §7.16 / §7.26 audit findings are closed (#41–#48, #51–#54). Auth: **83/83** routes guarded across 15 controllers (#41, #53, #56 + H1 reports + Module 1.1.C customers/quotations/invoices/credit-notes). `--runInBand` is **not** required (#37). System-account UPDATE DB backstop closed (#58). Integrity sweep #59 closed its scope; hard-close/reopen remains the only stub. `v_trial_balance` status-filter live bug closed (#60). Year-end P&L aggregation uses `is_ledger_truth_status` (#61); Nest fiscal-year P&L read aligned via `get_profit_and_loss` RPC (#64). Recurring templates: unattended daily Nest `@Cron` (#62); concurrent due-generation race closed via `rjt:` advisory-lock RPC (#63). Module 1.1.C: customers (#C1-1) + quotations (#C1-2) + invoices (#C1-3) + credit notes (#C1-4) + quotation convert (#C1-5) landed.
 
 **Fresh DB setup:** run `schema.sql` top-to-bottom (includes §12 table grants — no separate apply scripts).
 
@@ -746,26 +746,27 @@ to keep applying to any future fixed-company test setup.)*
 
 ### 7.2 Verification baseline
 
-**Current (2026-08-31, post–Module 1.1.C C1-3 invoices) — recount, not incremental drift:**
+**Current (2026-08-31, post–Module 1.1.C C1-5 quotation convert) — recount, not incremental drift:**
 
 | Check | Result |
 |---|---|
 | npm run build | Pass |
-| Full suite | **48 suites** / **495 tests** — **495/495 pass** after C1-3 (`npx jest`, 2026-08-31) |
+| Full suite | **51 suites** / **535 tests** — **535/535 pass** after C1-5 (`npx jest`, 2026-08-31) |
 | COA verify | node scripts/verify-reset-health.mjs — **7/7** on demo …0002 |
-| Auth regression | **72/72** routes (`controller-auth-coverage.spec.ts`; 13 controllers incl. customers + quotations + invoices) |
+| Auth regression | **83/83** routes (`controller-auth-coverage.spec.ts`; 15 controllers incl. credit-notes + convert) |
+| AuthModule wiring | `node scripts/verify-auth-module-imports.mjs` — **14/14** guarded controllers OK |
 | Fresh DB setup | schema.sql top-to-bottom + seed_finalized_coa_demo_company_0002.sql |
 | Excel TC1–TC14 | **14 PASS / 0 PARTIAL / 0 FAIL** (incl. #55/#56/#57 deltas) |
 | `v_trial_balance` | `security_invoker=true` confirmed live; status filter uses `is_ledger_truth_status` (#60) |
 | Recurring schedule | Nest `@Cron` EVERY_DAY_AT_1AM → `runDueGenerations` per company (#62); due claim via `generate_due_recurring_entry` / `rjt:` (#63) |
-| Module 1.1.C | customers C1-1 + quotations C1-2 + invoices C1-3 (see feature-spec-1.1.C.md) |
+| Module 1.1.C | customers C1-1 + quotations C1-2 + invoices C1-3 + credit notes C1-4 + quotation convert C1-5 (see feature-spec-1.1.C.md) |
 | Nest ledger-truth audit | #64 — grep of Nest `posted`-only filters: one bug fixed (`getProfitAndLossBalancesForFiscalYear`); remaining hits classified (period-edit guard, test counters — not aggregation) |
 
 **§7.2 drift correction:** The post-#63 row still said **42/42** auth and **~42 suites** — that was already stale *before* C1-1/C1-2 (H1-era **42** routes never picked up **+5** customers or **+12** quotations). Authoritative recount above supersedes all prior §7.2 suite/auth totals; do not increment from the old 42 baseline.
 
 Historical test-count chain (decision-time snapshots, not maintained incrementally):
-30/314 (2026-08-28, post-#54) → 33/333 (#55–#58) → **34/339** (#59) → **39 suites** (H1 + #60) → **+2** scheduler (#62) → **+1** recurring concurrency (#63) → **+2** customers (#C1-1) → **+1** quotations (#C1-2) → **+1** invoices (#C1-3) = **48 suites** verified 2026-08-31.
-Auth: **38 → 42** (H1 report routes, 2026-08-29) → **47** (+5 customers, C1-1) → **59** (+12 quotations, C1-2) → **72** (+13 invoices, C1-3).
+30/314 (2026-08-28, post-#54) → 33/333 (#55–#58) → **34/339** (#59) → **39 suites** (H1 + #60) → **+2** scheduler (#62) → **+1** recurring concurrency (#63) → **+2** customers (#C1-1) → **+1** quotations (#C1-2) → **+1** invoices (#C1-3) → **+1** credit notes (#C1-4) → **+1** TB vs cnl co-load diagnostic → **+1** quotation convert (#C1-5) = **51 suites** verified 2026-08-31.
+Auth: **38 → 42** (H1 report routes, 2026-08-29) → **47** (+5 customers, C1-1) → **59** (+12 quotations, C1-2) → **72** (+13 invoices, C1-3) → **82** (+10 credit notes, C1-4) → **83** (+1 convert, C1-5).
 Older decision-log entries (#26–#49) record suite counts *at decision time* only.
 
 ### 7.3 Gap audit closure index

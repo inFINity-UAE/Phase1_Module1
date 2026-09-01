@@ -93,6 +93,14 @@ export class CompanyMembersService {
         companyId =
           await this.companyMembersRepository.findCompanyIdByInvoiceLineId(resourceId);
         break;
+      case 'credit_note':
+        companyId =
+          await this.companyMembersRepository.findCompanyIdByCreditNoteId(resourceId);
+        break;
+      case 'credit_note_line':
+        companyId =
+          await this.companyMembersRepository.findCompanyIdByCreditNoteLineId(resourceId);
+        break;
       default: {
         const _exhaustive: never = resource;
         throw new NotFoundException(`Unknown resource kind ${_exhaustive}`);

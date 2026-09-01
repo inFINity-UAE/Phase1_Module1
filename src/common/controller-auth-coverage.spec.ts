@@ -11,6 +11,9 @@ import { QuotationsService } from '../quotations/quotations.service';
 import { InvoicesController } from '../invoices/invoices.controller';
 import { InvoiceLinesController } from '../invoices/invoice-lines.controller';
 import { InvoicesService } from '../invoices/invoices.service';
+import { CreditNotesController } from '../credit-notes/credit-notes.controller';
+import { CreditNoteLinesController } from '../credit-notes/credit-note-lines.controller';
+import { CreditNotesService } from '../credit-notes/credit-notes.service';
 import { AccountingPeriodsController } from '../accounting-periods/accounting-periods.controller';
 import { AccountingPeriodsService } from '../accounting-periods/accounting-periods.service';
 import { AuditLogController } from '../audit-log/audit-log.controller';
@@ -35,7 +38,14 @@ import { ReportsService } from '../reports/reports.service';
  * [feature-spec.md decisions #24/#27/#41; feature-spec-1.1.H1.md #1]
  * Controllers reject unauthenticated requests (401) and succeed for a
  * verified Bearer session with membership. Regression list covers all
- * 72 guarded HTTP routes across 13 controllers.
+ * 82 guarded HTTP routes across 15 controllers.
+ *
+ * Blind spot (C1-3): this spec registers controllers in isolation and mocks
+ * CompanyMembershipGuard + CompanyMembersService — it does NOT import real
+ * feature modules, so a missing AuthModule import on InvoicesModule (etc.)
+ * will not fail here. Static loop-closer:
+ *   node scripts/verify-auth-module-imports.mjs
+ * Real-module integration specs (where they exist) catch it at compile time.
  */
 describe('Controller auth coverage (decision #24)', () => {
   let app: INestApplication;
@@ -57,6 +67,8 @@ describe('Controller auth coverage (decision #24)', () => {
   const quotationLineId = '13131313-1313-1313-1313-131313131313';
   const invoiceId = '14141414-1414-1414-1414-141414141414';
   const invoiceLineId = '15151515-1515-1515-1515-151515151515';
+  const creditNoteId = '16161616-1616-1616-1616-161616161616';
+  const creditNoteLineId = '17171717-1717-1717-1717-171717171717';
 
   const journalEntryDetails = {
     entry: { id: entryId, company_id: companyId },
@@ -128,6 +140,7 @@ describe('Controller auth coverage (decision #24)', () => {
     { method: 'POST', path: `/quotations/${quotationId}/mark-viewed` },
     { method: 'POST', path: `/quotations/${quotationId}/accept` },
     { method: 'POST', path: `/quotations/${quotationId}/decline` },
+    { method: 'POST', path: `/quotations/${quotationId}/convert` },
     {
       method: 'POST',
       path: '/quotation-lines',
@@ -174,6 +187,44 @@ describe('Controller auth coverage (decision #24)', () => {
     },
     { method: 'PATCH', path: `/invoice-lines/${invoiceLineId}`, body: { quantity: 2 } },
     { method: 'DELETE', path: `/invoice-lines/${invoiceLineId}` },
+    {
+      method: 'POST',
+      path: '/credit-notes',
+      body: {
+        company_id: companyId,
+        original_invoice_id: invoiceId,
+        credit_note_date: '2026-07-01',
+        lines: [
+          {
+            line_number: 1,
+            description: 'Credit',
+            quantity: 1,
+            unit_price: 10,
+            original_invoice_line_id: invoiceLineId,
+          },
+        ],
+      },
+    },
+    { method: 'GET', path: `/credit-notes?company_id=${companyId}` },
+    { method: 'GET', path: `/credit-notes/${creditNoteId}` },
+    { method: 'PATCH', path: `/credit-notes/${creditNoteId}`, body: { credit_note_date: '2026-07-02' } },
+    { method: 'DELETE', path: `/credit-notes/${creditNoteId}` },
+    { method: 'POST', path: `/credit-notes/${creditNoteId}/issue` },
+    { method: 'POST', path: `/credit-notes/${creditNoteId}/void`, body: { void_reason: 'Auth probe' } },
+    {
+      method: 'POST',
+      path: '/credit-note-lines',
+      body: {
+        credit_note_id: creditNoteId,
+        line_number: 1,
+        description: 'Line',
+        quantity: 1,
+        unit_price: 10,
+        original_invoice_line_id: invoiceLineId,
+      },
+    },
+    { method: 'PATCH', path: `/credit-note-lines/${creditNoteLineId}`, body: { quantity: 2 } },
+    { method: 'DELETE', path: `/credit-note-lines/${creditNoteLineId}` },
     {
       method: 'POST',
       path: '/accounting-periods',
@@ -321,6 +372,7 @@ describe('Controller auth coverage (decision #24)', () => {
       markViewed: jest.fn().mockResolvedValue({ quotation: { id: quotationId }, lines: [] }),
       accept: jest.fn().mockResolvedValue({ quotation: { id: quotationId }, lines: [] }),
       decline: jest.fn().mockResolvedValue({ quotation: { id: quotationId }, lines: [] }),
+      convert: jest.fn().mockResolvedValue({ invoice: { id: invoiceId }, lines: [] }),
       createLine: jest.fn().mockResolvedValue({ id: quotationLineId }),
       updateLine: jest.fn().mockResolvedValue({ id: quotationLineId }),
       deleteLine: jest.fn().mockResolvedValue(undefined),
@@ -333,10 +385,8 @@ describe('Controller auth coverage (decision #24)', () => {
       update: jest.fn().mockResolvedValue({ invoice: { id: invoiceId }, lines: [] }),
       remove: jest.fn().mockResolvedValue(undefined),
       issue: jest.fn().mockResolvedValue({
-        invoice: { id: invoiceId, journal_entry_id: null },
+        invoice: { id: invoiceId, journal_entry_id: '00000000-0000-0000-0000-000000000099' },
         lines: [],
-        journal_entry_id: null,
-        ledger_posting_status: 'deferred_batch_2',
       }),
       void: jest.fn().mockResolvedValue({ invoice: { id: invoiceId }, lines: [] }),
       send: jest.fn().mockResolvedValue({ invoice: { id: invoiceId }, lines: [] }),
@@ -344,6 +394,24 @@ describe('Controller auth coverage (decision #24)', () => {
       writeOff: jest.fn().mockResolvedValue({ invoice: { id: invoiceId }, lines: [] }),
       createLine: jest.fn().mockResolvedValue({ id: invoiceLineId }),
       updateLine: jest.fn().mockResolvedValue({ id: invoiceLineId }),
+      deleteLine: jest.fn().mockResolvedValue(undefined),
+    };
+
+    const creditNotesService = {
+      create: jest.fn().mockResolvedValue({ credit_note: { id: creditNoteId }, lines: [] }),
+      findAll: jest.fn().mockResolvedValue([]),
+      findOne: jest.fn().mockResolvedValue({ credit_note: { id: creditNoteId }, lines: [] }),
+      update: jest.fn().mockResolvedValue({ credit_note: { id: creditNoteId }, lines: [] }),
+      remove: jest.fn().mockResolvedValue(undefined),
+      issue: jest.fn().mockResolvedValue({
+        credit_note: { id: creditNoteId, journal_entry_id: null },
+        lines: [],
+        journal_entry_id: null,
+        ledger_posting_status: 'deferred_batch_2',
+      }),
+      void: jest.fn().mockResolvedValue({ credit_note: { id: creditNoteId }, lines: [] }),
+      createLine: jest.fn().mockResolvedValue({ id: creditNoteLineId }),
+      updateLine: jest.fn().mockResolvedValue({ id: creditNoteLineId }),
       deleteLine: jest.fn().mockResolvedValue(undefined),
     };
 
@@ -437,6 +505,8 @@ describe('Controller auth coverage (decision #24)', () => {
         QuotationLinesController,
         InvoicesController,
         InvoiceLinesController,
+        CreditNotesController,
+        CreditNoteLinesController,
         AccountingPeriodsController,
         JournalEntriesController,
         JournalLinesController,
@@ -452,6 +522,7 @@ describe('Controller auth coverage (decision #24)', () => {
         { provide: CustomersService, useValue: customersService },
         { provide: QuotationsService, useValue: quotationsService },
         { provide: InvoicesService, useValue: invoicesService },
+        { provide: CreditNotesService, useValue: creditNotesService },
         { provide: AccountingPeriodsService, useValue: accountingPeriodsService },
         { provide: JournalEntriesService, useValue: journalEntriesService },
         { provide: RecurringJournalTemplatesService, useValue: recurringService },
@@ -512,8 +583,8 @@ describe('Controller auth coverage (decision #24)', () => {
     return { status: response.status, body: await response.text() };
   }
 
-  it('covers all 59 guarded HTTP routes', () => {
-    expect(ALL_GUARDED_ROUTES).toHaveLength(72);
+  it('covers all guarded HTTP routes', () => {
+    expect(ALL_GUARDED_ROUTES).toHaveLength(83);
   });
 
   it.each(ALL_GUARDED_ROUTES)(

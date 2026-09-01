@@ -167,6 +167,41 @@ const CONCURRENCY = 8;
       expect(error?.code).toBe('23514');
     });
 
+    it('quotation line is_service defaults to false when omitted and accepts explicit true/false', async () => {
+      const created = await createDraftQuotation([
+        {
+          line_number: 1,
+          description: 'Default is_service',
+          quantity: 1,
+          unit_price: 10,
+          vat_rate: 5,
+        },
+      ]);
+      expect(created.lines[0].is_service).toBe(false);
+
+      const explicitFalse = await quotationsService.createLine({
+        quotation_id: created.quotation.id,
+        line_number: 2,
+        description: 'Explicit false',
+        quantity: 1,
+        unit_price: 10,
+        vat_rate: 5,
+        is_service: false,
+      });
+      expect(explicitFalse.is_service).toBe(false);
+
+      const explicitTrue = await quotationsService.createLine({
+        quotation_id: created.quotation.id,
+        line_number: 3,
+        description: 'Explicit true',
+        quantity: 1,
+        unit_price: 10,
+        vat_rate: 5,
+        is_service: true,
+      });
+      expect(explicitTrue.is_service).toBe(true);
+    });
+
     it('allocates quotation_number on creation and keeps numbers unique per company', async () => {
       const a = await createDraftQuotation();
       const b = await createDraftQuotation();

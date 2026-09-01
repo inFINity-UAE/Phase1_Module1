@@ -6,6 +6,7 @@ import { AccountingPeriodsModule } from './accounting-periods/accounting-periods
 import { CustomersModule } from './customers/customers.module';
 import { QuotationsModule } from './quotations/quotations.module';
 import { InvoicesModule } from './invoices/invoices.module';
+import { CreditNotesModule } from './credit-notes/credit-notes.module';
 import { JournalEntriesModule } from './journal-entries/journal-entries.module';
 import { RecurringJournalTemplatesModule } from './recurring-journal-templates/recurring-journal-templates.module';
 import { AuditLogModule } from './audit-log/audit-log.module';
@@ -20,6 +21,7 @@ import { ReportsModule } from './reports/reports.module';
     CustomersModule,
     QuotationsModule,
     InvoicesModule,
+    CreditNotesModule,
     JournalEntriesModule,
     RecurringJournalTemplatesModule,
     AuditLogModule,
