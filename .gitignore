@@ -10,3 +10,8 @@ coverage/
 *.tsbuildinfo
 __pycache__/
 *.pyc
+
+# One-off MCP / migration scratch (never commit)
+scripts/_*
+scripts/_*/
+jest-summary.json

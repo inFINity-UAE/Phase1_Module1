@@ -261,4 +261,33 @@ export class SupabaseInvoicesRepository implements InvoicesRepository {
       ledger_reversal_status: result.ledger_reversal_status,
     };
   }
+
+  async markOverdueInvoices(companyId: string): Promise<number> {
+    const { data, error } = await this.supabase.client.rpc('mark_overdue_invoices', {
+      p_company_id: companyId,
+    });
+
+    if (error) {
+      throw error;
+    }
+
+    return data as number;
+  }
+
+  async listCompanyIdsWithOpenInvoices(): Promise<string[]> {
+    const { data, error } = await this.supabase.client
+      .from('invoices')
+      .select('company_id')
+      .in('status', ['issued', 'sent', 'viewed']);
+
+    if (error) {
+      throw error;
+    }
+
+    const ids = new Set<string>();
+    for (const row of data ?? []) {
+      ids.add(row.company_id as string);
+    }
+    return [...ids];
+  }
 }

@@ -1,5 +1,7 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
+import { InvoicesSchedulerService } from '../invoices/invoices-scheduler.service';
+import { QuotationsSchedulerService } from '../quotations/quotations-scheduler.service';
 import { RecurringGenerationResult } from './entities/recurring-generation-result.entity';
 import { RecurringJournalTemplatesService } from './recurring-journal-templates.service';
 import {
@@ -18,12 +20,15 @@ export type ScheduledRecurringRunSummary = {
 
 /**
  * [feature-spec.md decision #62] Unattended daily trigger for due recurring
- * templates. Calls existing runDueGenerations per company — does not replace
- * POST /run-due or POST /generate.
+ * templates, [feature-spec-1.1.C.md §8 decision #20] quotation expiration,
+ * and [decision #21] invoice overdue marking. Calls existing runDueGenerations
+ * per company — does not replace POST /run-due or POST /generate.
  *
- * Interval: once daily (01:00 UTC). recurrence_frequency enum is
+ * Interval: once daily (01:00 UTC). Recurring recurrence_frequency enum is
  * daily/weekly/monthly/quarterly/annually — none require sub-daily runs;
- * a daily sweep catches every due next_run_date.
+ * a daily sweep catches every due next_run_date. Quotation expiration runs
+ * immediately after recurring; invoice overdue marking runs immediately after
+ * quotation expiration in the same cron handler (same 01:00 UTC slot).
  */
 @Injectable()
 export class RecurringJournalSchedulerService {
@@ -33,11 +38,16 @@ export class RecurringJournalSchedulerService {
     private readonly templatesService: RecurringJournalTemplatesService,
     @Inject(RECURRING_JOURNAL_TEMPLATES_REPOSITORY)
     private readonly templatesRepository: RecurringJournalTemplatesRepository,
+    private readonly quotationsSchedulerService: QuotationsSchedulerService,
+    private readonly invoicesSchedulerService: InvoicesSchedulerService,
   ) {}
 
   @Cron(CronExpression.EVERY_DAY_AT_1AM)
   async handleDailyRecurringRun(): Promise<ScheduledRecurringRunSummary> {
-    return this.runScheduledDueGenerations();
+    const recurringSummary = await this.runScheduledDueGenerations();
+    await this.quotationsSchedulerService.runScheduledExpirations();
+    await this.invoicesSchedulerService.runScheduledOverdueMarking();
+    return recurringSummary;
   }
 
   /**

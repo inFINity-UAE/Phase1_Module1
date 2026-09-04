@@ -36,4 +36,6 @@ export interface InvoicesRepository {
     invoice: Invoice;
     ledger_reversal_status: 'reversed' | 'skipped_no_posting';
   }>;
+  markOverdueInvoices(companyId: string): Promise<number>;
+  listCompanyIdsWithOpenInvoices(): Promise<string[]>;
 }

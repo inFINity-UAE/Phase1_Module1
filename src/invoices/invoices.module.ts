@@ -5,6 +5,7 @@ import { InvoiceLinesController } from './invoice-lines.controller';
 import { INVOICES_REPOSITORY } from './invoices.repository';
 import { SupabaseInvoicesRepository } from './invoices.repository.supabase';
 import { InvoicesController } from './invoices.controller';
+import { InvoicesSchedulerService } from './invoices-scheduler.service';
 import { InvoicesService } from './invoices.service';
 
 @Module({
@@ -12,8 +13,9 @@ import { InvoicesService } from './invoices.service';
   controllers: [InvoicesController, InvoiceLinesController],
   providers: [
     InvoicesService,
+    InvoicesSchedulerService,
     { provide: INVOICES_REPOSITORY, useClass: SupabaseInvoicesRepository },
   ],
-  exports: [InvoicesService, INVOICES_REPOSITORY],
+  exports: [InvoicesService, InvoicesSchedulerService, INVOICES_REPOSITORY],
 })
 export class InvoicesModule {}

@@ -220,4 +220,33 @@ export class SupabaseQuotationsRepository implements QuotationsRepository {
 
     return data as string;
   }
+
+  async expireDueQuotations(companyId: string): Promise<number> {
+    const { data, error } = await this.supabase.client.rpc('expire_due_quotations', {
+      p_company_id: companyId,
+    });
+
+    if (error) {
+      throw error;
+    }
+
+    return data as number;
+  }
+
+  async listCompanyIdsWithOpenQuotations(): Promise<string[]> {
+    const { data, error } = await this.supabase.client
+      .from('quotations')
+      .select('company_id')
+      .in('status', ['draft', 'sent', 'viewed']);
+
+    if (error) {
+      throw error;
+    }
+
+    const ids = new Set<string>();
+    for (const row of data ?? []) {
+      ids.add(row.company_id as string);
+    }
+    return [...ids];
+  }
 }

@@ -1074,10 +1074,47 @@ revoke all on function prevent_nondraft_quotation_header_mutation() from authent
 revoke all on function prevent_nondraft_quotation_header_mutation() from anon;
 grant execute on function prevent_nondraft_quotation_header_mutation() to service_role;
 
+-- [feature-spec-1.1.C.md §2.1 / §8 decision #6] Scheduled valid_until → Expired transition.
+-- Exception token: COMPANY_ID_REQUIRED
+create or replace function expire_due_quotations(p_company_id uuid)
+returns int
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  v_count int;
+begin
+  if p_company_id is null then
+    raise exception 'COMPANY_ID_REQUIRED';
+  end if;
+
+  -- [feature-spec-1.1.C.md §8 / decision #15] qxp: per-company namespace — same
+  -- pattern as ob:/ye:/rjt:/quo:/inv:/crn:/cnl: advisory locks.
+  perform pg_advisory_xact_lock(hashtext('qxp:' || p_company_id::text));
+
+  update quotations
+     set status = 'expired',
+         updated_at = now()
+   where company_id = p_company_id
+     and status in ('draft', 'sent', 'viewed')
+     and valid_until is not null
+     and valid_until < current_date;
+
+  get diagnostics v_count = row_count;
+  return v_count;
+end;
+$$;
+
+revoke all on function expire_due_quotations(uuid) from public;
+revoke all on function expire_due_quotations(uuid) from authenticated;
+revoke all on function expire_due_quotations(uuid) from anon;
+grant execute on function expire_due_quotations(uuid) to service_role;
+
 -- ============================================================================
 -- 7c. INVOICES (Module 1.1.C — feature-spec-1.1.C.md §1.3, §2.2, §3, §5, §6.2)
 -- Numbering at Issue (#8), not INSERT (#16 quotations). Ledger posting §7
--- deferred to Batch 2 — journal_entry_id stays null after Issue in this pass.
+-- via create_invoice_journal_entry wired into issue_invoice (decision #12).
 -- ============================================================================
 
 create type payment_terms_type as enum (
@@ -1871,6 +1908,45 @@ revoke all on function void_invoice(uuid, text, uuid) from public;
 revoke all on function void_invoice(uuid, text, uuid) from authenticated;
 revoke all on function void_invoice(uuid, text, uuid) from anon;
 grant execute on function void_invoice(uuid, text, uuid) to service_role;
+
+-- [feature-spec-1.1.C.md §2.2 / §8 decision #7] Scheduled due_date → Overdue transition.
+-- Pure status flip on due_date only — does not read or update amount_paid (§10;
+-- Module D owns payment application). No ledger interaction.
+-- Exception token: COMPANY_ID_REQUIRED
+create or replace function mark_overdue_invoices(p_company_id uuid)
+returns int
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  v_count int;
+begin
+  if p_company_id is null then
+    raise exception 'COMPANY_ID_REQUIRED';
+  end if;
+
+  -- [feature-spec-1.1.C.md §8 / decision #15] ovd: per-company namespace — same
+  -- pattern as qxp:/ob:/ye:/rjt:/quo:/inv:/crn:/cnl: advisory locks.
+  perform pg_advisory_xact_lock(hashtext('ovd:' || p_company_id::text));
+
+  update invoices
+     set status = 'overdue',
+         updated_at = now()
+   where company_id = p_company_id
+     and status in ('issued', 'sent', 'viewed')
+     and due_date is not null
+     and due_date < current_date;
+
+  get diagnostics v_count = row_count;
+  return v_count;
+end;
+$$;
+
+revoke all on function mark_overdue_invoices(uuid) from public;
+revoke all on function mark_overdue_invoices(uuid) from authenticated;
+revoke all on function mark_overdue_invoices(uuid) from anon;
+grant execute on function mark_overdue_invoices(uuid) to service_role;
 
 -- [feature-spec-1.1.C.md §4 decision #9] Accepted quotation → Draft invoice; one-time link.
 create or replace function convert_quotation_to_invoice(

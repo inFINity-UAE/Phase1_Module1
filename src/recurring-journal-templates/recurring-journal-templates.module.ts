@@ -1,5 +1,7 @@
 import { Module } from '@nestjs/common';
 import { AuthModule } from '../auth/auth.module';
+import { InvoicesModule } from '../invoices/invoices.module';
+import { QuotationsModule } from '../quotations/quotations.module';
 import { JournalEntriesModule } from '../journal-entries/journal-entries.module';
 import {
   RecurringJournalTemplateLinesController,
@@ -11,7 +13,7 @@ import { RECURRING_JOURNAL_TEMPLATES_REPOSITORY } from './recurring-journal-temp
 import { SupabaseRecurringJournalTemplatesRepository } from './recurring-journal-templates.repository.supabase';
 
 @Module({
-  imports: [JournalEntriesModule, AuthModule],
+  imports: [JournalEntriesModule, AuthModule, QuotationsModule, InvoicesModule],
   controllers: [
     RecurringJournalTemplatesController,
     RecurringJournalTemplateLinesController,

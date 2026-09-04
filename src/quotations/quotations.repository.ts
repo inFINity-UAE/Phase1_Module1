@@ -27,4 +27,6 @@ export interface QuotationsRepository {
   findCustomerActive(customerId: string): Promise<boolean | null>;
   findCustomerCompanyId(customerId: string): Promise<string | null>;
   convertToInvoice(quotationId: string, createdBy: string): Promise<string>;
+  expireDueQuotations(companyId: string): Promise<number>;
+  listCompanyIdsWithOpenQuotations(): Promise<string[]>;
 }
