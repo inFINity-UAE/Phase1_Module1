@@ -125,9 +125,8 @@ export class SupabaseAccountingPeriodsRepository implements AccountingPeriodsRep
 
   /**
    * [feature-spec] Soft-close — blocks new postings unless Owner override with reason.
-   * TODO: [Rules §1.22] Close checklist (bank recs, AR/AP reconciled, accruals posted,
-   * depreciation run, etc.) must be complete before soft-close, or require explicit
-   * override with reason. Not implemented in Module 1.1.A — build when checklist exists.
+   * ponytail: no Rules §1.22 close checklist. Ceiling: soft-close always succeeds.
+   * Upgrade: require checklist (or override reason) before the status change.
    */
   async softClose(id: string, closedBy: string): Promise<AccountingPeriod> {
     const now = new Date().toISOString();

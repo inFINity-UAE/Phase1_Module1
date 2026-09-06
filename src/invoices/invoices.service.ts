@@ -192,6 +192,10 @@ export class InvoicesService {
     return this.transition(id, InvoiceStatus.Viewed);
   }
 
+  /**
+   * ponytail: status flip only — no bad-debt journal or amount_paid change.
+   * Ceiling: 1100 still shows the receivable. Upgrade: Module D write-off RPC.
+   */
   async writeOff(id: string): Promise<InvoiceWithLines> {
     return this.transition(id, InvoiceStatus.WrittenOff);
   }

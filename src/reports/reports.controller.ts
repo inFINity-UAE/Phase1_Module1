@@ -55,7 +55,9 @@ export class ReportsController {
 
   /**
    * [feature-spec-1.1.H1.md decision #5] General Ledger — company_id required;
-   * account_id / date_from / date_to optional. Pagination deferred.
+   * account_id / date_from / date_to optional.
+   * ponytail: unbounded result set. Ceiling: one company GL in a single response.
+   * Upgrade: H2 pagination.
    */
   @Get('general-ledger')
   @RequireCompanyMembership({ type: 'query' })

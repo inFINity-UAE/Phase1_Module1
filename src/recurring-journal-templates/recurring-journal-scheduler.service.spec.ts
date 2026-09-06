@@ -1,8 +1,8 @@
 import { RecurringJournalSchedulerService } from './recurring-journal-scheduler.service';
 import { RecurringJournalTemplatesService } from './recurring-journal-templates.service';
 import { RecurringJournalTemplatesRepository } from './recurring-journal-templates.repository';
-import { InvoicesSchedulerService } from '../invoices/invoices-scheduler.service';
-import { QuotationsSchedulerService } from '../quotations/quotations-scheduler.service';
+import { InvoicesRepository } from '../invoices/invoices.repository';
+import { QuotationsRepository } from '../quotations/quotations.repository';
 
 /**
  * [feature-spec.md decision #62] Unit coverage for multi-company iteration
@@ -19,11 +19,11 @@ describe('RecurringJournalSchedulerService (decision #62)', () => {
   let templatesRepository: jest.Mocked<
     Pick<RecurringJournalTemplatesRepository, 'listCompanyIdsWithActiveTemplates'>
   >;
-  let quotationsScheduler: jest.Mocked<
-    Pick<QuotationsSchedulerService, 'runScheduledExpirations'>
+  let quotationsRepository: jest.Mocked<
+    Pick<QuotationsRepository, 'listCompanyIdsWithOpenQuotations' | 'expireDueQuotations'>
   >;
-  let invoicesScheduler: jest.Mocked<
-    Pick<InvoicesSchedulerService, 'runScheduledOverdueMarking'>
+  let invoicesRepository: jest.Mocked<
+    Pick<InvoicesRepository, 'listCompanyIdsWithOpenInvoices' | 'markOverdueInvoices'>
   >;
   let scheduler: RecurringJournalSchedulerService;
 
@@ -34,25 +34,19 @@ describe('RecurringJournalSchedulerService (decision #62)', () => {
     templatesRepository = {
       listCompanyIdsWithActiveTemplates: jest.fn(),
     };
-    quotationsScheduler = {
-      runScheduledExpirations: jest.fn().mockResolvedValue({
-        companies_evaluated: 0,
-        quotations_expired: 0,
-        company_failures: [],
-      }),
+    quotationsRepository = {
+      listCompanyIdsWithOpenQuotations: jest.fn(),
+      expireDueQuotations: jest.fn(),
     };
-    invoicesScheduler = {
-      runScheduledOverdueMarking: jest.fn().mockResolvedValue({
-        companies_evaluated: 0,
-        invoices_marked_overdue: 0,
-        company_failures: [],
-      }),
+    invoicesRepository = {
+      listCompanyIdsWithOpenInvoices: jest.fn(),
+      markOverdueInvoices: jest.fn(),
     };
     scheduler = new RecurringJournalSchedulerService(
       templatesService as unknown as RecurringJournalTemplatesService,
       templatesRepository as unknown as RecurringJournalTemplatesRepository,
-      quotationsScheduler as unknown as QuotationsSchedulerService,
-      invoicesScheduler as unknown as InvoicesSchedulerService,
+      quotationsRepository as unknown as QuotationsRepository,
+      invoicesRepository as unknown as InvoicesRepository,
     );
   });
 
