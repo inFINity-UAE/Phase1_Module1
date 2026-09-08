@@ -6,20 +6,19 @@ This is the authoritative scope document for Module 1.1.D only — do not
 infer scope from Module 1.1.A/C/H1 or other 1.1.B–H modules.
 
 **Status: scoped and decision-logged, not yet built.** §2 below is a
-ratified decision log (D-1…D-14), grounded against `schema.sql`, the
-finalized `Chart_of_Accounts_-_inFINity.xlsx`, and explicit accountant/
-owner sign-off, matching the discipline `feature-spec.md` (A) and
-`feature-spec-1_1_C.md` (C) use. **One thing remains a genuine
-assumption, flagged rather than silently picked**: the AED 50,000
-general threshold's alignment with an external test pack ("TC9") this
-conversation never had access to. D-10's weekend-days default is now
-confirmed (D-13) and the public-holiday seed gap is closed (D-14).
-Everything else is either confirmed against a real source or an explicit
-decision. It is still a *pre-build* document otherwise: no code exists
-for D yet, so nothing here claims to have been tested. As build
-proceeds, any decision that needs revision gets a new numbered entry
-appended (D-13+) rather than silently edited — same rule A's and C's
-logs follow.
+ratified decision log (D-1…D-15), grounded against `schema.sql`, the
+finalized `Chart_of_Accounts_-_inFINity.xlsx`, explicit accountant/owner
+sign-off, and (for D-11) the TC9 test pack itself, matching the
+discipline `feature-spec.md` (A) and `feature-spec-1_1_C.md` (C) use.
+D-10's weekend-days default is confirmed (D-13), the public-holiday seed
+gap is closed (D-14), and the month-end close cadence D-10's scheduler
+needed is now fixed (D-15, calendar month-end). Everything here is
+either confirmed against a real source or an explicit decision — no
+open assumptions remain. It is still a *pre-build* document otherwise:
+no code exists for D yet, so nothing here claims to have been tested.
+As build proceeds, any decision that needs revision gets a new numbered
+entry appended (D-16+) rather than silently edited — same rule A's and
+C's logs follow.
 
 **Dependencies, verified directly against `schema.sql`:** Module 0 (A) —
 `companies`, `accounts`, `journal_entries`, `journal_lines`,
@@ -288,9 +287,12 @@ threshold; everything else → the existing general one;
 D-8's "lighter, non-blocking review" call — it's a systematic estimate,
 not a discretionary loss judgment.
 
-*(Note: I can't independently verify the AED 50,000 figure against "TC9"
-— that test pack wasn't shared in this conversation. Recorded as given,
-not confirmed against source, same as the TC6 reference earlier.)*
+*(Verified against TC9: the test pack's own assertion message reads
+"App threshold is `APPROVAL_THRESHOLD` AED (Excel specifies 50,000)" —
+i.e. TC9 asserts the running app's configured threshold against the
+Excel-sourced figure of 50,000, the same number recorded here. No
+discrepancy — the two sources agree, so AED 50,000 stands confirmed,
+not merely "as given.")*
 
 **Why lower for write-offs specifically:** a write-off is an irreversible
 confirmed loss, not just a large expense — the tighter number reflects
@@ -415,6 +417,33 @@ that is off by a day still lands on or beside a real day off, and per
 D-10's own reasoning a late provisioning cycle is recoverable while a
 missed one isn't — so there is no case for skipping unconfirmed
 holidays.
+
+### D-15 — Month-end close cadence: calendar month-end, QuickBooks/Xero-style
+
+**Decision:** `accounting_periods` follow the same convention as
+QuickBooks/Xero — one period per **calendar month**, `period_end` is the
+last calendar day of that month (`period_start`/`period_end` are still
+client-supplied per A's existing `accounting_periods` create/update
+routes; D adds no new period-creation logic or schema). No fixed
+mid-month close day and no company-configurable close-day offset — this
+app's periods are calendar months, matching the product category it's
+modeled on rather than a custom fiscal-close calendar.
+
+**Why this resolves D-10's open dependency:** D-10's provisioning run
+fires `period_end` + 5 business days, but nothing previously said when
+a period actually ends. With `period_end` anchored to the last calendar
+day of each month, the scheduler now has a concrete date to compute
+against for every company — e.g. a January period closes 2026-01-31, so
+(weekend/holiday-aware per D-10/D-13/D-14) the ECL run targets on or
+after 2026-02-07 (5 business days out, adjusted for Sat/Sun and any
+`public_holidays` row in that window).
+
+**Scope note:** this does not add a periods-admin API or an
+auto-period-creation job — both remain out of scope for D (§7, same
+boundary D-13 draws). It only fixes what the close date *is* once a
+period exists, which is what D-10's scheduler needed to anchor to.
+Closes the "still needed" flag in §4.5a and the Build Order dependency
+raised ahead of D-P11.
 
 ---
 
@@ -816,9 +845,10 @@ and `customers.ecl_override_rate` start empty; specific high-risk
 customers get flagged as and when they're actually identified, not
 invented now.
 
-**Still needed before this can actually run on schedule:** the
-month-end close date/cadence — nothing in the COA, schema, or company
-data answers this; it's an internal operational fact, not derivable.
+**Month-end close date/cadence:** resolved by D-15 — calendar
+month-end, QuickBooks/Xero-style. `period_end` is always the last
+calendar day of the month, giving the scheduler a concrete date to
+anchor T+5-business-days to.
 
 1. For each customer without `ecl_override_rate` set, bucket their
    outstanding invoice balances per D-5's aging buckets and apply the
@@ -939,19 +969,23 @@ C's `invoices`/`credit_notes` tables are needed beyond `paid_at`.
 
 ## 8. Suggested next step
 
-**D-1 through D-14 are ratified.** One flagged assumption remains worth
-a quick confirmation before build rather than a hard blocker: the AED
-50,000 general `journal_approval_threshold`'s unverified alignment with
-"TC9" (D-11) — recorded as given, never checked against the test pack
-itself.
+**D-1 through D-15 are ratified — no open items remain.** The two
+things flagged as outstanding in the previous pass are now closed:
 
-Closed since the last pass: D-10's weekend-days default is confirmed
-Sat/Sun with the settings-editing surface explicitly deferred (D-13),
-and `public_holidays` now has real seed data through 2029 sourced from
-Cabinet Resolution No. (27) of 2024, with lunar dates carried as
-`PROVISIONAL` and correctable (D-14).
+- The AED 50,000 general `journal_approval_threshold` (D-11) is
+  confirmed against the TC9 test pack itself — TC9's own assertion
+  message ties the running app's configured threshold to "Excel
+  specifies 50,000," the same figure recorded here. No discrepancy.
+- The month-end close date/cadence that D-10's provisioning scheduler
+  needed to anchor to (§4.5a) is fixed by D-15: calendar month-end,
+  QuickBooks/Xero-style — `period_end` is always the last calendar day
+  of the month.
 
-Everything else — schema (§3), posting functions (§4), reporting (§5) —
-is ready to build against. Still outstanding as an operational input
-rather than a decision: the month-end close date/cadence (§4.5a), which
-no document in the project answers.
+Also closed since the last pass: D-10's weekend-days default is
+confirmed Sat/Sun with the settings-editing surface explicitly deferred
+(D-13), and `public_holidays` now has real seed data through 2029
+sourced from Cabinet Resolution No. (27) of 2024, with lunar dates
+carried as `PROVISIONAL` and correctable (D-14).
+
+Everything — schema (§3), posting functions (§4), reporting (§5) — is
+ready to build against.
