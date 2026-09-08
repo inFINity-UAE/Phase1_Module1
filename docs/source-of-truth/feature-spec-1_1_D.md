@@ -6,17 +6,20 @@ This is the authoritative scope document for Module 1.1.D only — do not
 infer scope from Module 1.1.A/C/H1 or other 1.1.B–H modules.
 
 **Status: scoped and decision-logged, not yet built.** §2 below is a
-ratified decision log (D-1…D-9), grounded against `schema.sql`, the
-finalized `Chart_of_Accounts_-_inFINity.xlsx`, and — for D-8 — explicit
-accountant sign-off, matching the discipline `feature-spec.md` (A) and
-`feature-spec-1_1_C.md` (C) use. **D-8's answer expands scope beyond the
-original 8 deliverables**: monthly ECL provisioning (§4.5) is new work,
-not a different journal entry on an existing feature — flagged here so
-it isn't buried in a decision-log entry. It is still a *pre-build*
-document otherwise: no code exists for D yet, so nothing here claims to
-have been tested. As build proceeds, any decision that turns out to need
-revision gets a new numbered entry appended (D-10+) rather than silently
-edited — same rule A's and C's logs follow.
+ratified decision log (D-1…D-14), grounded against `schema.sql`, the
+finalized `Chart_of_Accounts_-_inFINity.xlsx`, and explicit accountant/
+owner sign-off, matching the discipline `feature-spec.md` (A) and
+`feature-spec-1_1_C.md` (C) use. **One thing remains a genuine
+assumption, flagged rather than silently picked**: the AED 50,000
+general threshold's alignment with an external test pack ("TC9") this
+conversation never had access to. D-10's weekend-days default is now
+confirmed (D-13) and the public-holiday seed gap is closed (D-14).
+Everything else is either confirmed against a real source or an explicit
+decision. It is still a *pre-build* document otherwise: no code exists
+for D yet, so nothing here claims to have been tested. As build
+proceeds, any decision that needs revision gets a new numbered entry
+appended (D-13+) rather than silently edited — same rule A's and C's
+logs follow.
 
 **Dependencies, verified directly against `schema.sql`:** Module 0 (A) —
 `companies`, `accounts`, `journal_entries`, `journal_lines`,
@@ -235,6 +238,184 @@ surface — C's stub already owns the URL and the auth/validation around
 "can this invoice be written off," D only needs to add what happens
 *after* that check passes.
 
+### D-10 — ECL provisioning schedule: T+5 business days, holiday-aware, never skipped
+
+**Decision:** the run (§4.5a) fires 5 business days after
+`period_end`, not on a fixed calendar date — late-arriving invoices/
+payments get time to post before aging buckets are computed, and it
+lands after the AR aging position is effectively final but before the
+period can hard-close. If that date falls on a weekend or public
+holiday, it pushes to the next business day rather than being skipped —
+a late cycle is recoverable, a missed one isn't.
+
+**Consequence — new supporting schema:**
+- `public_holidays (id, company_id nullable [null = UAE-wide], holiday_date, description)`
+  — a table that doesn't exist anywhere in `schema.sql` today. Seed data
+  was left out of the original draft because UAE public holidays are
+  partly lunar-calendar-based and needed an actual government source
+  rather than a guess. **Superseded by D-14**, which sources them from
+  Cabinet Resolution No. (27) of 2024 and seeds three years forward.
+- `company_settings.weekend_days smallint[]` — which ISO weekdays count
+  as non-business days for this company. Default Saturday + Sunday was
+  originally an unconfirmed assumption; **confirmed by the owner in
+  D-13**.
+
+**Consequence — sequencing dependency on Module A:** the provisioning
+run must execute before whatever action transitions
+`accounting_periods.status` to `closed`. Rather than trying to hook into
+A's close sequence (which this spec doesn't own), D's provisioning RPC
+defensively checks the target period isn't already `closed` and errors
+loudly if it is — reusing the same period-status guard pattern A's own
+posting functions already use, not inventing a new one.
+
+**"AR aging snapshot is final" — resolved without a new snapshot
+table.** H1's own precedent (§5, "no new tables") argues against
+persisting one here too: by construction, T+5 business days after
+`period_end` is late enough that a live call to `get_aged_receivables`
+(§5.2) with `as_of_date = period_end` already reflects the settled
+position. No `ar_aging_snapshots` table needed — the *timing* of the run
+is what makes it "final," not a stored artifact.
+
+### D-11 — Two approval thresholds, not one
+
+**Decision:** `company_settings` gets a second column,
+`write_off_approval_threshold numeric(18,2)`, seeded to **AED 5,000** —
+separate from the existing `journal_approval_threshold` (general journal
+entries, **AED 50,000**). A write-off posting function resolves which
+threshold applies by `entry_type`: `write_off` → the tighter, dedicated
+threshold; everything else → the existing general one;
+`ecl_provision` → **always non-blocking**, regardless of amount, per
+D-8's "lighter, non-blocking review" call — it's a systematic estimate,
+not a discretionary loss judgment.
+
+*(Note: I can't independently verify the AED 50,000 figure against "TC9"
+— that test pack wasn't shared in this conversation. Recorded as given,
+not confirmed against source, same as the TC6 reference earlier.)*
+
+**Why lower for write-offs specifically:** a write-off is an irreversible
+confirmed loss, not just a large expense — the tighter number reflects
+risk category, not size, which is exactly why one shared threshold
+wouldn't have worked (a AED 6,000 write-off needs sign-off even though
+it's well under the general AED 50,000 line).
+
+### D-12 — Payment routing by method, plus sub-account support for multiple bank accounts
+
+**Decision — payment-method-aware account routing.** `payments.
+payment_method` becomes a proper enum
+(`'cash','bank_transfer','cheque','card','pos','other'`), and the
+posting function picks the debit account by method when
+`bank_account_id` isn't explicitly set:
+
+| `payment_method` | Default debit account |
+|---|---|
+| `cash` | `1010` Cash on Hand |
+| `bank_transfer`, `cheque` | `company_settings.default_bank_account_id` (D-6, `1020`) |
+| `card`, `pos` | `1070` Merchant / Payment Gateway Clearing |
+| `other` | `default_bank_account_id`, same as bank transfer |
+
+Card/POS payments route through `1070` rather than straight to `1020`,
+since settlement typically lands a day or two later, net of processor
+fees — confirmed for real in the COA (`1070 Merchant / Payment Gateway
+Clearing`, Cash & Bank band). **The `1070 → 1020` settlement/clearing
+entry itself is explicitly out of scope for D** (§7) — matching a bank
+statement line to the clearing balance is a reconciliation concern, not
+an AR concern; for now that's a manual journal entry through A's normal
+posting path (`Dr 1020, Cr 1070`) until a dedicated reconciliation
+module exists.
+
+**Decision — multiple bank accounts via existing hierarchy, no new
+schema.** `accounts.parent_account_id`/`depth` already supports up to
+4 levels (schema.sql line 114-115) — a second or third bank account is
+simply a new account created as a child of `1020` through Module A's
+existing account-management flow (its own 4-digit number; `account_number`
+is a fixed `char(4)`, so there's no dotted "1020.1" — a true sibling
+account like a newly-numbered `10xx`, parented to `1020`). D doesn't need
+new schema for this: `payments.bank_account_id` (§3.2, D-6) already
+accepts any `accounts.id`, and the payment-entry picker should list any
+active account under the Cash & Bank sub-category, not hardcode to
+`1020` alone. `company_settings.default_bank_account_id` stays a single
+company-wide default; per-payment override via `bank_account_id` handles
+the rest.
+
+### D-13 — Weekend days: Sat/Sun confirmed; no settings admin API in D
+
+**Decision:** `company_settings.weekend_days` keeps its `{6,7}`
+(Saturday + Sunday, ISO-8601 weekday numbers) default — **confirmed by
+the owner**, closing D-10's flagged assumption. The column stays a
+`smallint[]` so the value is company-configurable at the data layer, but
+**D ships no endpoint to read or write company settings**. Changing
+`weekend_days` — or any other `company_settings` value — remains a
+DB-level task in this pass.
+
+**Why:** no settings admin API exists anywhere in the project today.
+`company_settings` is read-only and internal, reached solely through
+`JournalEntriesRepository.getCompanySettings()`; nothing writes it
+outside test setup. Exposing it is a cross-cutting administration
+surface (which roles may edit which setting, audit-logging of changes,
+validation per column) that belongs to a company-administration module,
+not to Accounts Receivable — the same boundary reasoning D-4 used to
+refuse a credit-limit override workflow and D-9 used to avoid a second
+write-off endpoint. Added to §7 as an explicit exclusion so it stays
+tracked rather than forgotten.
+
+**Note on the default itself:** Sat/Sun is the UAE federal standard, but
+private-sector practice genuinely varies (some employers still run a
+Friday–Saturday weekend, and Sharjah's public sector runs a four-and-a-
+half-day week). The column exists precisely because the default is not
+universal — this decision defers the *editing surface*, not the
+configurability.
+
+### D-14 — Public holidays: sourced from Cabinet Resolution 27/2024, seeded 3 years, lunar dates PROVISIONAL
+
+**Decision:** `public_holidays` (§3.1b) is pre-populated through 2029
+from the UAE's own legal source, with every lunar-calendar entry stored
+as `PROVISIONAL` and correctable in place once the actual date is
+announced.
+
+**Source, in the order the accounting-engine rule requires:**
+
+1. **Cabinet Resolution No. (27) of 2024 Concerning the Public Holidays
+   in the State**, Article 1 — the legal instrument, published on the
+   UAE Legislation portal
+   (`uaelegislation.gov.ae/en/legislations/2595`), in force from
+   1 January 2025. Its Article 1 table is the authoritative list of the
+   seven holidays and their durations.
+2. The UAE Government portal `u.ae`'s public-holidays page, which
+   mirrors the same list and adds the moon-sighting footnote and the
+   30-Ramadan rule for Eid Al Fitr's fourth day.
+
+**No official machine-readable feed exists.** The UAE open data portal
+(`bayanat.ae`) publishes no holidays dataset, and `u.ae` states the
+list as *rules*, not dates. So there is deliberately **no auto-sync
+job** in this design — the calendar is seeded data plus a correction
+path, not an integration.
+
+**Why the dates can't simply be computed and trusted** — two things in
+the Resolution itself make any pre-computed lunar date provisional:
+
+- Only two holidays are fixed on the Gregorian calendar (Gregorian New
+  Year, 1 January; National Day, 2–3 December). The other five are Hijri
+  dates, and `u.ae` states plainly that *"Islamic holidays are determined
+  according to moon sighting"* — an announcement, not an algorithm.
+- **Article 2** lets the Cabinet move any non-Eid holiday to the
+  beginning or end of the week by resolution. (Article 3 bounds this: a
+  holiday coinciding with another holiday or falling on the weekend is
+  *not* transferred.)
+
+**Consequence:** `public_holidays` gains a `status` column
+(`'PROVISIONAL' | 'CONFIRMED'`) and a `source` column, and D adds one
+small admin route so a projected date can be corrected and confirmed
+when the announcement lands (§3.1b). This is the *only* administrative
+write surface D adds — narrowly scoped to holiday dates, not the
+general settings API D-13 declines to build.
+
+**Scheduling consequence (§4.5a):** the T+5-business-day calculation
+treats `PROVISIONAL` rows exactly like `CONFIRMED` ones. A projection
+that is off by a day still lands on or beside a real day off, and per
+D-10's own reasoning a late provisioning cycle is recoverable while a
+missed one isn't — so there is no case for skipping unconfirmed
+holidays.
+
 ---
 
 ## 3. Schema additions
@@ -249,11 +430,133 @@ now()`).
 
 - `credit_limit numeric(18,2)` — nullable; `null` = no limit enforced.
 
-### 3.1a `company_settings` (extend) — per D-6
+### 3.1a `company_settings` (extend) — per D-6, D-10, D-11
 
 - `default_bank_account_id uuid references accounts(id)` — seeded to
   account `1020` (Bank Account - Current AED) at company creation, same
   pattern as the existing `journal_approval_threshold`.
+- `write_off_approval_threshold numeric(18,2)` — D-11, seeded **AED
+  5,000**, separate from the existing `journal_approval_threshold`
+  (**AED 50,000**).
+- `weekend_days smallint[]` — D-10, seeded `{6,7}` (ISO-8601 Sat/Sun) —
+  **confirmed by the owner, D-13**. No API writes it in this pass (D-13).
+
+### 3.1b `public_holidays` (new) — per D-10, D-14
+
+```
+id             uuid primary key default gen_random_uuid()
+company_id     uuid references companies(id)   -- nullable: null = UAE-wide
+holiday_date   date not null
+description    text not null
+status         text not null default 'PROVISIONAL'
+               check (status in ('PROVISIONAL','CONFIRMED'))
+source         text                             -- e.g. 'Cabinet Resolution 27/2024 Art.1'
+created_at     timestamptz not null default now()
+updated_at     timestamptz not null default now()
+```
+
+Uniqueness needs **two partial indexes**, not one `unique (company_id,
+holiday_date)` — a plain unique constraint treats NULLs as distinct, so
+it would happily admit duplicate UAE-wide rows for the same date, which
+is exactly the row most likely to be inserted twice by a re-run seed:
+
+```
+create unique index public_holidays_company_date_uq
+  on public_holidays (company_id, holiday_date) where company_id is not null;
+create unique index public_holidays_uae_date_uq
+  on public_holidays (holiday_date) where company_id is null;
+```
+
+**Resolution order:** a company-scoped row (`company_id` non-null) takes
+precedence over the UAE-wide row (`company_id is null`) for the same
+date. This is what lets one company correct or drop a date without
+editing the shared calendar every other company reads.
+
+**Correction route (D-14).** `GET`/`POST`/`PATCH`/`DELETE
+/public-holidays` — company-scoped, guarded by the same
+`SupabaseAuthGuard` + `CompanyMembershipGuard` + Owner/Accountant role
+check the rest of D uses. `PATCH` is the one that matters: it moves
+`holiday_date` and flips `status` to `CONFIRMED` once the Cabinet
+announces the real date. Writes always land on company-scoped rows; the
+UAE-wide (`company_id is null`) rows are seed data, not editable through
+the API.
+
+#### Seed data — per D-14
+
+Two sources, in the priority order the accounting-engine rule requires:
+**Cabinet Resolution No. (27) of 2024, Article 1** (the legal list of
+holidays and their durations) and the `u.ae` public-holidays page (same
+list, plus the moon-sighting and 30-Ramadan footnotes). Seeded as
+UAE-wide rows (`company_id is null`), covering the remainder of 2026
+through 2029.
+
+`CONFIRMED` — fixed on the Gregorian calendar by Article 1, so no
+projection is involved:
+
+| Date | Description |
+|---|---|
+| `2026-12-02`, `2026-12-03` | National Day (Eid Al Etihad) |
+| `2027-01-01` | Gregorian New Year |
+| `2027-12-02`, `2027-12-03` | National Day |
+| `2028-01-01` | Gregorian New Year |
+| `2028-12-02`, `2028-12-03` | National Day |
+| `2029-01-01` | Gregorian New Year |
+| `2029-12-02`, `2029-12-03` | National Day |
+
+`PROVISIONAL` — the five Hijri holidays of Article 1, projected from the
+astronomical new moon (Meeus' phase series) under the Umm al-Qura
+criterion: the month begins the day after conjunction when conjunction
+precedes sunset at Mecca, otherwise two days after.
+
+| Dates | Description | Hijri (Art. 1) |
+|---|---|---|
+| `2027-03-09` … `2027-03-11` | Eid Al Fitr | 1–3 Shawwal 1448 |
+| `2027-05-15` | Arafah Day | 9 Dhu al-Hijjah 1448 |
+| `2027-05-16` … `2027-05-18` | Eid Al Adha | 10–12 Dhu al-Hijjah 1448 |
+| `2027-06-06` | Hijri New Year | 1 Muharram 1449 |
+| `2027-08-14` | Prophet Mohammed's Birthday | 12 Rabi' al-Awwal 1449 |
+| `2028-02-26` … `2028-02-28` | Eid Al Fitr | 1–3 Shawwal 1449 |
+| `2028-05-04` | Arafah Day | 9 Dhu al-Hijjah 1449 |
+| `2028-05-05` … `2028-05-07` | Eid Al Adha | 10–12 Dhu al-Hijjah 1449 |
+| `2028-05-25` | Hijri New Year | 1 Muharram 1450 |
+| `2028-08-03` | Prophet Mohammed's Birthday | 12 Rabi' al-Awwal 1450 |
+| `2029-02-14` … `2029-02-16` | Eid Al Fitr | 1–3 Shawwal 1450 |
+| `2029-04-23` | Arafah Day | 9 Dhu al-Hijjah 1450 |
+| `2029-04-24` … `2029-04-26` | Eid Al Adha | 10–12 Dhu al-Hijjah 1450 |
+| `2029-05-14` | Hijri New Year | 1 Muharram 1451 |
+| `2029-07-24` | Prophet Mohammed's Birthday | 12 Rabi' al-Awwal 1451 |
+
+**Known accuracy of the projection, measured rather than asserted.**
+Calibrated against six dates with published actuals, it reproduced five
+exactly (1 Shawwal 1420 → 2000-01-08; 1 Ramadan 1447 → 2026-02-18;
+1 Shawwal 1447 → 2026-03-20; 9 Dhu al-Hijjah 1447 → 2026-05-26;
+12 Rabi' al-Awwal 1448 → 2026-08-25) and missed one by a single day
+(1 Muharram 1448: projected 2026-06-16, announced 2026-06-15). **±1 day
+is the expected error, not the exception** — which is the whole reason
+every row above ships as `PROVISIONAL` rather than as fact.
+
+The projection is reproducible, not a hand-copied table:
+`scripts/hijri_holiday_projection.py` regenerates the rows above and
+asserts the six calibration dates on every run.
+
+**Two things deliberately not seeded**, because neither is derivable in
+advance:
+
+- **Eid Al Fitr's possible fourth day.** `u.ae` notes that if Ramadan
+  runs 30 days, day 30 is also a holiday (this is why UAE Eid Al Fitr
+  2026 ran 19–22 March, not 20–22). Whether it applies depends on the
+  observed length of Ramadan, so only the three days Article 1 fixes are
+  seeded.
+- **Article 2 transfers.** The Cabinet may move any non-Eid holiday to
+  the start or end of the week by resolution. That is an announcement,
+  not a rule that can be pre-applied — it is handled by correcting the
+  row through the `PATCH` route above.
+
+Both are corrections in the same direction: seed the legal baseline,
+confirm against the announcement. Re-running the seed must therefore be
+idempotent and must **not** overwrite a row already moved to
+`CONFIRMED` — `on conflict do nothing`, matching the
+`seed_finalized_coa_demo_company_0002.sql` convention.
 
 ### 3.2 `payments` (new) — per D-1
 
@@ -263,7 +566,7 @@ company_id        uuid not null references companies(id)
 customer_id       uuid not null references customers(id)
 payment_date      date not null
 amount            numeric(18,2) not null check (amount > 0)
-payment_method    text                          -- enum candidate; not yet specified by deliverables
+payment_method    payment_method_type            -- new enum (D-12): 'cash','bank_transfer','cheque','card','pos','other'
 reference_number  text
 bank_account_id   uuid references accounts(id)  -- nullable; falls back to company_settings.default_bank_account_id (D-6)
 unapplied_amount  numeric(18,2) not null         -- starts = amount, decrements as applications are added
@@ -415,10 +718,12 @@ transition logic yet. D owns all three:
 
 - One `payments` row can fund `payment_applications` rows against
   several invoices for the same customer in one transaction.
-- GL posting at the *payment* record, not per application: `Dr` Bank
-  (`1020`, or `payments.bank_account_id` if set — D-6), `Cr` Accounts
-  Receivable (`1100`), for `amount`. One journal entry per payment —
-  mirrors C's post-once-at-Issue pattern rather than one entry per line.
+- GL posting at the *payment* record, not per application: `Dr` the
+  routed debit account (D-12 — `1010` cash, `1020`/default bank for
+  transfer/cheque, `1070` for card/POS, or an explicit
+  `payments.bank_account_id` override), `Cr` Accounts Receivable
+  (`1100`), for `amount`. One journal entry per payment — mirrors C's
+  post-once-at-Issue pattern rather than one entry per line.
 - `entry_type = 'customer_payment'` (§3.6).
 
 ### 4.3 Advance receipt
@@ -458,7 +763,10 @@ transition logic yet. D owns all three:
   provision), the excess still posts `Dr 5640` directly for the shortfall
   — a corner case worth a code comment, not a silent rounding fix.
 - Approval: the write-off's `journal_entry_id` goes through A's existing
-  threshold-based approval — nothing write-off-specific to build (D-8).
+  threshold-based approval, but resolved against
+  `write_off_approval_threshold` (D-11, AED 5,000), not the general
+  `journal_approval_threshold` — nothing else write-off-specific to
+  build.
 - Undo path: reuse A's standard reversing-entry mechanism
   (`reverse_journal_entry`, schema.sql §10) rather than a write-off-
   specific undo — a written-off invoice that later gets paid is a
@@ -469,9 +777,48 @@ transition logic yet. D owns all three:
 Not one of D's original 8 deliverables; added because the accountant's
 answer on D-8 requires it for the allowance method to mean anything.
 
-**4.5a — Provisioning run.** As part of month-end close, a
-scheduled/triggered run (same category as `mark_overdue_invoices()`,
-guarded by the `ecl:` advisory lock, §3.7):
+**4.5a — Provisioning run.** Scheduled per D-10: `period_end` + 5
+business days, weekend/holiday-aware via `company_settings.weekend_days`
+(`{6,7}`, D-13) and `public_holidays` — counting `PROVISIONAL` rows as
+non-business days identically to `CONFIRMED` ones, per D-14 — guarded
+against an already-`closed` period, and
+guarded by the `ecl:` advisory lock (§3.7) so two concurrent triggers
+can't double-post the same period.
+
+**Seed rates (provisional, not company-calibrated):** no company-specific
+loss history exists yet, so `ecl_loss_rate_policies` seeds with generic
+industry benchmarks rather than an invented company-specific number.
+These are explicitly placeholders — the D-8 review cadence already
+calls for reassessing rates yearly against real write-off history, and
+that reassessment is what turns these from generic into calibrated:
+
+| Bucket | Seed rate |
+|---|---|
+| `current` | 0.75% |
+| `0_30` | 2% |
+| `31_60` | 7.5% |
+| `61_90` | 20% |
+| `90_plus` | 40% |
+
+Single midpoint values chosen from the benchmark ranges rather than
+range endpoints, since `ecl_loss_rate_policies.loss_rate` is a single
+number per bucket, not a range — worth a code comment noting these are
+provisional so nobody mistakes them for a ratified figure later.
+
+**Opening allowance balance:** no existing informal provision or
+write-off history was identified, so `1110`'s opening balance is
+**AED 0** — the first monthly run builds the allowance up from scratch
+via A's normal opening-balance mechanism, rather than guessing at a
+non-zero starting figure. Standard for a first implementation.
+
+**Manual overrides at go-live:** none seeded — `ecl_loss_rate_policies`
+and `customers.ecl_override_rate` start empty; specific high-risk
+customers get flagged as and when they're actually identified, not
+invented now.
+
+**Still needed before this can actually run on schedule:** the
+month-end close date/cadence — nothing in the COA, schema, or company
+data answers this; it's an internal operational fact, not derivable.
 
 1. For each customer without `ecl_override_rate` set, bucket their
    outstanding invoice balances per D-5's aging buckets and apply the
@@ -566,6 +913,9 @@ C's `invoices`/`credit_notes` tables are needed beyond `paid_at`.
 
 ## 7. Out of scope for this pass
 
+- **`1070 → 1020` settlement/clearing entries** (D-12) — bank
+  reconciliation, not an AR concern; manual journal entry until a
+  dedicated module exists.
 - **VAT-201 return filing/reclaim mechanics** — Module F, per Build
   Order §3. D computes and flags `vat_relief_eligible` (§4.5b) only.
 - **PDF/XLSX/CSV export mechanics** generally — Build Order §8
@@ -575,6 +925,11 @@ C's `invoices`/`credit_notes` tables are needed beyond `paid_at`.
   category, same bucket as C §9.
 - **Multi-currency** payments or advances — not mentioned anywhere in
   A/C and out of scope until raised explicitly.
+- **Company-settings admin API/UI** (D-13) — changing `weekend_days`,
+  either approval threshold, or `default_bank_account_id` is a DB-level
+  task until a dedicated company-administration module exists. D reads
+  `company_settings`; it never writes it. The one exception is
+  `public_holidays`, which gets its own narrow admin route per D-14.
 - **Credit-limit override workflow** — only relevant if D-4 is revisited
   toward "blocking" instead of "alert-only."
 - **Supplier-side mirror (Module E / Accounts Payable)** — separate
@@ -584,9 +939,19 @@ C's `invoices`/`credit_notes` tables are needed beyond `paid_at`.
 
 ## 8. Suggested next step
 
-**All decisions (D-1 through D-9) are now ratified** — against
-`schema.sql`, the real COA, and explicit accountant sign-off on D-8.
-Nothing in this spec remains a placeholder or a "TBC." §3's schema
-migration (note the larger surface now: `write_offs`,
-`ecl_loss_rate_policies`, `ecl_provision_runs`, plus the `customers` and
-`invoices` extensions) can proceed alongside §4's posting functions.
+**D-1 through D-14 are ratified.** One flagged assumption remains worth
+a quick confirmation before build rather than a hard blocker: the AED
+50,000 general `journal_approval_threshold`'s unverified alignment with
+"TC9" (D-11) — recorded as given, never checked against the test pack
+itself.
+
+Closed since the last pass: D-10's weekend-days default is confirmed
+Sat/Sun with the settings-editing surface explicitly deferred (D-13),
+and `public_holidays` now has real seed data through 2029 sourced from
+Cabinet Resolution No. (27) of 2024, with lunar dates carried as
+`PROVISIONAL` and correctable (D-14).
+
+Everything else — schema (§3), posting functions (§4), reporting (§5) —
+is ready to build against. Still outstanding as an operational input
+rather than a decision: the month-end close date/cadence (§4.5a), which
+no document in the project answers.
