@@ -1,0 +1,31 @@
+---
+description: PostgreSQL schema, triggers, RPCs, numeric money, migrations. Use when editing schema.sql, apply_*.sql, or DB functions.
+globs:
+  - docs/source-of-truth/**/*.sql
+  - src/**/*.repository*.ts
+alwaysApply: false
+---
+
+# PostgreSQL
+
+`docs/source-of-truth/schema.sql` is the **fresh-DB** schema. Apply top-to-bottom, then seeds. Workflow: `.cursor/workflows/database-change.md`.
+
+## Invariants
+
+- Money: `numeric(18,2)` — never `float`/`double`. Timestamps: `timestamptz`. IDs: `uuid`.
+- Prefer DB enforcement for accounting invariants (CHECK, EXCLUDE, triggers, RPC transactions). Do **not** add triggers/constraints without tracing existing ones — many already exist.
+- New functions: `search_path = public, pg_temp`; revoke `public`/`authenticated`/`anon`; `grant execute … to service_role` (`feature-spec.md` §5.1). Views that read tenant tables: `security_invoker = true` (required on `v_trial_balance`).
+- Concurrency: `pg_advisory_xact_lock`. Namespaces: entry number `hashtext(company_id)`; `ob:` / `ye:` / `rjt:` / payment/ECL locks as in schema. **Namespace lock first, then entry-number lock.**
+- Posted JE immutability is a feature. Never `TRUNCATE`, disable triggers, or force-delete posted companies (`feature-spec.md` §7).
+- `audit_log` is append-only (`block_audit_log_mutation`).
+- Periods: btree_gist exclusion on overlapping ranges per company.
+
+## apply_*.sql vs schema.sql
+
+`schema.sql` header says fold patches in. Module D also ships idempotent `apply_*.sql` for **already-applied** projects. Same change must land in **both** `schema.sql` (canonical) and a matching apply script when one exists. Do not leave live DB and `schema.sql` diverged.
+
+## Do not
+
+- Invent account numbers or enums outside the spec.
+- Change CHECK/trigger text to “make Nest easier.”
+- Assume `service_role` auto-has table grants on a fresh Supabase project — §12 grants are required.

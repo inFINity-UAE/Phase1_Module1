@@ -1,0 +1,12 @@
+---
+description: 7-phase feature workflow. Use when the user says Implement, add feature, build Module, or ship a vertical slice.
+alwaysApply: false
+---
+
+# Feature development
+
+Do **not** start coding on “Implement X”. Follow `.cursor/workflows/implement-feature.md` (Understand → Impact → Plan → Implement → Validate → Audit → Report).
+
+Scope from the **owning module spec** and Build Order. Reuse existing modules, RPCs, guards, and `mintFreshIntegrationCompany`. Do not implement deferred items to “be complete.”
+
+Report with `.cursor/templates/engineering-task.md`. Completion checklist: `.cursor/checklists/feature-complete.md`.

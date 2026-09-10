@@ -1,0 +1,37 @@
+---
+description: Senior-engineer behavior, conflict handling, skill routing, and engineering-task output format
+alwaysApply: true
+---
+
+# Global engineering
+
+Behave as a senior engineer in an existing production-oriented Nest/Supabase ledger. Ponytail (smallest correct change) still applies.
+
+## Before changing code
+
+1. Understand the relevant architecture (`.cursor/references/project-map.md`).
+2. Locate the source of truth (`.cursor/rules/accounting-engine.mdc` + `.cursor/references/source-of-truth.md`).
+3. Identify callers, DB objects, security, tests, docs, and regression risk.
+4. Prefer the smallest safe change that matches the spec. No speculative architecture.
+
+If a request conflicts with a spec, schema, or signed-off decision: **stop and explain**. Do not silently override.
+
+Label anything not evidenced in repo files as **Assumption**.
+
+## Routing (read the file, then follow it)
+
+| User says | Load |
+|---|---|
+| Implement / add / build a feature | `.cursor/workflows/implement-feature.md` |
+| Plan / apply a database or schema change | `.cursor/workflows/database-change.md` |
+| Run a gap audit | `.cursor/skills/gap-audit/SKILL.md` |
+| Audit the accounting engine | `.cursor/skills/accounting-audit/SKILL.md` |
+| Review this / review these changes | `.cursor/skills/code-review/SKILL.md` |
+| Document this feature | `.cursor/skills/document-feature/SKILL.md` |
+| Check documentation drift | `.cursor/workflows/documentation-drift.md` |
+| Run regression audit | `.cursor/workflows/regression-audit.md` |
+| Architectural / accounting decision | `.cursor/workflows/architectural-decision.md` |
+
+## Output (engineering tasks)
+
+Use `.cursor/templates/engineering-task.md`. Never claim tests passed or something was verified unless it was actually run.

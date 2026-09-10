@@ -1,28 +1,27 @@
 ---
-description: UAE-compliant double-entry accounting engine — source of truth and hard rules for Module 1.1.A
+description: UAE-compliant double-entry accounting engine — source of truth, never-guess, and module gating
 alwaysApply: true
 ---
 
 This project implements a UAE-compliant double-entry accounting engine.
 
-SOURCE OF TRUTH — in this priority order:
-1. /docs/source-of-truth/Accounting Rules - inFINity.pdf
-2. /docs/source-of-truth/schema.sql
-3. /docs/source-of-truth/feature-spec.md (Module 1.1.A feature list)
+SOURCE OF TRUTH — when they disagree, STOP and report the conflict (do not pick a silent default). Priority:
+
+1. `/docs/source-of-truth/Accounting Rules - inFINity.pdf` — accounting policy (rates, treatments, immutability)
+2. `/docs/source-of-truth/schema.sql` — live DB structure (tables, RPCs, triggers, RLS, grants)
+3. The **module feature spec for the code being changed** (not a later module's spec):
+   - A — `feature-spec.md`
+   - H1 — `feature-spec-1.1.H1.md`
+   - C — `feature-spec-1.1.C.md`
+   - D — `feature-spec-1_1_D.md`
+   - E — `feature-spec-1_1_E.md` (specified; **not built**)
+4. `Module_1.1_Build_Order_Scope.md` — sequencing only, never a substitute for a feature spec
+
+Stale counts, intros, or manuals (`README.md`, `INFINITY_ACCOUNTING_DOCUMENTATION.md`, older §7.2 snapshots) are **not** authoritative over (1)–(3).
 
 HARD RULES:
-- Never invent, assume, guess, or "fill in reasonably" any accounting rule,
-  tax rate, threshold, formula, or business rule not explicitly stated in
-  the source documents above. If something is ambiguous or not covered,
-  STOP and ask the developer rather than picking a default.
-- Every non-trivial piece of business logic (validation, calculation,
-  workflow rule) must have a code comment citing which document and
-  section it implements, e.g. // [Rules §1.3] no hard deletes, reversing
-  entries only.
-- Never alter schema.sql's table/column/constraint definitions to make
-  application code easier to write. If the schema seems to be missing
-  something the feature needs, stop and ask rather than modifying it.
-- All monetary values are numeric(18,2) AED unless a document states
-  otherwise.
-- Do not implement anything from Module 1.1.B–H or later phases even if it
-  seems related — this project currently implements Module 1.1.A only.
+- Never invent, assume, guess, or "fill in reasonably" any accounting rule, tax rate, threshold, formula, account number, or business rule not explicitly stated in the sources above. If unclear: inspect the PDF, the module spec, `schema.sql`, the implementation, and tests — then **report the ambiguity**. Do not pick a default.
+- Every non-trivial piece of business logic (validation, calculation, workflow rule) must have a code comment citing which document and section it implements, e.g. `// [Rules §1.3] no hard deletes, reversing entries only`.
+- Never reshape existing `schema.sql` tables/constraints to make Nest easier. If a **ratified module spec** requires additive DDL, use `.cursor/workflows/database-change.md` (update `schema.sql` and any matching `apply_*.sql`). If the spec is silent or ambiguous, stop and ask — do not invent columns.
+- All monetary values are `numeric(18,2)` AED unless a document states otherwise.
+- Implement only the module the user scoped. Built and signed off: A, H1, C1 core, D. Next specified: E. Do **not** implement B, F, G, H-remainder, C §9 presentation, or D §7 deferrals unless the user explicitly scopes that work. Do not treat "related" as in-scope.

@@ -1,0 +1,12 @@
+---
+description: Architectural and accounting decisions must be explicit. Use when changing posting, RLS, immutability, module boundaries, or signed-off decision-log items.
+alwaysApply: false
+---
+
+# Change management
+
+Signed-off decisions (A #1–#64, H1 #1–#6, C #1–#23, D-1…D-17, E-1…E-22) are not to be silently reversed.
+
+If a change would alter one: stop and follow `.cursor/workflows/architectural-decision.md`. Append a new numbered decision to the module spec; do not edit the old entry’s meaning.
+
+Especially load-bearing: backend-only access (§5.1), membership guard (#41), ledger-truth status, advisory-lock order, COA account numbers, Bill entity Option A (E-1), one-cron scheduler (D-16), no posted-row deletes.

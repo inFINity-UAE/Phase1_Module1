@@ -1,0 +1,42 @@
+---
+description: Ledger invariants — balanced JE, immutability, periods, COA, posting accounts. Use when touching journals, accounts, periods, invoices, payments, reports, or schema.sql.
+globs:
+  - src/journal-entries/**
+  - src/accounts/**
+  - src/accounting-periods/**
+  - src/recurring-journal-templates/**
+  - src/invoices/**
+  - src/credit-notes/**
+  - src/payments/**
+  - src/reports/**
+  - docs/source-of-truth/**
+alwaysApply: false
+---
+
+# Accounting invariants
+
+Hard SoT/never-guess rules live in `accounting-engine.mdc`. This file is operational.
+
+## Must hold
+
+- Posted JE: Σ debit = Σ credit (`trg_enforce_journal_balance_on_post`). Drafts may be unbalanced.
+- Posted headers/lines are immutable. Correct via `reverse_journal_entry` — never UPDATE/DELETE posted rows. An entry cannot be reversed twice; a reversal cannot be reversed (`feature-spec.md` §4.2).
+- `is_ledger_truth_status` = `posted` ∪ `reversed`. Draft/pending/rejected **never** enter TB/BS/P&L/GL/year-end P&L.
+- Opening balance: once per company+fiscal year; **asset/liability/equity only**. Year-end: once per company+fiscal year into **3100**.
+- Periods: `open` / `soft_closed` / `closed`. Soft-close is the only wired status transition. **Hard-close and reopen HTTP are stubs** — schema columns only. Overlap forbidden (`accounting_periods_company_daterange_excl`). Dates are half-open `[period_start, period_end)`.
+- System accounts (`is_system_account`, e.g. 3100): no structural PATCH/deactivate; DB `trg_prevent_system_account_mutation` / `prevent_account_deletion`.
+- Owner bypasses journal approval; Owner or Manager approve others. Recurring `auto_post` still uses `JournalEntriesService.post()` — not a bypass.
+- Write-off uses `write_off_approval_threshold` (default 5000). `ecl_provision` is non-blocking (`resolveApprovalThreshold`).
+- Audit: mutations via `trg_log_journal_entry_change`; rejected posted deletes logged in Nest as `delete_blocked` in a **separate** request after the trigger rollback.
+
+## COA — never invent numbers
+
+4-digit, 5 bands: 1xxx asset, 2xxx liability, 3xxx equity, 4xxx income, 5xxx expense. `normal_balance` is `debit`/`credit` only. Resolve numbers from the Excel COA / seed / existing RPCs.
+
+Hardcoded in schema/posting today (do not casually change): `1100` AR, `2200` output VAT, `4060` sales discounts, `3100` RE, `1020` default bank, `2060` advances, `5640`/`1110` ECL, `1010`/`1070` payment routing. E (unbuilt) locks `2000`/`1400`/`1320`/`5060`/`2020` in `feature-spec-1_1_E.md` — do not reopen.
+
+## Unclear requirement
+
+Inspect PDF → module spec → `schema.sql` → implementation → tests. Then report. Do not guess treatment.
+
+Checklist: `.cursor/checklists/accounting-invariants.md`.

@@ -1,0 +1,37 @@
+---
+description: Supabase client, service-role, RLS, RPCs, env keys. Use when touching database/, auth, RLS, or Supabase clients.
+globs:
+  - src/database/**
+  - src/auth/**
+  - docs/source-of-truth/schema.sql
+alwaysApply: false
+---
+
+# Supabase
+
+## Access model (`feature-spec.md` §5.1)
+
+All app data access is **backend-mediated** with `SUPABASE_SECRET_KEY` (`SupabaseService`). No `authenticated`-role client is intended to call tables/RPCs.
+
+**Critical:** `service_role` **bypasses RLS**. Tenant isolation in Nest is:
+
+1. `SupabaseAuthGuard` (Bearer JWT → `auth.getUser`)
+2. `CompanyMembershipGuard` + `@RequireCompanyMembership`
+3. Explicit `.eq('company_id', …)` / RPC `p_company_id` from a membership-resolved company
+
+RLS (`app.current_company_id`) is defense-in-depth for non-service roles. Nest does **not** currently set that GUC. `companies` RLS uses `private.is_company_member(auth.uid())`, not the GUC.
+
+For every DB-facing change, ask: **can company A read/write company B?** If yes → critical defect.
+
+## Keys
+
+`.env.example`: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`, `SUPABASE_SECRET_KEY`. Tests: `.env.local`. App: `.env`. Never commit secrets; never send the secret key to a browser (there is no client app today).
+
+Do not switch to legacy `anon` / `service_role` JWTs (`feature-spec.md` #37). Keep the PGRST303 clock-skew fetch retry on the secret client.
+
+## Do not
+
+- Disable RLS to make a feature work.
+- Expose RPCs to `anon`/`authenticated`.
+- Trust `company_id` in the body without membership check.
+- Create a second Supabase client pattern.

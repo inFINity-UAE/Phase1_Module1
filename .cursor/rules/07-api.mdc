@@ -1,0 +1,19 @@
+---
+description: Nest HTTP conventions — guards, DTOs, company_id, error mapping. Use when adding or changing controllers and DTOs.
+globs:
+  - src/**/*.controller.ts
+  - src/**/*.dto.ts
+alwaysApply: false
+---
+
+# API
+
+- List endpoints require `company_id` query param (no implicit company on the user).
+- Mutations that create a tenant row take `company_id` in the body and membership-check it.
+- `:id` routes use `@RequireCompanyMembership({ type: 'param', resource: '…' })` with a `CompanyResourceKind` the repository can resolve.
+- Parse UUIDs with `ParseUUIDPipe`. HTTP 204 on deletes where existing controllers do.
+- Keep controllers thin. Reuse `handleDatabaseError` / exception tokens (`OPENING_BALANCE_ALREADY_EXISTS`, `POSTED_ENTRY_DELETE_BLOCKED`, …).
+- Do not add pagination, exports, or PDF unless the module spec says so (explicitly deferred in A/H1/D).
+- New controller → import `AuthModule` in that module; add the route to `controller-auth-coverage.spec.ts`.
+
+No public/unauthenticated API exists. No companies CRUD API exists.

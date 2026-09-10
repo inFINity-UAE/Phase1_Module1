@@ -1,0 +1,24 @@
+---
+description: inFINity Phase 1 — what exists, stack, modules, and where to look. Apply on any task in this repo.
+alwaysApply: true
+---
+
+# Project context
+
+**inFINity Phase 1** is a UAE double-entry accounting **HTTP API** (NestJS 11 + Supabase/Postgres). There is **no UI** in this repository.
+
+**Isolation unit:** `companies`. Tenant data is scoped by `company_id`. Demo COA clone source: `00000000-0000-0000-0000-000000000002` (read-only; never wipe).
+
+| Module | Spec | Status (Build Order, 2026-09-10) |
+|---|---|---|
+| A ledger | `feature-spec.md` | Built |
+| H1 reports | `feature-spec-1.1.H1.md` | Built (TB/BS/P&L/GL) |
+| C sales docs | `feature-spec-1.1.C.md` | C1 core built; §9 presentation deferred |
+| D AR | `feature-spec-1_1_D.md` | Built; §7 deferrals remain |
+| E AP | `feature-spec-1_1_E.md` | Spec only — no `suppliers`/`bills` |
+| B/F/G/H-rest | — | Queued |
+
+**Do not invent** a frontend, CI, local `supabase/` folder, generated types, or company-onboarding API — none exist.
+
+Facts (tables, RPCs, routes, tests): `.cursor/references/project-map.md`.
+Document conflicts: `.cursor/references/source-of-truth.md`.

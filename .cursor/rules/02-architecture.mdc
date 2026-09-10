@@ -1,0 +1,35 @@
+---
+description: Nest module layout, data flow, RPC vs service, scheduler, no Nest-level Postgres transactions. Use when changing src/ structure, adding modules, or posting to the ledger.
+alwaysApply: false
+---
+
+# Architecture
+
+## Layers
+
+`Controller → Service → Repository interface → *.repository.supabase.ts`
+
+- Controllers: auth guards, DTO, `@CurrentUser().id`. No SQL.
+- Services: workflow, RBAC, mapping DB errors via `handleDatabaseError`.
+- Repositories: Supabase JS `.from()` / `.rpc()`. Inject with `Symbol` tokens (`ACCOUNTS_REPOSITORY`, `useClass: Supabase…`).
+- New tenant module: import `AuthModule`; add resource kind + lookup in `CompanyMembersService` if the route uses `:id`. There is no write-off `:id` resource — write-off HTTP lives on invoices.
+
+## Where logic lives
+
+| Kind | Home |
+|---|---|
+| Balance, immutability, numbering, Issue/Void posting, reports | Postgres functions/triggers in `schema.sql` |
+| Approval threshold, membership, DTO whitelist, HTTP mapping | Nest |
+| Unattended jobs | `RecurringJournalSchedulerService` — **one** daily `@Cron` 01:00 UTC (recurring + expire quotations + overdue invoices + VAT-relief flag + ECL). Do not add a second scheduler. |
+
+Transactional documents (invoice Issue, payment post, write-off, opening balance, year-end, reverse) go through **existing RPCs**. Do not reimplement posting in Nest. Multiple Supabase `.from()` calls are **separate** requests — they are not one Postgres transaction. Atomic check-then-act belongs in a `SECURITY DEFINER` RPC.
+
+## Data flow (sales → ledger)
+
+Quotation (no JE) → convert → Invoice Issue (`issue_invoice` → `sales_invoice` JE, AR `1100` / VAT `2200` / income) → Payment (`create_payment_journal_entry`) → Void (`reverse_journal_entry`). Posted JEs are immutable; corrections reverse.
+
+## Do not
+
+- Add companies/members HTTP CRUD (scaffolding only today).
+- Bypass RPCs with multi-step Nest inserts for posting.
+- Set `app.current_company_id` unless a spec requires it — Nest uses `service_role` and **must** filter `company_id` itself (see 05-supabase / 06-security).

@@ -1,0 +1,31 @@
+---
+description: Authn/z, tenant isolation, DTO identity, secrets. Use when changing guards, DTOs, RLS, or any tenant-scoped route.
+globs:
+  - src/auth/**
+  - src/company-members/**
+  - src/**/*.controller.ts
+  - src/**/*.dto.ts
+alwaysApply: false
+---
+
+# Security
+
+Checklist: `.cursor/checklists/security.md` and `.cursor/checklists/auth-tenant.md`.
+
+## Non-negotiable
+
+- Every tenant route: `@UseGuards(SupabaseAuthGuard, CompanyMembershipGuard)` + `@RequireCompanyMembership`. Missing metadata → 500 (fail-closed).
+- Actor ids (`created_by`, `approved_by`, `closed_by`, …) come from `@CurrentUser()`, never the body (`feature-spec.md` #10).
+- Global `ValidationPipe`: `whitelist` + `forbidNonWhitelisted`. Purpose-built update DTOs — do not `PartialType(CreateDto)` if that would expose `company_id`, status, or identity fields.
+- Roles: enum has six values; **only Owner and Manager** are enforced for journal approve/reject. Do not invent a full RBAC module (1.6). Resolve role from `company_members` every time.
+- Non-member → **403**, not 404 (`CompanyMembersService.resolveRole`).
+- IDOR: load the resource, resolve `company_id`, then membership — never “id exists globally therefore allow.”
+- Errors: map known tokens via `database-error.mapper.ts`; do not leak stack traces or other tenants’ rows.
+
+## Verification when touching this surface
+
+Run `controller-auth-coverage.spec.ts` (route list), `node scripts/verify-auth-module-imports.mjs` (AuthModule wiring), and the relevant membership/RLS integration spec. Update `CompanyResourceKind` when adding `:id` resources.
+
+## Do not
+
+- Disable RLS; skip guards “just for this route”; take role from the client; log tokens or secret keys.

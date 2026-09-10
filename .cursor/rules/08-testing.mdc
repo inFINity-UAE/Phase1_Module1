@@ -1,0 +1,29 @@
+---
+description: Jest layout, live-DB integration rules, company minting. Use when writing or changing tests.
+globs: src/**/*.spec.ts,jest.config.js,src/test/**,src/e2e/**
+alwaysApply: false
+---
+
+# Testing
+
+Jest (`jest.config.js`): `rootDir: src`, `*.spec.ts`. No CI. Integration/e2e skip if `.env.local` keys are missing.
+
+## Company policy (`feature-spec.md` §7)
+
+Mint a **fresh UUID company per run** via `mintFreshIntegrationCompany` (clones COA from `…0002`). Never wipe `…0002`. Never reuse retired ids (`…0001`, `…e2e1`, `…b001`–`…b005`). Never TRUNCATE/disable triggers to clean posted data.
+
+## What to add
+
+Happy path is not enough. For ledger/AR work also cover: unbalanced post, inactive/wrong-company account, closed/soft-closed period, double reverse, duplicate Issue/OB/YE, `numeric(18,2)` rounding, unauthorized company, and concurrency where advisory locks exist.
+
+| Layer | Examples |
+|---|---|
+| Unit | `*.service.spec.ts` — no live DB |
+| Integration | `*.integration.spec.ts` — live Supabase |
+| E2E | `src/e2e/ledger-lifecycle.e2e.spec.ts` |
+| Auth regression | `controller-auth-coverage.spec.ts` + `verify-auth-module-imports.mjs` |
+| Excel pack | `excel-module-test-cases.integration.spec.ts` (TC1–TC14) |
+
+Run the **smallest relevant** suite first, then broader. Quote actual command output. Known compile gap (D-P13): `journal-entries.service.spec.ts` mock missing ECL methods — do not “fix” by deleting coverage; extend the mock if you touch that spec.
+
+Do not declare complete because only the happy path passed.

@@ -1,0 +1,17 @@
+---
+description: How to write and sync docs with code. Use when editing markdown specs, README, or when asked to document a feature.
+globs: docs/**/*.md,README.md,INFINITY_ACCOUNTING_DOCUMENTATION.md
+alwaysApply: false
+---
+
+# Documentation
+
+Document **what exists**. Never describe unbuilt behavior as live (E, C §9, D §7, hard-close HTTP, PDF export, company onboarding UI).
+
+- Specs: standing rules in the body; decision log is append-only (do not silently rewrite D-1… or A #1…).
+- Cite `[feature-spec.md §x]` / `[Rules §x]` in code comments for non-trivial logic.
+- `schema.sql` comments are part of the schema SoT.
+- After behavior changes, update the **module feature spec** if the rule changed; do not only edit the user manual.
+- Known stale docs: `.cursor/references/source-of-truth.md`. Prefer the module spec + `schema.sql` when they disagree with README or `INFINITY_ACCOUNTING_DOCUMENTATION.md`.
+
+Feature write-up: `.cursor/skills/document-feature/SKILL.md`. Drift check: `.cursor/workflows/documentation-drift.md`.
