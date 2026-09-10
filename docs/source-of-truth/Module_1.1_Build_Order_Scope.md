@@ -1,7 +1,8 @@
 # inFINity — Module 1.1 Build Order & Scope Document
 
 Companion to `feature-spec.md` (Module 1.1.A), `feature-spec-1.1.H1.md`,
-`feature-spec-1.1.C.md`, and `feature-spec-1_1_D.md`. Module 1.1.A
+`feature-spec-1.1.C.md`, `feature-spec-1_1_D.md`, and
+`feature-spec-1_1_E.md`. Module 1.1.A
 (Double-Entry Accounting Engine) is complete and signed off as of
 decision #63. Module 1.1.H1 (Core Financial Reports) is complete and
 signed off as of H1 decision #6 (2026-08-30). Module 1.1.C **C1 core**
@@ -9,8 +10,10 @@ signed off as of H1 decision #6 (2026-08-30). Module 1.1.C **C1 core**
 scheduled transitions) is complete as of C Batch 2 (2026-09-01).
 Module 1.1.D (Accounts Receivable) is complete and signed off as of
 D-1…D-17 (2026-09-10) — see §2 for C gaps D closed, §3 for D's
-intentional deferrals to F / H-remainder / later admin work. This
-document scopes what comes next, in what order, and why.
+intentional deferrals to F / H-remainder / later admin work. Module
+1.1.E (Accounts Payable) is **specified, not built** (E-1…E-22,
+2026-09-10) — Bill entity is Option A (`bills` table); see §4.
+This document scopes what comes next, in what order, and why.
 
 **Source:** `inFINity Complete Phase-Wise Feature List — All Modules &
 Sub-Features` (July 2026), sections B–H, mapped against what Module 1.1.A
@@ -32,7 +35,7 @@ and so open questions get resolved before they're discovered mid-build.
 | 1 | Core Financial Reports | H (partial — see §1) | 0 | ✅ Done (H1 #1–#6, 2026-08-30) — `feature-spec-1.1.H1.md` |
 | 2 | Quotations & Tax Invoicing | C | 0 | ✅ **C1 core done** (Batch 1–2, 2026-09-01) — `feature-spec-1.1.C.md`; §9 presentation + FTA gap register still deferred (→ post-C1/F); payment/`written_off` ledger closed by D (2026-09-10) |
 | 3 | Accounts Receivable | D | 0, 2 | ✅ **Done** (D-1…D-17, 2026-09-10) — `feature-spec-1_1_D.md`; §7 deferrals → F / H-remainder / later admin |
-| 4 | Accounts Payable | E | 0, (3's mirror — see §4 open question) | Queued |
+| 4 | Accounts Payable | E | 0, (3's mirror — pattern only) | 🟡 Spec drafted (E-1…E-22, 2026-09-10) — `feature-spec-1_1_E.md`; not yet built |
 | 5 | AI Document Processing & OCR | B | 0, 4 | Queued |
 | 6 | UAE VAT Compliance Engine | F | 0, 2, 4, 1 | Queued |
 | 7 | UAE Corporate Tax Add-On | G | 0, 1, 6 | Queued |
@@ -166,6 +169,11 @@ Authoritative detail: `feature-spec-1_1_D.md` §7. Carry-forward:
 
 ## 4. Accounts Payable (E)
 
+**Status: 🟡 Spec drafted, not yet built (2026-09-10).** Spec:
+`feature-spec-1_1_E.md` (decisions E-1…E-22). Grounded against
+`schema.sql`, the finalized COA, and Accounting Rules §1.5 / §4.2.
+Not yet in `schema.sql` / Nest.
+
 **Why fourth:** structurally mirrors D on the purchase side, and should
 follow the same "get the ledger-facing transaction module built, then
 its reporting/management layer" pattern established by C→D.
@@ -175,42 +183,23 @@ mirror, not D's dependent — but is sequenced after D so the two share a
 consistent pattern (customer ledger / supplier ledger; aged receivables /
 aged payables) rather than being designed independently and drifting.
 
-### ⚠️ Open question to resolve before scoping E — do not defer to mid-build
+### Bill entity — resolved (E-1): Option A, separate `bills` table
 
-**There is no "Bill" entity defined anywhere in the source feature list
-or in Module 1.1.A's schema.** D's AR side has a clear source: bills-owed
-data comes from C's invoices, which already have a real table. E's AP
-side (`supplier ledger`, `aged payables`, `duplicate bill detection`,
-`three-way match: PO vs delivery note vs supplier invoice`) all
-presuppose a Bill entity with its own fields — PO reference, delivery
-note reference, supplier invoice number, due date — that doesn't exist
-yet.
+The Build Order's original open question (Bill as its own table vs a
+`journal_entries` row) is closed in `feature-spec-1_1_E.md` E-1:
+**Option A.** A bill has its own pre-posting lifecycle
+(`draft → matched → issued → partially_paid/paid`, plus `disputed`/`void`)
+and posts one `purchase_invoice` journal at Issue, the same shape C used
+for invoices and D used for payments.
 
-This needs a decision, in the same style as Module 1.1.A's decision log,
-**before** E's feature-spec doc is written:
+That entity is also the landing target for Module 5 (B — OCR). Do not
+reopen the question when scoping B.
 
-- **Option A:** a Bill is its own table (`bills`), parallel to how
-  `journal_entries` and `accounts` are separate concerns, with its own
-  lifecycle (draft → matched → approved → posted) and its own journal
-  linkage once posted — similar in spirit to how `recurring_journal_templates`
-  generates `journal_entries` rather than being one itself.
-- **Option B:** a Bill is a `journal_entries` row with `entry_type`
-  extended to include something like `'supplier_bill'`, with
-  AP-specific fields either folded into existing columns or added via a
-  side table for the fields journal_entries has no room for (PO
-  reference, delivery note, three-way-match status).
-
-Recommend Option A — the three-way match and duplicate-detection features
-need a pre-posting lifecycle (a bill can exist, be matched, be disputed,
-all before it's ever a journal entry), which doesn't fit naturally into
-`journal_entries`' existing draft→posted model built around Module 1.1.A's
-simpler manual-entry assumptions. But this is a real design decision, not
-a formality — resolve it explicitly, log it, before starting E.
-
-**This same entity also feeds Module 5 (B — OCR)**, since OCR-extracted
-supplier invoices need a landing target. Resolving the Bill entity design
-here, before B is scoped, avoids B guessing at a schema that doesn't
-exist yet and having to be reworked once E defines it properly.
+**Also locked in the spec, not deferred to mid-build:** AP control
+`2000`, input VAT `1400`, advances `1320`, purchase discounts `5060`,
+GRNI `2020`; payment blocked on a failed three-way match (Rules §1.5);
+period-end GRNI accrual (Rules §1.5) as an explicit RPC, not a silent
+cron. Full decision log: E-1…E-22.
 
 ---
 
@@ -225,7 +214,7 @@ building against a guess, not a real schema, and very likely means
 reworking it once E is actually built.
 
 **Depends on:** Module 0 (to post the eventual journal entries), Module 4
-(E — the Bill entity OCR extraction targets, per §4's open question).
+(E — the Bill entity OCR extraction targets, per E-1 / §4).
 
 **Note for scoping:** "Batch upload: process up to 50 documents
 simultaneously in background queue (BullMQ)" is the first mention of a
@@ -321,19 +310,20 @@ layer rather than be built speculatively early.
   (D-1…D-17, 2026-09-10); fresh-DB + idempotent `apply_*.sql` + Jest
   **573** verified per §8 of that spec. Carry-forward deferrals listed
   in §3 above / feature-spec §7.
+- 🟡 **Module 1.1.E spec** — `feature-spec-1_1_E.md` written and
+  grounded (E-1…E-22, 2026-09-10); Bill entity Option A; not yet built.
 
 **Next:**
 
-1. Resolve the **Bill entity design question (§4)** as its own short
-   decision document — it affects how B is scoped later, and it's the
-   one open question in this build order that's cheaper to answer now
-   than to discover mid-build.
-2. Scope **Module 1.1.E (Accounts Payable)** when ready — mirror D's
-   pattern; do not invent a divergent subledger shape.
-3. **Post-C1 / post-D carry-forward** (not blocking E): FTA gap-detection
-   register, C §9 presentation features, D §7 items (1070→1020
-   settlement, VAT-201 filing in F, PDF/export, dunning, multi-currency,
-   company-settings admin API) — track in the owning module's
-   feature-spec until explicitly scoped.
-4. Optional hygiene: close the D-P13 `journal-entries.service.spec.ts`
+1. **Build Module 1.1.E** against `feature-spec-1_1_E.md` (E-1…E-22).
+   Bill entity is closed (Option A). Do not invent a divergent subledger
+   shape; do not reopen GL account numbers already resolved in E-2.
+2. **Post-C1 / post-D / post-E-spec carry-forward** (not blocking E
+   build): FTA gap-detection register, C §9 presentation features, D §7
+   items (1070→1020 settlement, VAT-201 filing in F, PDF/export,
+   dunning, multi-currency, company-settings admin API), E §7 items
+   (vendor credits, recurring bills, inventory/landed costs,
+   unattended GRNI cron) — track in the owning module's feature-spec
+   until explicitly scoped.
+3. Optional hygiene: close the D-P13 `journal-entries.service.spec.ts`
    mock gap so the suite is fully green.
