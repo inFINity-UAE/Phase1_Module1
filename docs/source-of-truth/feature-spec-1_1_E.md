@@ -1209,10 +1209,10 @@ verification items from the first draft's §8 are closed:
 Remaining before the same signed-off status D reached:
 
 1. Build schema, RPCs, Nest AP routes, and reports per §3–§5.
-2. Run D-P13 discipline: fresh-DB `schema.sql` + COA seed apply,
-   idempotent `apply_*.sql` ×2 (or fold into `schema.sql` per its header
-   "Do not maintain separate apply_*.sql patches — fold changes here"),
-   full test suite, `verify-auth-module-imports.mjs`.
+2. Run D-P13 discipline: fresh-DB `schema.sql` + COA seed (+ other
+   seeds as needed), full test suite, `verify-auth-module-imports.mjs`.
+   Fold all DDL into `schema.sql` — do not add separate `apply_*.sql`
+   patches (per `schema.sql` header).
 3. Ratify E-1…E-22. After ratification, never silently edit; append
    E-25+.
 

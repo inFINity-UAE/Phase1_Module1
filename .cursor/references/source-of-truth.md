@@ -16,7 +16,7 @@ When sources disagree, **do not guess**. Report the conflict. Authority order is
 
 **Business rules** come from the PDF + the owning module spec. **Schema shape** comes from `schema.sql`. If code and spec disagree, that is a **gap** (see gap-audit skill), not a license to pick one silently.
 
-`apply_*.sql` files are incremental patches for already-applied DBs. They must match `schema.sql`. Fresh DB = `schema.sql` + seeds only.
+Fresh DB = `schema.sql` + seeds only. Do not add separate `apply_*.sql` patches — fold DDL into `schema.sql` (per its header).
 
 Excel COA (`Chart of Accounts - inFINity.xlsx`) + `seed_finalized_coa_demo_company_0002.sql` are authoritative for account numbers/names. Demo company has 183 accounts (179 COA + hierarchy demo accounts per A §2.3).
 
@@ -32,7 +32,7 @@ These were true at inspection (2026-09-10). Prefer newer module specs / `schema.
 6. **`feature-spec-1_1_D.md` intro** “Confirmed in-schema” block is **pre-build evidence** (no payments table yet, invoice statuses unwired). The status line at the top is the current one: D is built. Do not re-litigate the intro as live schema.
 7. **D §7** still calls E’s Bill entity an open question. **E-1** closed it as Option A (`bills` table).
 8. **H1 spec** defers aged AR; D added `GET /reports/aged-receivables` without expanding H1’s scope document. Owning spec for aged AR is D §5.2.
-9. **`schema.sql` header** says do not maintain `apply_*.sql`; D-P13 requires ten idempotent `apply_*.sql` files **and** a folded `schema.sql`. Both exist on purpose.
+9. **`schema.sql` header** says do not maintain `apply_*.sql`. Incremental Module D patches were verified at D-P13 then **removed** — structure lives only in `schema.sql`.
 
 ## Stubs / not built (do not document as complete)
 

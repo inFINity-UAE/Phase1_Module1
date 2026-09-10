@@ -1,8 +1,8 @@
 # Database change
 
-Trigger: “Plan this database change”, new table/RPC/trigger/RLS, or editing `schema.sql` / `apply_*.sql`.
+Trigger: “Plan this database change”, new table/RPC/trigger/RLS, or editing `schema.sql`.
 
-Never casually alter production-critical structures. Prefer additive, idempotent, reversible changes. Fold into `schema.sql` (fresh-DB SoT). If an `apply_*.sql` series exists for live projects, add or extend a matching apply script (D-P13 pattern).
+Never casually alter production-critical structures. Prefer additive, idempotent, reversible changes. Fold into `schema.sql` (fresh-DB SoT). Do not add separate `apply_*.sql` patches.
 
 ## Before DDL
 

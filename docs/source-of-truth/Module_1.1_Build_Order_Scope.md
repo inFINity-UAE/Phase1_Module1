@@ -43,10 +43,11 @@ and so open questions get resolved before they're discovered mid-build.
 
 **Verification posture (2026-09-10, Module D sign-off):** full
 `schema.sql` fresh-DB apply on Testing 1.1.A passed clean (+ COA seed +
-UAE public-holidays seed); all `apply_*.sql` idempotent ×2; Jest
-**573 passed** / 59 suites green (1 suite TS compile gap in
-`journal-entries.service.spec.ts` mock — see `feature-spec-1_1_D.md` §8);
-prior C baseline was **544/544** (2026-09-01).
+UAE public-holidays seed); Jest **573 passed** / 59 suites green (1 suite
+TS compile gap in `journal-entries.service.spec.ts` mock — see
+`feature-spec-1_1_D.md` §8); prior C baseline was **544/544** (2026-09-01).
+Incremental `apply_*.sql` patches were verified then removed — fresh DB
+= `schema.sql` + seeds only.
 
 ---
 
@@ -307,9 +308,8 @@ layer rather than be built speculatively early.
   (C1-1…C1-5) landed 2026-08-31; Batch 2 (ledger + scheduler) landed
   2026-09-01; fresh-DB apply verified 2026-09-01.
 - ✅ **Module 1.1.D** — `feature-spec-1_1_D.md` written and built
-  (D-1…D-17, 2026-09-10); fresh-DB + idempotent `apply_*.sql` + Jest
-  **573** verified per §8 of that spec. Carry-forward deferrals listed
-  in §3 above / feature-spec §7.
+  (D-1…D-17, 2026-09-10); fresh-DB + Jest **573** verified per §8 of
+  that spec. Carry-forward deferrals listed in §3 above / feature-spec §7.
 - 🟡 **Module 1.1.E spec** — `feature-spec-1_1_E.md` written and
   grounded (E-1…E-22, 2026-09-10); Bill entity Option A; not yet built.
 

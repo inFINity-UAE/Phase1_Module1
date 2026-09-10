@@ -18,13 +18,14 @@ unspecified are appended as D-16+. Explicit deferrals remain in §7.
 **D-P13 verification (2026-09-10, Testing 1.1.A `kaihxmsskblynwjmwvfh`):**
 fresh `schema.sql` apply + `seed_finalized_coa_demo_company_0002.sql` +
 `seed_uae_public_holidays.sql` clean (25 public tables, 183 accounts,
-38 holidays); all ten `apply_*.sql` scripts idempotent ×2; full
-`npx jest` **573 passed** across 59 suites (vs Module C baseline
-**544/544** — net +29 D tests) with **1 suite failing to compile**
-(`journal-entries.service.spec.ts` mock missing D-P11
-`listPeriodsPendingEcl` / `addBusinessDays` / `runEclProvision` —
+38 holidays); full `npx jest` **573 passed** across 59 suites (vs
+Module C baseline **544/544** — net +29 D tests) with **1 suite
+failing to compile** (`journal-entries.service.spec.ts` mock missing
+D-P11 `listPeriodsPendingEcl` / `addBusinessDays` / `runEclProvision` —
 TypeScript only, not a runtime/DB regression); `verify-auth-module-imports.mjs`
 17/17 OK; `hijri_holiday_projection.py` self-check OK (worst miss 1 day).
+(D-P13 also ran ten incremental `apply_*.sql` patches ×2 idempotent;
+those files were later removed — structure lives only in `schema.sql`.)
 
 **Dependencies, verified directly against `schema.sql`:** Module 0 (A) —
 `companies`, `accounts`, `journal_entries`, `journal_lines`,
@@ -1023,7 +1024,7 @@ scope.
 | Check | Result |
 |---|---|
 | Fresh-DB `schema.sql` + COA seed + UAE holidays seed | Clean (25 tables / 183 accounts / 38 holidays) |
-| All `docs/source-of-truth/apply_*.sql` ×2 | Idempotent (10/10 both passes) |
+| Incremental `apply_*.sql` ×2 (then retired) | Idempotent at D-P13; files removed — SoT is `schema.sql` only |
 | Full `npx jest` | **573 passed**; 59/60 suites green (baseline was **544/544**) |
 | Known suite compile gap | `journal-entries.service.spec.ts` — mock missing `listPeriodsPendingEcl`, `addBusinessDays`, `runEclProvision` (D-P11); fix is test-only |
 | `verify-auth-module-imports.mjs` | 17/17 guarded controllers OK |

@@ -107,7 +107,7 @@ create table companies (
 -- [feature-spec-1_1_D.md §3.1a / D-6, D-10, D-11, D-13]
 -- No trigger creates this row — Nest e2e setup and seed_finalized_coa insert it
 -- before the COA exists, so default_bank_account_id is backfilled to account 1020
--- after accounts are present (seed UPDATE / apply_module_d_enums_and_columns.sql).
+-- after accounts are present (seed UPDATE backfill to account 1020).
 -- FK to accounts is added after the accounts table exists (declared below).
 create table company_settings (
   company_id                    uuid primary key references companies(id) on delete cascade,
@@ -5238,14 +5238,10 @@ grant execute on function get_general_ledger(uuid, uuid, date, date) to service_
 
 -- ============================================================================
 -- 9a2. Module 1.1.D AR reports (feature-spec-1_1_D.md section 5 / D-P12)
--- Bodies mirrored in apply_module_d_ar_reports.sql for live idempotent apply.
--- ============================================================================
-
--- apply_module_d_ar_reports.sql
 -- [feature-spec-1_1_D.md §5 / D-P12]
 -- Customer ledger, aged receivables, credit-limit check, payment history.
 -- Pattern: SECURITY INVOKER + service_role EXECUTE (H1 §5.1).
--- Idempotent (CREATE OR REPLACE).
+-- ============================================================================
 
 -- ---------------------------------------------------------------------------
 -- §5.1 get_customer_ledger
