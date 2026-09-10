@@ -38,6 +38,7 @@ create type period_status as enum ('open', 'soft_closed', 'closed');
 
 -- [feature-spec-1.1.C.md decision #13 / Batch 2 prerequisite] Module 1.1.C
 -- ledger posting entry classification — additive only; no existing rows use these values.
+-- [feature-spec-1_1_D.md §3.6] Module 1.1.D AR posting types — additive only.
 create type journal_entry_type as enum (
   'manual',
   'recurring',
@@ -46,7 +47,22 @@ create type journal_entry_type as enum (
   'year_end_closing',
   'system',
   'sales_invoice',
-  'credit_note'
+  'credit_note',
+  'customer_payment',
+  'advance_receipt',
+  'advance_application',
+  'write_off',
+  'ecl_provision'
+);
+
+-- [feature-spec-1_1_D.md §3.2 / D-12] Payment method → debit-account routing.
+create type payment_method_type as enum (
+  'cash',
+  'bank_transfer',
+  'cheque',
+  'card',
+  'pos',
+  'other'
 );
 
 create type journal_entry_status as enum (
@@ -88,12 +104,20 @@ create table companies (
 
 -- Company-level configurable settings (approval threshold, close policy, etc.)
 -- Kept as a separate 1:1 table so rule changes don't churn the companies row.
+-- [feature-spec-1_1_D.md §3.1a / D-6, D-10, D-11, D-13]
+-- No trigger creates this row — Nest e2e setup and seed_finalized_coa insert it
+-- before the COA exists, so default_bank_account_id is backfilled to account 1020
+-- after accounts are present (seed UPDATE / apply_module_d_enums_and_columns.sql).
+-- FK to accounts is added after the accounts table exists (declared below).
 create table company_settings (
   company_id                    uuid primary key references companies(id) on delete cascade,
   journal_approval_threshold    numeric(18,2),        -- entries above this need Owner approval; null = disabled
   approval_threshold_currency   char(3) not null default 'AED',
   default_period_length         text not null default 'monthly', -- monthly | quarterly
   allow_period_reopen           boolean not null default true,
+  default_bank_account_id       uuid,                 -- D-6; FK + 1020 seed after accounts
+  write_off_approval_threshold  numeric(18,2) not null default 5000, -- D-11 AED 5,000
+  weekend_days                  smallint[] not null default '{6,7}', -- D-10/D-13 ISO Sat/Sun
   updated_at                    timestamptz not null default now()
 );
 
@@ -129,6 +153,44 @@ create table accounts (
 create index idx_accounts_company on accounts(company_id);
 create index idx_accounts_parent on accounts(parent_account_id);
 create index idx_accounts_category on accounts(company_id, category);
+
+-- [feature-spec-1_1_D.md §3.1a / D-6] FK deferred until accounts exists
+-- (company_settings is created before accounts in §1).
+alter table company_settings
+  add constraint company_settings_default_bank_account_id_fkey
+  foreign key (default_bank_account_id) references accounts(id);
+
+-- ============================================================================
+-- 1b. PUBLIC HOLIDAYS (Module 1.1.D — feature-spec-1_1_D.md §3.1b / D-10, D-14)
+-- UAE-wide rows: company_id IS NULL. Company-scoped rows override the same date.
+-- ============================================================================
+
+create table public_holidays (
+  id             uuid primary key default gen_random_uuid(),
+  company_id     uuid references companies(id),   -- null = UAE-wide
+  holiday_date   date not null,
+  description    text not null,
+  status         text not null default 'PROVISIONAL',
+  source         text,                             -- e.g. 'Cabinet Resolution 27/2024 Art.1'
+  created_at     timestamptz not null default now(),
+  updated_at     timestamptz not null default now(),
+  constraint public_holidays_status_check check (
+    status in ('PROVISIONAL', 'CONFIRMED')
+  )
+);
+
+-- Two partial unique indexes — a plain unique(company_id, holiday_date) treats
+-- NULLs as distinct and would allow duplicate UAE-wide rows for the same date.
+create unique index public_holidays_company_date_uq
+  on public_holidays (company_id, holiday_date)
+  where company_id is not null;
+
+create unique index public_holidays_uae_date_uq
+  on public_holidays (holiday_date)
+  where company_id is null;
+
+create index idx_public_holidays_company on public_holidays(company_id);
+create index idx_public_holidays_date on public_holidays(holiday_date);
 
 -- Enforce account_number's leading digit matches its category (1xxx=Asset, etc.)
 create or replace function enforce_account_number_category()
@@ -632,8 +694,17 @@ create table customers (
   billing_address        text,
   default_payment_terms  text,                            -- §5 enum lands with invoices; text default for now
   is_active              boolean not null default true,   -- soft deactivate; no hard delete
+  -- [feature-spec-1_1_D.md §3.1] null = no credit limit enforced
+  credit_limit           numeric(18,2),
+  -- [feature-spec-1_1_D.md §3.4b] manual ECL override for named high-risk cases
+  ecl_override_rate      numeric(6,4),
+  ecl_override_reason    text,
   created_at             timestamptz not null default now(),
-  updated_at             timestamptz not null default now()
+  updated_at             timestamptz not null default now(),
+  constraint customers_ecl_override_reason_required check (
+    ecl_override_rate is null
+    or (ecl_override_reason is not null and btrim(ecl_override_reason) <> '')
+  )
 );
 
 create index idx_customers_company on customers(company_id);
@@ -1152,6 +1223,8 @@ create table invoices (
   vat_total             numeric(18,2) not null default 0,
   grand_total           numeric(18,2) not null default 0,
   amount_paid           numeric(18,2) not null default 0,
+  -- [feature-spec-1_1_D.md §3.5 / D-3] set once when amount_paid reaches grand_total
+  paid_at               timestamptz,
   source_quotation_id   uuid references quotations(id),
   journal_entry_id      uuid references journal_entries(id),
   void_reason           text,
@@ -3146,6 +3219,208 @@ revoke all on function log_journal_entry_change() from anon;
 grant execute on function log_journal_entry_change() to service_role;
 
 -- ============================================================================
+-- 7e. Module 1.1.D — AR payments, write-offs, ECL
+--     (feature-spec-1_1_D.md §3.2, §3.3, §3.4, §3.4a, §3.4c, §3.7)
+-- Advisory-lock namespaces (hashtext('<ns>:' || id)):
+--   pay:  — serialise payment_applications against one payment (unapplied_amount)
+--   wof:  — reserved for write-off numbering if a human-facing number is added later
+--   ecl:  — monthly ECL provisioning run (acquire_ecl_provision_lock)
+-- ============================================================================
+
+create table payments (
+  id                 uuid primary key default gen_random_uuid(),
+  company_id         uuid not null references companies(id),
+  customer_id        uuid not null references customers(id),
+  payment_date       date not null,
+  amount             numeric(18,2) not null check (amount > 0),
+  payment_method     payment_method_type,              -- D-12; nullable until set at receipt
+  reference_number   text,
+  bank_account_id    uuid references accounts(id),     -- D-6 override; else company default
+  unapplied_amount   numeric(18,2) not null,           -- starts = amount; trigger-maintained
+  journal_entry_id   uuid references journal_entries(id),
+  created_by         uuid not null,
+  created_at         timestamptz not null default now(),
+  updated_at         timestamptz not null default now(),
+  constraint payments_unapplied_within_amount check (
+    unapplied_amount >= 0 and unapplied_amount <= amount
+  )
+);
+
+create index idx_payments_company on payments(company_id);
+create index idx_payments_customer on payments(customer_id);
+create index idx_payments_date on payments(company_id, payment_date);
+create index idx_payments_journal_entry on payments(journal_entry_id)
+  where journal_entry_id is not null;
+
+-- [feature-spec-1_1_D.md §3.2] New payment always starts fully unapplied.
+create or replace function set_payment_unapplied_on_insert()
+returns trigger
+language plpgsql
+security invoker
+set search_path = public, pg_temp
+as $$
+begin
+  new.unapplied_amount := new.amount;
+  return new;
+end;
+$$;
+
+create trigger trg_set_payment_unapplied_on_insert
+  before insert on payments
+  for each row execute function set_payment_unapplied_on_insert();
+
+create table payment_applications (
+  id              uuid primary key default gen_random_uuid(),
+  payment_id      uuid not null references payments(id) on delete cascade,
+  invoice_id      uuid not null references invoices(id),
+  applied_amount  numeric(18,2) not null check (applied_amount > 0),
+  applied_at      timestamptz not null default now(),
+  applied_by      uuid not null
+);
+
+create index idx_payment_applications_payment on payment_applications(payment_id);
+create index idx_payment_applications_invoice on payment_applications(invoice_id);
+
+-- [feature-spec-1_1_D.md §3.3] Recompute unapplied_amount from applications;
+-- CHECK on payments rejects sum(applied) > amount (DB defence-in-depth).
+create or replace function refresh_payment_unapplied_amount()
+returns trigger
+language plpgsql
+security invoker
+set search_path = public, pg_temp
+as $$
+declare
+  v_payment_id uuid;
+  v_amount numeric(18,2);
+  v_applied numeric(18,2);
+  v_unapplied numeric(18,2);
+begin
+  v_payment_id := coalesce(new.payment_id, old.payment_id);
+
+  -- [feature-spec-1_1_D.md §3.7] pay: lock — concurrent applications on one payment
+  perform pg_advisory_xact_lock(hashtext('pay:' || v_payment_id::text));
+
+  select amount into v_amount from payments where id = v_payment_id;
+  if not found then
+    raise exception 'PAYMENT_NOT_FOUND';
+  end if;
+
+  select coalesce(sum(applied_amount), 0)
+    into v_applied
+    from payment_applications
+   where payment_id = v_payment_id;
+
+  v_unapplied := v_amount - v_applied;
+  if v_unapplied < 0 then
+    raise exception 'PAYMENT_APPLICATIONS_EXCEED_AMOUNT';
+  end if;
+
+  update payments
+     set unapplied_amount = v_unapplied,
+         updated_at = now()
+   where id = v_payment_id;
+
+  return coalesce(new, old);
+end;
+$$;
+
+-- Spec §3.3: insert/delete. UPDATE of applied_amount also recomputed so a
+-- direct UPDATE cannot bypass the cap.
+create trigger trg_refresh_payment_unapplied_amount
+  after insert or update or delete on payment_applications
+  for each row execute function refresh_payment_unapplied_amount();
+
+-- [feature-spec-1_1_D.md §3.4] NO approved_by — approval lives on journal_entries (D-8).
+create table write_offs (
+  id                     uuid primary key default gen_random_uuid(),
+  company_id             uuid not null references companies(id),
+  customer_id            uuid not null references customers(id),
+  invoice_id             uuid not null references invoices(id),
+  amount                 numeric(18,2) not null check (amount > 0),
+  reason                 text not null,
+  journal_entry_id       uuid references journal_entries(id),
+  debtor_notified_at     date,
+  vat_relief_eligible    boolean not null default false,
+  vat_relief_flagged_at  timestamptz,
+  created_by             uuid not null,
+  created_at             timestamptz not null default now()
+);
+
+create index idx_write_offs_company on write_offs(company_id);
+create index idx_write_offs_customer on write_offs(customer_id);
+create index idx_write_offs_invoice on write_offs(invoice_id);
+create index idx_write_offs_vat_relief on write_offs(company_id, vat_relief_eligible)
+  where vat_relief_eligible = false;
+
+-- [feature-spec-1_1_D.md §3.4a] Append-only loss-rate policies (versioned by effective_from).
+create table ecl_loss_rate_policies (
+  id              uuid primary key default gen_random_uuid(),
+  company_id      uuid not null references companies(id),
+  bucket          text not null,
+  loss_rate       numeric(6,4) not null,
+  effective_from  date not null,
+  created_by      uuid not null,
+  created_at      timestamptz not null default now(),
+  unique (company_id, bucket, effective_from),
+  constraint ecl_loss_rate_policies_bucket_check check (
+    bucket in ('current', '0_30', '31_60', '61_90', '90_plus')
+  ),
+  constraint ecl_loss_rate_policies_rate_range check (
+    loss_rate >= 0 and loss_rate <= 1
+  )
+);
+
+create index idx_ecl_loss_rate_policies_company
+  on ecl_loss_rate_policies(company_id, bucket, effective_from desc);
+
+-- [feature-spec-1_1_D.md §3.4c] One ECL provision run per company per period_end.
+create table ecl_provision_runs (
+  id                  uuid primary key default gen_random_uuid(),
+  company_id          uuid not null references companies(id),
+  period_end_date     date not null,
+  required_allowance  numeric(18,2) not null,
+  prior_allowance     numeric(18,2) not null,
+  adjustment_amount   numeric(18,2) not null,
+  journal_entry_id    uuid references journal_entries(id),
+  reviewed_by         uuid,
+  created_by          uuid not null,
+  created_at          timestamptz not null default now(),
+  unique (company_id, period_end_date)
+);
+
+create index idx_ecl_provision_runs_company on ecl_provision_runs(company_id);
+
+-- [feature-spec-1_1_D.md §3.7 / §4.5a] ecl: lock — concurrent month-end provision runs.
+create or replace function acquire_ecl_provision_lock(p_company_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+begin
+  if p_company_id is null then
+    raise exception 'COMPANY_ID_REQUIRED';
+  end if;
+  perform pg_advisory_xact_lock(hashtext('ecl:' || p_company_id::text));
+end;
+$$;
+
+revoke all on function set_payment_unapplied_on_insert() from public;
+revoke all on function set_payment_unapplied_on_insert() from authenticated;
+revoke all on function set_payment_unapplied_on_insert() from anon;
+grant execute on function set_payment_unapplied_on_insert() to service_role;
+
+revoke all on function refresh_payment_unapplied_amount() from public;
+revoke all on function refresh_payment_unapplied_amount() from authenticated;
+revoke all on function refresh_payment_unapplied_amount() from anon;
+grant execute on function refresh_payment_unapplied_amount() to service_role;
+
+revoke all on function acquire_ecl_provision_lock(uuid) from public;
+revoke all on function acquire_ecl_provision_lock(uuid) from authenticated;
+revoke all on function acquire_ecl_provision_lock(uuid) from anon;
+grant execute on function acquire_ecl_provision_lock(uuid) to service_role;
+
+-- ============================================================================
 -- 8. ROW-LEVEL SECURITY (multi-tenant isolation)
 -- ============================================================================
 -- Assumes the app sets `request.jwt.claims.company_id` (Supabase convention)
@@ -3171,6 +3446,12 @@ alter table invoices enable row level security;
 alter table invoice_lines enable row level security;
 alter table credit_notes enable row level security;
 alter table credit_note_lines enable row level security;
+alter table public_holidays enable row level security;
+alter table payments enable row level security;
+alter table payment_applications enable row level security;
+alter table write_offs enable row level security;
+alter table ecl_loss_rate_policies enable row level security;
+alter table ecl_provision_runs enable row level security;
 
 create policy company_isolation_accounts on accounts
   using (company_id = (select current_setting('app.current_company_id', true))::uuid);
@@ -3225,6 +3506,38 @@ create policy company_isolation_credit_note_lines on credit_note_lines
       where company_id = (select current_setting('app.current_company_id', true))::uuid
     )
   );
+
+-- [feature-spec-1_1_D.md §3.1b] UAE-wide (company_id null) readable by every
+-- company; company-scoped rows isolated as usual. Writes must be company-scoped
+-- (UAE-wide rows are seed-only — D-14).
+create policy company_isolation_public_holidays on public_holidays
+  using (
+    company_id is null
+    or company_id = (select current_setting('app.current_company_id', true))::uuid
+  )
+  with check (
+    company_id = (select current_setting('app.current_company_id', true))::uuid
+  );
+
+create policy company_isolation_payments on payments
+  using (company_id = (select current_setting('app.current_company_id', true))::uuid);
+
+create policy company_isolation_payment_applications on payment_applications
+  using (
+    payment_id in (
+      select id from payments
+      where company_id = (select current_setting('app.current_company_id', true))::uuid
+    )
+  );
+
+create policy company_isolation_write_offs on write_offs
+  using (company_id = (select current_setting('app.current_company_id', true))::uuid);
+
+create policy company_isolation_ecl_loss_rate_policies on ecl_loss_rate_policies
+  using (company_id = (select current_setting('app.current_company_id', true))::uuid);
+
+create policy company_isolation_ecl_provision_runs on ecl_provision_runs
+  using (company_id = (select current_setting('app.current_company_id', true))::uuid);
 
 -- journal_lines and template_lines inherit isolation via their parent entry/template
 create policy company_isolation_journal_lines on journal_lines

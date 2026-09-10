@@ -214,5 +214,15 @@ INSERT INTO public.accounts (company_id, account_number, account_name, category,
 -- depth 3 accounts
 INSERT INTO public.accounts (company_id, account_number, account_name, category, sub_category, normal_balance, parent_account_id, depth, is_system_account, is_active, description) VALUES ('00000000-0000-0000-0000-000000000002', '5102', 'Salaries & Wages Expense - Head Office - Management', 'expense', 'Payroll', 'debit', (SELECT id FROM public.accounts WHERE company_id = '00000000-0000-0000-0000-000000000002' AND account_number = '5101'), 3, false, true, '[Detail] Hierarchy demo child of 5101. [feature-spec.md decision #15]');
 
+-- [feature-spec-1_1_D.md §3.1a / D-6] company_settings is inserted before accounts exist
+-- (no create trigger) — backfill default bank to 1020 once the COA row is present.
+UPDATE public.company_settings cs
+SET default_bank_account_id = a.id
+FROM public.accounts a
+WHERE cs.company_id = '00000000-0000-0000-0000-000000000002'
+  AND a.company_id = cs.company_id
+  AND a.account_number = '1020'
+  AND cs.default_bank_account_id IS NULL;
+
 COMMIT;
 

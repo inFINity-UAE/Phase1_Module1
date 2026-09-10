@@ -100,6 +100,7 @@ export async function ensureCompanyWithCoa(
 
   // Finalized UAE COA = 179 Excel rows + 4 hierarchy demos = 183 (marker: 1021)
   if ((count ?? 0) >= 183 && hierarchyDemo) {
+    await seedDefaultBankAccountId(supabase, companyId);
     return;
   }
 
@@ -188,6 +189,10 @@ export async function ensureCompanyWithCoa(
       `(company_id=${companyId})`,
   );
 
+  // [feature-spec-1_1_D.md §3.1a / D-6] settings row is upserted before COA exists
+  // (no DB trigger) — backfill default_bank_account_id to 1020 once accounts land.
+  await seedDefaultBankAccountId(supabase, companyId);
+
   if (companyId === DEMO_COMPANY_ID) {
     await ensureCompanyMember(
       supabase,
@@ -196,6 +201,39 @@ export async function ensureCompanyWithCoa(
       CompanyRole.Owner,
       testUserEmail(DEMO_OWNER_ID),
     );
+  }
+}
+
+/**
+ * [feature-spec-1_1_D.md §3.1a / D-6] Point company_settings.default_bank_account_id
+ * at account 1020. company_settings is created before accounts exist — no trigger.
+ */
+async function seedDefaultBankAccountId(
+  supabase: SupabaseService,
+  companyId: string,
+): Promise<void> {
+  const { data: bank, error: bankError } = await supabase.client
+    .from('accounts')
+    .select('id')
+    .eq('company_id', companyId)
+    .eq('account_number', '1020')
+    .maybeSingle();
+
+  if (bankError) {
+    throw bankError;
+  }
+  if (!bank?.id) {
+    return;
+  }
+
+  const { error } = await supabase.client
+    .from('company_settings')
+    .update({ default_bank_account_id: bank.id })
+    .eq('company_id', companyId)
+    .is('default_bank_account_id', null);
+
+  if (error) {
+    throw error;
   }
 }
 
