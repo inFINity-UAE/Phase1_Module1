@@ -17,3 +17,6 @@ scripts/_*/
 tmp_*/
 tmp_*
 jest-summary.json
+
+# Generated / working accounting overview (not source of truth)
+INFINITY_ACCOUNTING_DOCUMENTATION.md
