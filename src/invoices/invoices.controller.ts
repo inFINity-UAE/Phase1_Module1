@@ -21,6 +21,7 @@ import { IssueInvoiceDto } from './dto/issue-invoice.dto';
 import { UpdateInvoiceDto } from './dto/update-invoice.dto';
 import { VoidInvoiceDto } from './dto/void-invoice.dto';
 import { WriteOffInvoiceDto } from './dto/write-off-invoice.dto';
+import { SetDebtorNotifiedDto } from './dto/set-debtor-notified.dto';
 import { InvoicesService } from './invoices.service';
 
 /** [feature-spec-1.1.C.md §1.3] Invoice header CRUD + status transitions. */
@@ -96,5 +97,14 @@ export class InvoicesController {
     @CurrentUser() user: AuthenticatedUser,
   ) {
     return this.invoicesService.writeOff(id, dto, user.id, user.role);
+  }
+
+  @Patch(':id/debtor-notified')
+  @RequireCompanyMembership({ type: 'param', resource: 'invoice' })
+  setDebtorNotified(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: SetDebtorNotifiedDto,
+  ) {
+    return this.invoicesService.setDebtorNotified(id, dto);
   }
 }

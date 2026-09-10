@@ -37,11 +37,15 @@ export interface InvoicesRepository {
     ledger_reversal_status: 'reversed' | 'skipped_no_posting';
   }>;
   markOverdueInvoices(companyId: string): Promise<number>;
+  /** [feature-spec-1_1_D.md §4.5b] VAT-relief flag scan — same cron as overdue. */
+  markVatReliefEligible(companyId: string, asOfDate?: string): Promise<number>;
   listCompanyIdsWithOpenInvoices(): Promise<string[]>;
+  listCompanyIdsWithUnflaggedWriteOffs(): Promise<string[]>;
   writeOffInvoice(
     id: string,
     createdBy: string,
     reason: string,
     debtorNotifiedAt: string | null,
   ): Promise<{ journal_entry_id: string }>;
+  setDebtorNotifiedAt(invoiceId: string, debtorNotifiedAt: string): Promise<boolean>;
 }

@@ -24,7 +24,8 @@ export type CompanyMembershipSource =
         | 'credit_note'
         | 'credit_note_line'
         | 'payment'
-        | 'payment_application';
+        | 'payment_application'
+        | 'public_holiday';
       param?: string;
     }
   | {

@@ -17,10 +17,12 @@ export type CompanyResourceKind =
   | 'credit_note'
   | 'credit_note_line'
   | 'payment'
-  | 'payment_application';
+  | 'payment_application'
+  | 'public_holiday';
 
 export interface CompanyMembersRepository {
   findRole(userId: string, companyId: string): Promise<CompanyRole | null>;
+  findOwnerUserId(companyId: string): Promise<string | null>;
   findCompanyIdByJournalEntryId(entryId: string): Promise<string | null>;
   findCompanyIdByJournalLineId(lineId: string): Promise<string | null>;
   findCompanyIdByAccountId(accountId: string): Promise<string | null>;
@@ -36,4 +38,5 @@ export interface CompanyMembersRepository {
   findCompanyIdByCreditNoteLineId(lineId: string): Promise<string | null>;
   findCompanyIdByPaymentId(paymentId: string): Promise<string | null>;
   findCompanyIdByPaymentApplicationId(applicationId: string): Promise<string | null>;
+  findCompanyIdByPublicHolidayId(holidayId: string): Promise<string | null>;
 }

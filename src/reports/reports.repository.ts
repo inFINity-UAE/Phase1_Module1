@@ -2,45 +2,60 @@ import { PeriodTrialBalanceRow } from './entities/period-trial-balance-row.entit
 import { BalanceSheetAccountRow } from './entities/balance-sheet.entity';
 import { GeneralLedgerRow } from './entities/general-ledger-row.entity';
 import { ProfitAndLossAccountRow } from './entities/profit-and-loss.entity';
+import { AgedReceivablesRow } from './entities/aged-receivables-row.entity';
+import { CreditLimitCheck } from './entities/credit-limit-check.entity';
+import { CustomerLedgerRow } from './entities/customer-ledger-row.entity';
+import { CustomerPaymentHistory } from './entities/customer-payment-history.entity';
 
 export const REPORTS_REPOSITORY = Symbol('REPORTS_REPOSITORY');
 
 export interface ReportsRepository {
-  /**
-   * [feature-spec-1.1.H1.md decision #1] RPC get_trial_balance_for_period.
-   */
   getTrialBalanceForPeriod(
     companyId: string,
     periodId: string,
     includeZeroBalance?: boolean,
   ): Promise<PeriodTrialBalanceRow[]>;
 
-  /**
-   * [feature-spec-1.1.H1.md decision #2] RPC get_balance_sheet.
-   */
   getBalanceSheet(
     companyId: string,
     asOfDate: string,
   ): Promise<BalanceSheetAccountRow[]>;
 
-  /**
-   * [feature-spec-1.1.H1.md decision #3] RPC get_profit_and_loss.
-   */
   getProfitAndLoss(
     companyId: string,
     periodStart: string,
     periodEnd: string,
   ): Promise<ProfitAndLossAccountRow[]>;
 
-  /**
-   * [feature-spec-1.1.H1.md decision #5] RPC get_general_ledger.
-   */
   getGeneralLedger(
     companyId: string,
     accountId?: string | null,
     dateFrom?: string | null,
     dateTo?: string | null,
   ): Promise<GeneralLedgerRow[]>;
+
+  /** [feature-spec-1_1_D.md §5.1] */
+  getCustomerLedger(
+    companyId: string,
+    customerId: string,
+    dateFrom?: string | null,
+    dateTo?: string | null,
+  ): Promise<CustomerLedgerRow[]>;
+
+  /** [feature-spec-1_1_D.md §5.2] */
+  getAgedReceivables(companyId: string, asOfDate: string): Promise<AgedReceivablesRow[]>;
+
+  /** [feature-spec-1_1_D.md §5.3 / D-4] */
+  checkCustomerCreditLimit(
+    companyId: string,
+    customerId: string,
+  ): Promise<CreditLimitCheck>;
+
+  /** [feature-spec-1_1_D.md §5.5] */
+  getCustomerPaymentHistory(
+    companyId: string,
+    customerId: string,
+  ): Promise<CustomerPaymentHistory>;
 
   findPeriodCompanyRow(
     periodId: string,
@@ -49,4 +64,8 @@ export interface ReportsRepository {
   findAccountCompanyRow(
     accountId: string,
   ): Promise<{ id: string; company_id: string; account_number: string | null } | null>;
+
+  findCustomerCompanyRow(
+    customerId: string,
+  ): Promise<{ id: string; company_id: string } | null>;
 }

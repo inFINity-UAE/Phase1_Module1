@@ -27,6 +27,11 @@ export class CompanyMembersService {
     return role;
   }
 
+  /** [feature-spec-1_1_D.md §4.5a] Scheduled ECL posts as company Owner. */
+  async findOwnerUserId(companyId: string): Promise<string | null> {
+    return this.companyMembersRepository.findOwnerUserId(companyId);
+  }
+
   /**
    * Entry-scoped actions: look up the target entry's company_id first, then
    * resolve membership. Prefer CompanyMembershipGuard for HTTP; this remains
@@ -107,6 +112,10 @@ export class CompanyMembersService {
       case 'payment_application':
         companyId =
           await this.companyMembersRepository.findCompanyIdByPaymentApplicationId(resourceId);
+        break;
+      case 'public_holiday':
+        companyId =
+          await this.companyMembersRepository.findCompanyIdByPublicHolidayId(resourceId);
         break;
       default: {
         const _exhaustive: never = resource;

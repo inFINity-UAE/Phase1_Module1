@@ -1,11 +1,15 @@
-import { BadRequestException, Inject, Injectable } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { handleDatabaseError } from '../common/errors/database-error.mapper';
 import { assertAccountBelongsToCompany } from '../journal-entries/journal-line-account.validation';
 import { assertPeriodUsableForCompany } from '../journal-entries/journal-period.validation';
+import { AgedReceivablesRow } from './entities/aged-receivables-row.entity';
 import {
   BalanceSheetAccountRow,
   BalanceSheetReport,
 } from './entities/balance-sheet.entity';
+import { CreditLimitCheck } from './entities/credit-limit-check.entity';
+import { CustomerLedgerRow } from './entities/customer-ledger-row.entity';
+import { CustomerPaymentHistory } from './entities/customer-payment-history.entity';
 import { GeneralLedgerRow } from './entities/general-ledger-row.entity';
 import { PeriodTrialBalanceRow } from './entities/period-trial-balance-row.entity';
 import {
@@ -13,6 +17,7 @@ import {
   ProfitAndLossReport,
 } from './entities/profit-and-loss.entity';
 import { REPORTS_REPOSITORY, ReportsRepository } from './reports.repository';
+
 
 /** [feature-spec-1.1.H1.md decision #2] Server today as YYYY-MM-DD (UTC calendar date). */
 export function serverAsOfDateToday(now: Date = new Date()): string {
@@ -203,6 +208,112 @@ export class ReportsService {
         accountId ?? null,
         dateFrom ?? null,
         dateTo ?? null,
+      );
+    } catch (error) {
+      handleDatabaseError(error);
+    }
+  }
+
+  private async assertCustomerUsableForCompany(
+    companyId: string,
+    customerId: string,
+  ): Promise<void> {
+    const customer = await this.reportsRepository.findCustomerCompanyRow(customerId);
+    if (!customer) {
+      throw new NotFoundException(`Customer ${customerId} not found`);
+    }
+    if (customer.company_id !== companyId) {
+      throw new BadRequestException(
+        `Customer ${customerId} does not belong to company ${companyId}`,
+      );
+    }
+  }
+
+  /**
+   * [feature-spec-1_1_D.md §5.1] Customer ledger — thin RPC pass-through.
+   */
+  async getCustomerLedger(
+    companyId: string,
+    customerId: string,
+    dateFrom?: string,
+    dateTo?: string,
+  ): Promise<CustomerLedgerRow[]> {
+    if (dateFrom != null && dateTo != null && dateTo < dateFrom) {
+      throw new BadRequestException(
+        `date_to (${dateTo}) must be on or after date_from (${dateFrom})`,
+      );
+    }
+
+    try {
+      await this.assertCustomerUsableForCompany(companyId, customerId);
+      return await this.reportsRepository.getCustomerLedger(
+        companyId,
+        customerId,
+        dateFrom ?? null,
+        dateTo ?? null,
+      );
+    } catch (error) {
+      handleDatabaseError(error);
+    }
+  }
+
+  /**
+   * [feature-spec-1_1_D.md §5.4] Statement data = customer ledger (PDF deferred).
+   */
+  async getCustomerStatement(
+    companyId: string,
+    customerId: string,
+    dateFrom?: string,
+    dateTo?: string,
+  ): Promise<CustomerLedgerRow[]> {
+    return this.getCustomerLedger(companyId, customerId, dateFrom, dateTo);
+  }
+
+  /**
+   * [feature-spec-1_1_D.md §5.2 / D-5] Aged receivables.
+   */
+  async getAgedReceivables(
+    companyId: string,
+    asOfDate?: string,
+  ): Promise<AgedReceivablesRow[]> {
+    try {
+      const resolvedAsOf = asOfDate ?? serverAsOfDateToday();
+      return await this.reportsRepository.getAgedReceivables(companyId, resolvedAsOf);
+    } catch (error) {
+      handleDatabaseError(error);
+    }
+  }
+
+  /**
+   * [feature-spec-1_1_D.md §5.3 / D-4] Credit-limit check (alert only).
+   */
+  async checkCustomerCreditLimit(
+    companyId: string,
+    customerId: string,
+  ): Promise<CreditLimitCheck> {
+    try {
+      await this.assertCustomerUsableForCompany(companyId, customerId);
+      return await this.reportsRepository.checkCustomerCreditLimit(
+        companyId,
+        customerId,
+      );
+    } catch (error) {
+      handleDatabaseError(error);
+    }
+  }
+
+  /**
+   * [feature-spec-1_1_D.md §5.5] Payment history / DSO.
+   */
+  async getCustomerPaymentHistory(
+    companyId: string,
+    customerId: string,
+  ): Promise<CustomerPaymentHistory> {
+    try {
+      await this.assertCustomerUsableForCompany(companyId, customerId);
+      return await this.reportsRepository.getCustomerPaymentHistory(
+        companyId,
+        customerId,
       );
     } catch (error) {
       handleDatabaseError(error);

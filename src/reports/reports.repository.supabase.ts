@@ -1,6 +1,10 @@
 import { Injectable } from '@nestjs/common';
 import { SupabaseService } from '../database/supabase.service';
+import { AgedReceivablesRow } from './entities/aged-receivables-row.entity';
 import { BalanceSheetAccountRow } from './entities/balance-sheet.entity';
+import { CreditLimitCheck } from './entities/credit-limit-check.entity';
+import { CustomerLedgerRow } from './entities/customer-ledger-row.entity';
+import { CustomerPaymentHistory } from './entities/customer-payment-history.entity';
 import { GeneralLedgerRow } from './entities/general-ledger-row.entity';
 import { PeriodTrialBalanceRow } from './entities/period-trial-balance-row.entity';
 import { ProfitAndLossAccountRow } from './entities/profit-and-loss.entity';
@@ -214,5 +218,148 @@ export class SupabaseReportsRepository implements ReportsRepository {
       line_balance: asMoney(row.line_balance),
       running_balance: asMoney(row.running_balance),
     }));
+  }
+
+  /** [feature-spec-1_1_D.md §5.1] Customer ledger RPC. */
+  async getCustomerLedger(
+    companyId: string,
+    customerId: string,
+    dateFrom?: string | null,
+    dateTo?: string | null,
+  ): Promise<CustomerLedgerRow[]> {
+    const { data, error } = await this.supabase.client.rpc('get_customer_ledger', {
+      p_company_id: companyId,
+      p_customer_id: customerId,
+      p_date_from: dateFrom ?? null,
+      p_date_to: dateTo ?? null,
+    });
+
+    if (error) {
+      throw error;
+    }
+
+    return ((data as Record<string, unknown>[]) ?? []).map((row) => ({
+      entry_date: String(row.entry_date),
+      source_type: String(row.source_type),
+      source_id: String(row.source_id),
+      document_number: row.document_number == null ? null : String(row.document_number),
+      description: String(row.description),
+      debit: asMoney(row.debit),
+      credit: asMoney(row.credit),
+      affects_ar: Boolean(row.affects_ar),
+      running_balance: row.running_balance == null ? null : asMoney(row.running_balance),
+      journal_entry_id: String(row.journal_entry_id),
+    }));
+  }
+
+  /** [feature-spec-1_1_D.md §5.2] Aged receivables RPC. */
+  async getAgedReceivables(
+    companyId: string,
+    asOfDate: string,
+  ): Promise<AgedReceivablesRow[]> {
+    const { data, error } = await this.supabase.client.rpc('get_aged_receivables', {
+      p_company_id: companyId,
+      p_as_of_date: asOfDate,
+    });
+
+    if (error) {
+      throw error;
+    }
+
+    return ((data as Record<string, unknown>[]) ?? []).map((row) => ({
+      customer_id: row.customer_id == null ? null : String(row.customer_id),
+      customer_name: String(row.customer_name),
+      is_totals: Boolean(row.is_totals),
+      bucket_current: asMoney(row.bucket_current),
+      bucket_0_30: asMoney(row.bucket_0_30),
+      bucket_31_60: asMoney(row.bucket_31_60),
+      bucket_61_90: asMoney(row.bucket_61_90),
+      bucket_90_plus: asMoney(row.bucket_90_plus),
+      total: asMoney(row.total),
+    }));
+  }
+
+  /** [feature-spec-1_1_D.md §5.3 / D-4] Credit-limit check RPC. */
+  async checkCustomerCreditLimit(
+    companyId: string,
+    customerId: string,
+  ): Promise<CreditLimitCheck> {
+    const { data, error } = await this.supabase.client.rpc('check_customer_credit_limit', {
+      p_company_id: companyId,
+      p_customer_id: customerId,
+    });
+
+    if (error) {
+      throw error;
+    }
+
+    const row = data as Record<string, unknown>;
+    return {
+      customer_id: String(row.customer_id),
+      credit_limit: row.credit_limit == null ? null : asMoney(row.credit_limit),
+      open_invoice_outstanding: asMoney(row.open_invoice_outstanding),
+      unapplied_advance_credit: asMoney(row.unapplied_advance_credit),
+      outstanding_balance: asMoney(row.outstanding_balance),
+      exceeds_credit_limit: Boolean(row.exceeds_credit_limit),
+      alert: row.alert == null ? null : String(row.alert),
+    };
+  }
+
+  /** [feature-spec-1_1_D.md §5.5] Payment history / DSO RPC. */
+  async getCustomerPaymentHistory(
+    companyId: string,
+    customerId: string,
+  ): Promise<CustomerPaymentHistory> {
+    const { data, error } = await this.supabase.client.rpc(
+      'get_customer_payment_history',
+      {
+        p_company_id: companyId,
+        p_customer_id: customerId,
+      },
+    );
+
+    if (error) {
+      throw error;
+    }
+
+    const row = data as Record<string, unknown>;
+    const invoices = ((row.invoices as Record<string, unknown>[]) ?? []).map((inv) => ({
+      invoice_id: String(inv.invoice_id),
+      invoice_number: inv.invoice_number == null ? null : String(inv.invoice_number),
+      invoice_date: String(inv.invoice_date),
+      paid_at: String(inv.paid_at),
+      payment_terms: String(inv.payment_terms),
+      terms_days: asInt(inv.terms_days),
+      actual_days_to_pay: asInt(inv.actual_days_to_pay),
+      days_vs_terms: asInt(inv.days_vs_terms),
+    }));
+
+    return {
+      customer_id: String(row.customer_id),
+      invoice_count: asInt(row.invoice_count),
+      average_actual_days_to_pay:
+        row.average_actual_days_to_pay == null
+          ? null
+          : asMoney(row.average_actual_days_to_pay),
+      average_terms_days:
+        row.average_terms_days == null ? null : asMoney(row.average_terms_days),
+      invoices,
+    };
+  }
+
+  async findCustomerCompanyRow(
+    customerId: string,
+  ): Promise<{ id: string; company_id: string } | null> {
+    const { data, error } = await this.supabase.client
+      .from('customers')
+      .select('id, company_id')
+      .eq('id', customerId)
+      .maybeSingle();
+
+    if (error) {
+      throw error;
+    }
+
+    return data as { id: string; company_id: string } | null;
   }
 }

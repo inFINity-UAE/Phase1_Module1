@@ -2,14 +2,19 @@ import { Controller, Get, Query, UseGuards } from '@nestjs/common';
 import { RequireCompanyMembership } from '../auth/decorators/require-company-membership.decorator';
 import { CompanyMembershipGuard } from '../auth/guards/company-membership.guard';
 import { SupabaseAuthGuard } from '../auth/guards/supabase-auth.guard';
+import { AgedReceivablesQueryDto } from './dto/aged-receivables-query.dto';
 import { BalanceSheetQueryDto } from './dto/balance-sheet-query.dto';
+import { CreditLimitCheckQueryDto } from './dto/credit-limit-check-query.dto';
+import { CustomerLedgerQueryDto } from './dto/customer-ledger-query.dto';
+import { CustomerPaymentHistoryQueryDto } from './dto/customer-payment-history-query.dto';
 import { GeneralLedgerQueryDto } from './dto/general-ledger-query.dto';
 import { ProfitAndLossQueryDto } from './dto/profit-and-loss-query.dto';
 import { TrialBalanceQueryDto } from './dto/trial-balance-query.dto';
 import { ReportsService } from './reports.service';
 
 /**
- * [feature-spec-1.1.H1.md decisions #1/#2/#3/#5] Core Financial Reports.
+ * [feature-spec-1.1.H1.md] + [feature-spec-1_1_D.md §5]
+ * Thin read routes over Postgres report RPCs — no Nest-side aggregation.
  */
 @Controller('reports')
 @UseGuards(SupabaseAuthGuard, CompanyMembershipGuard)
@@ -26,10 +31,6 @@ export class ReportsController {
     );
   }
 
-  /**
-   * [feature-spec-1.1.H1.md decision #2] as_of_date optional — Nest defaults
-   * to server today when omitted.
-   */
   @Get('balance-sheet')
   @RequireCompanyMembership({ type: 'query' })
   getBalanceSheet(@Query() query: BalanceSheetQueryDto) {
@@ -39,10 +40,6 @@ export class ReportsController {
     );
   }
 
-  /**
-   * [feature-spec-1.1.H1.md decision #3] Single-period P&L — all three
-   * query params required; no prior-period comparison (deferred to H2).
-   */
   @Get('profit-and-loss')
   @RequireCompanyMembership({ type: 'query' })
   getProfitAndLoss(@Query() query: ProfitAndLossQueryDto) {
@@ -53,12 +50,6 @@ export class ReportsController {
     );
   }
 
-  /**
-   * [feature-spec-1.1.H1.md decision #5] General Ledger — company_id required;
-   * account_id / date_from / date_to optional.
-   * ponytail: unbounded result set. Ceiling: one company GL in a single response.
-   * Upgrade: H2 pagination.
-   */
   @Get('general-ledger')
   @RequireCompanyMembership({ type: 'query' })
   getGeneralLedger(@Query() query: GeneralLedgerQueryDto) {
@@ -67,6 +58,60 @@ export class ReportsController {
       query.account_id,
       query.date_from,
       query.date_to,
+    );
+  }
+
+  /** [feature-spec-1_1_D.md §5.1] */
+  @Get('customer-ledger')
+  @RequireCompanyMembership({ type: 'query' })
+  getCustomerLedger(@Query() query: CustomerLedgerQueryDto) {
+    return this.reportsService.getCustomerLedger(
+      query.company_id,
+      query.customer_id,
+      query.date_from,
+      query.date_to,
+    );
+  }
+
+  /** [feature-spec-1_1_D.md §5.4] Data only — PDF deferred. */
+  @Get('customer-statement')
+  @RequireCompanyMembership({ type: 'query' })
+  getCustomerStatement(@Query() query: CustomerLedgerQueryDto) {
+    return this.reportsService.getCustomerStatement(
+      query.company_id,
+      query.customer_id,
+      query.date_from,
+      query.date_to,
+    );
+  }
+
+  /** [feature-spec-1_1_D.md §5.2 / D-5] */
+  @Get('aged-receivables')
+  @RequireCompanyMembership({ type: 'query' })
+  getAgedReceivables(@Query() query: AgedReceivablesQueryDto) {
+    return this.reportsService.getAgedReceivables(
+      query.company_id,
+      query.as_of_date,
+    );
+  }
+
+  /** [feature-spec-1_1_D.md §5.3 / D-4] Alert-only credit-limit check. */
+  @Get('credit-limit-check')
+  @RequireCompanyMembership({ type: 'query' })
+  checkCustomerCreditLimit(@Query() query: CreditLimitCheckQueryDto) {
+    return this.reportsService.checkCustomerCreditLimit(
+      query.company_id,
+      query.customer_id,
+    );
+  }
+
+  /** [feature-spec-1_1_D.md §5.5] */
+  @Get('customer-payment-history')
+  @RequireCompanyMembership({ type: 'query' })
+  getCustomerPaymentHistory(@Query() query: CustomerPaymentHistoryQueryDto) {
+    return this.reportsService.getCustomerPaymentHistory(
+      query.company_id,
+      query.customer_id,
     );
   }
 }

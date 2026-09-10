@@ -51,6 +51,9 @@ describe('AccountingPeriodsService', () => {
       hasPostedJournalActivity: jest.fn(),
       softClose: jest.fn(),
       logSoftClosedPostingOverride: jest.fn(),
+      listPeriodsPendingEcl: jest.fn(),
+      addBusinessDays: jest.fn(),
+      runEclProvision: jest.fn(),
     };
 
     const module: TestingModule = await Test.createTestingModule({

@@ -274,11 +274,41 @@ export class SupabaseInvoicesRepository implements InvoicesRepository {
     return data as number;
   }
 
+  async markVatReliefEligible(companyId: string, asOfDate?: string): Promise<number> {
+    const { data, error } = await this.supabase.client.rpc('mark_vat_relief_eligible', {
+      p_company_id: companyId,
+      ...(asOfDate ? { p_as_of_date: asOfDate } : {}),
+    });
+
+    if (error) {
+      throw error;
+    }
+
+    return data as number;
+  }
+
   async listCompanyIdsWithOpenInvoices(): Promise<string[]> {
     const { data, error } = await this.supabase.client
       .from('invoices')
       .select('company_id')
       .in('status', ['issued', 'sent', 'viewed']);
+
+    if (error) {
+      throw error;
+    }
+
+    const ids = new Set<string>();
+    for (const row of data ?? []) {
+      ids.add(row.company_id as string);
+    }
+    return [...ids];
+  }
+
+  async listCompanyIdsWithUnflaggedWriteOffs(): Promise<string[]> {
+    const { data, error } = await this.supabase.client
+      .from('write_offs')
+      .select('company_id')
+      .eq('vat_relief_eligible', false);
 
     if (error) {
       throw error;
@@ -310,5 +340,19 @@ export class SupabaseInvoicesRepository implements InvoicesRepository {
 
     const result = data as { journal_entry_id: string };
     return { journal_entry_id: result.journal_entry_id };
+  }
+
+  async setDebtorNotifiedAt(invoiceId: string, debtorNotifiedAt: string): Promise<boolean> {
+    const { data, error } = await this.supabase.client
+      .from('write_offs')
+      .update({ debtor_notified_at: debtorNotifiedAt })
+      .eq('invoice_id', invoiceId)
+      .select('id')
+      .maybeSingle();
+
+    if (error) {
+      throw error;
+    }
+    return Boolean(data);
   }
 }

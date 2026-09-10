@@ -40,4 +40,16 @@ export interface AccountingPeriodsRepository {
     actorId: string,
     reason: string,
   ): Promise<AccountingPeriod>;
+
+  /**
+   * [feature-spec-1_1_D.md §4.5a / D-10 / D-15]
+   * Non-closed periods with no ecl_provision_runs row yet (catch-up candidates).
+   */
+  listPeriodsPendingEcl(): Promise<Array<{ company_id: string; period_end: string }>>;
+  addBusinessDays(companyId: string, startDate: string, n: number): Promise<string>;
+  runEclProvision(
+    companyId: string,
+    periodEndDate: string,
+    createdBy: string,
+  ): Promise<{ journal_entry_id: string | null }>;
 }

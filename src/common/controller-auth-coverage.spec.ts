@@ -14,6 +14,8 @@ import { InvoicesService } from '../invoices/invoices.service';
 import { PaymentsController } from '../payments/payments.controller';
 import { PaymentApplicationsController } from '../payments/payment-applications.controller';
 import { PaymentsService } from '../payments/payments.service';
+import { PublicHolidaysController } from '../public-holidays/public-holidays.controller';
+import { PublicHolidaysService } from '../public-holidays/public-holidays.service';
 import { CreditNotesController } from '../credit-notes/credit-notes.controller';
 import { CreditNoteLinesController } from '../credit-notes/credit-note-lines.controller';
 import { CreditNotesService } from '../credit-notes/credit-notes.service';
@@ -41,7 +43,7 @@ import { ReportsService } from '../reports/reports.service';
  * [feature-spec.md decisions #24/#27/#41; feature-spec-1.1.H1.md #1]
  * Controllers reject unauthenticated requests (401) and succeed for a
  * verified Bearer session with membership. Regression list covers all
- * 92 guarded HTTP routes across controllers.
+ * 102 guarded HTTP routes across controllers.
  *
  * Blind spot (C1-3): this spec registers controllers in isolation and mocks
  * CompanyMembershipGuard + CompanyMembersService — it does NOT import real
@@ -74,6 +76,7 @@ describe('Controller auth coverage (decision #24)', () => {
   const creditNoteLineId = '17171717-1717-1717-1717-171717171717';
   const paymentId = '18181818-1818-1818-1818-181818181818';
   const paymentApplicationId = '19191919-1919-1919-1919-191919191919';
+  const publicHolidayId = '1a1a1a1a-1a1a-1a1a-1a1a-1a1a1a1a1a1a';
 
   const journalEntryDetails = {
     entry: { id: entryId, company_id: companyId },
@@ -98,6 +101,26 @@ describe('Controller auth coverage (decision #24)', () => {
     {
       method: 'GET',
       path: `/reports/general-ledger?company_id=${companyId}`,
+    },
+    {
+      method: 'GET',
+      path: `/reports/customer-ledger?company_id=${companyId}&customer_id=${customerId}`,
+    },
+    {
+      method: 'GET',
+      path: `/reports/customer-statement?company_id=${companyId}&customer_id=${customerId}`,
+    },
+    {
+      method: 'GET',
+      path: `/reports/aged-receivables?company_id=${companyId}&as_of_date=2026-01-31`,
+    },
+    {
+      method: 'GET',
+      path: `/reports/credit-limit-check?company_id=${companyId}&customer_id=${customerId}`,
+    },
+    {
+      method: 'GET',
+      path: `/reports/customer-payment-history?company_id=${companyId}&customer_id=${customerId}`,
     },
     { method: 'GET', path: `/accounts?company_id=${companyId}` },
     { method: 'GET', path: `/accounts/${accountId}` },
@@ -179,6 +202,11 @@ describe('Controller auth coverage (decision #24)', () => {
     { method: 'POST', path: `/invoices/${invoiceId}/mark-viewed` },
     { method: 'POST', path: `/invoices/${invoiceId}/write-off`, body: { reason: 'Auth probe' } },
     {
+      method: 'PATCH',
+      path: `/invoices/${invoiceId}/debtor-notified`,
+      body: { debtor_notified_at: '2026-06-01' },
+    },
+    {
       method: 'POST',
       path: '/invoice-lines',
       body: {
@@ -223,6 +251,22 @@ describe('Controller auth coverage (decision #24)', () => {
     },
     { method: 'DELETE', path: `/payment-applications/${paymentApplicationId}` },
     { method: 'POST', path: `/payment-applications/${paymentApplicationId}/post` },
+    {
+      method: 'POST',
+      path: '/public-holidays',
+      body: {
+        company_id: companyId,
+        holiday_date: '2026-12-02',
+        description: 'Auth probe holiday',
+      },
+    },
+    { method: 'GET', path: `/public-holidays?company_id=${companyId}` },
+    {
+      method: 'PATCH',
+      path: `/public-holidays/${publicHolidayId}`,
+      body: { holiday_date: '2026-12-03' },
+    },
+    { method: 'DELETE', path: `/public-holidays/${publicHolidayId}` },
     {
       method: 'POST',
       path: '/credit-notes',
@@ -432,6 +476,10 @@ describe('Controller auth coverage (decision #24)', () => {
       send: jest.fn().mockResolvedValue({ invoice: { id: invoiceId }, lines: [] }),
       markViewed: jest.fn().mockResolvedValue({ invoice: { id: invoiceId }, lines: [] }),
       writeOff: jest.fn().mockResolvedValue({ invoice: { id: invoiceId }, lines: [] }),
+      setDebtorNotified: jest.fn().mockResolvedValue({
+        invoice_id: invoiceId,
+        debtor_notified_at: '2026-06-01',
+      }),
       createLine: jest.fn().mockResolvedValue({ id: invoiceLineId }),
       updateLine: jest.fn().mockResolvedValue({ id: invoiceLineId }),
       deleteLine: jest.fn().mockResolvedValue(undefined),
@@ -450,6 +498,13 @@ describe('Controller auth coverage (decision #24)', () => {
         application: { id: paymentApplicationId },
         journal_entry_id: '00000000-0000-0000-0000-000000000097',
       }),
+    };
+
+    const publicHolidaysService = {
+      findAll: jest.fn().mockResolvedValue([]),
+      create: jest.fn().mockResolvedValue({ id: publicHolidayId }),
+      update: jest.fn().mockResolvedValue({ id: publicHolidayId, status: 'CONFIRMED' }),
+      remove: jest.fn().mockResolvedValue(undefined),
     };
 
     const creditNotesService = {
@@ -552,6 +607,25 @@ describe('Controller auth coverage (decision #24)', () => {
         net_profit: 0,
       }),
       getGeneralLedger: jest.fn().mockResolvedValue([]),
+      getCustomerLedger: jest.fn().mockResolvedValue([]),
+      getCustomerStatement: jest.fn().mockResolvedValue([]),
+      getAgedReceivables: jest.fn().mockResolvedValue([]),
+      checkCustomerCreditLimit: jest.fn().mockResolvedValue({
+        customer_id: customerId,
+        credit_limit: null,
+        open_invoice_outstanding: 0,
+        unapplied_advance_credit: 0,
+        outstanding_balance: 0,
+        exceeds_credit_limit: false,
+        alert: null,
+      }),
+      getCustomerPaymentHistory: jest.fn().mockResolvedValue({
+        customer_id: customerId,
+        invoice_count: 0,
+        average_actual_days_to_pay: null,
+        average_terms_days: null,
+        invoices: [],
+      }),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -564,6 +638,7 @@ describe('Controller auth coverage (decision #24)', () => {
         InvoiceLinesController,
         PaymentsController,
         PaymentApplicationsController,
+        PublicHolidaysController,
         CreditNotesController,
         CreditNoteLinesController,
         AccountingPeriodsController,
@@ -582,6 +657,7 @@ describe('Controller auth coverage (decision #24)', () => {
         { provide: QuotationsService, useValue: quotationsService },
         { provide: InvoicesService, useValue: invoicesService },
         { provide: PaymentsService, useValue: paymentsService },
+        { provide: PublicHolidaysService, useValue: publicHolidaysService },
         { provide: CreditNotesService, useValue: creditNotesService },
         { provide: AccountingPeriodsService, useValue: accountingPeriodsService },
         { provide: JournalEntriesService, useValue: journalEntriesService },
@@ -644,7 +720,7 @@ describe('Controller auth coverage (decision #24)', () => {
   }
 
   it('covers all guarded HTTP routes', () => {
-    expect(ALL_GUARDED_ROUTES).toHaveLength(92);
+    expect(ALL_GUARDED_ROUTES).toHaveLength(102);
   });
 
   it.each(ALL_GUARDED_ROUTES)(

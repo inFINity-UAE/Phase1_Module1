@@ -7,6 +7,7 @@ import {
 import { handleDatabaseError } from '../common/errors/database-error.mapper';
 import { CompanyRole } from '../common/enums/company-role.enum';
 import { JournalEntriesService } from '../journal-entries/journal-entries.service';
+import { ReportsService } from '../reports/reports.service';
 import { InvoiceStatus } from './common/enums/invoice-status.enum';
 import { InvoiceType } from './common/enums/invoice-type.enum';
 import { PaymentTermsType } from './common/enums/payment-terms-type.enum';
@@ -17,6 +18,7 @@ import { UpdateInvoiceLineDto } from './dto/update-invoice-line.dto';
 import { UpdateInvoiceDto } from './dto/update-invoice.dto';
 import { VoidInvoiceDto } from './dto/void-invoice.dto';
 import { WriteOffInvoiceDto } from './dto/write-off-invoice.dto';
+import { SetDebtorNotifiedDto } from './dto/set-debtor-notified.dto';
 import { InvoiceIssueResult, InvoiceVoidResult } from './entities/invoice-with-lines.entity';
 import { InvoiceLine } from './entities/invoice-line.entity';
 import { InvoiceWithLines } from './entities/invoice-with-lines.entity';
@@ -41,6 +43,7 @@ export class InvoicesService {
     @Inject(INVOICES_REPOSITORY)
     private readonly invoicesRepository: InvoicesRepository,
     private readonly journalEntriesService: JournalEntriesService,
+    private readonly reportsService: ReportsService,
   ) {}
 
   async create(dto: CreateInvoiceDto, createdBy: string): Promise<InvoiceWithLines> {
@@ -129,6 +132,7 @@ export class InvoicesService {
   /**
    * [feature-spec-1.1.C.md §2.2 / §7] Draft → Issued: numbering, due_date,
    * invoice_type, and atomic sales-invoice ledger posting via issue_invoice RPC.
+   * [feature-spec-1_1_D.md §5.3 / D-4] Credit-limit alert returned, never blocks.
    */
   async issue(id: string, dto?: IssueInvoiceDto): Promise<InvoiceIssueResult> {
     const current = await this.findOne(id);
@@ -149,7 +153,12 @@ export class InvoicesService {
         id,
         dto?.invoice_type_override ?? null,
       );
-      return this.findOne(id);
+      const issued = await this.findOne(id);
+      const credit_limit_check = await this.reportsService.checkCustomerCreditLimit(
+        issued.invoice.company_id,
+        issued.invoice.customer_id,
+      );
+      return { ...issued, credit_limit_check };
     } catch (error) {
       handleDatabaseError(error);
     }
@@ -229,6 +238,34 @@ export class InvoicesService {
         role,
       );
       return this.findOne(id);
+    } catch (error) {
+      handleDatabaseError(error);
+    }
+  }
+
+  /**
+   * [feature-spec-1_1_D.md §4.4] Follow-up: debtor notice can land after write-off.
+   */
+  async setDebtorNotified(
+    id: string,
+    dto: SetDebtorNotifiedDto,
+  ): Promise<{ invoice_id: string; debtor_notified_at: string }> {
+    const current = await this.findOne(id);
+    if (current.invoice.status !== InvoiceStatus.WrittenOff) {
+      throw new BadRequestException(
+        `Invoice ${id} is not written off — cannot set debtor_notified_at`,
+      );
+    }
+
+    try {
+      const updated = await this.invoicesRepository.setDebtorNotifiedAt(
+        id,
+        dto.debtor_notified_at,
+      );
+      if (!updated) {
+        throw new NotFoundException(`No write-off found for invoice ${id}`);
+      }
+      return { invoice_id: id, debtor_notified_at: dto.debtor_notified_at };
     } catch (error) {
       handleDatabaseError(error);
     }

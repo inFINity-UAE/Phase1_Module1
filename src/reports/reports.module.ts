@@ -15,5 +15,6 @@ import { ReportsService } from './reports.service';
       useClass: SupabaseReportsRepository,
     },
   ],
+  exports: [ReportsService, REPORTS_REPOSITORY],
 })
 export class ReportsModule {}

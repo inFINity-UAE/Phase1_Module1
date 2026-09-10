@@ -24,6 +24,7 @@ import { InvoicesController } from '../invoices/invoices.controller';
 import { InvoiceLinesController } from '../invoices/invoice-lines.controller';
 import { PaymentsController } from '../payments/payments.controller';
 import { PaymentApplicationsController } from '../payments/payment-applications.controller';
+import { PublicHolidaysController } from '../public-holidays/public-holidays.controller';
 import { AccountingPeriodsController } from '../accounting-periods/accounting-periods.controller';
 import { AuditLogController } from '../audit-log/audit-log.controller';
 import { JournalEntriesController } from '../journal-entries/journal-entries.controller';
@@ -61,6 +62,7 @@ const HTTP_CONTROLLERS: Type[] = [
   InvoiceLinesController,
   PaymentsController,
   PaymentApplicationsController,
+  PublicHolidaysController,
   AccountingPeriodsController,
   JournalEntriesController,
   JournalLinesController,
@@ -96,6 +98,7 @@ const HTTP_CONTROLLERS: Type[] = [
     let foreignInvoiceLineId = '';
     let foreignPaymentId = '';
     let foreignPaymentApplicationId = '';
+    let foreignPublicHolidayId = '';
     let memberAccountId = '';
 
     beforeAll(async () => {
@@ -350,6 +353,21 @@ const HTTP_CONTROLLERS: Type[] = [
         throw appErr ?? new Error('foreign payment application insert failed');
       }
       foreignPaymentApplicationId = foreignApp.id as string;
+
+      const { data: foreignHoliday, error: holidayErr } = await supabase.client
+        .from('public_holidays')
+        .insert({
+          company_id: foreignCompanyId,
+          holiday_date: '2099-06-01',
+          description: 'Foreign company holiday',
+          status: 'PROVISIONAL',
+        })
+        .select('id')
+        .single();
+      if (holidayErr || !foreignHoliday) {
+        throw holidayErr ?? new Error('foreign public holiday insert failed');
+      }
+      foreignPublicHolidayId = foreignHoliday.id as string;
 
       const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
       const publishableKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!;
@@ -629,6 +647,26 @@ const HTTP_CONTROLLERS: Type[] = [
           method: 'GET',
           path: `/reports/general-ledger?company_id=${foreignCompanyId}`,
         },
+        {
+          method: 'GET',
+          path: `/reports/customer-ledger?company_id=${foreignCompanyId}&customer_id=${foreignCustomerId}`,
+        },
+        {
+          method: 'GET',
+          path: `/reports/customer-statement?company_id=${foreignCompanyId}&customer_id=${foreignCustomerId}`,
+        },
+        {
+          method: 'GET',
+          path: `/reports/aged-receivables?company_id=${foreignCompanyId}&as_of_date=2026-01-31`,
+        },
+        {
+          method: 'GET',
+          path: `/reports/credit-limit-check?company_id=${foreignCompanyId}&customer_id=${foreignCustomerId}`,
+        },
+        {
+          method: 'GET',
+          path: `/reports/customer-payment-history?company_id=${foreignCompanyId}&customer_id=${foreignCustomerId}`,
+        },
         { method: 'GET', path: `/customers?company_id=${foreignCompanyId}` },
         { method: 'GET', path: `/customers/${foreignCustomerId}` },
         {
@@ -672,6 +710,11 @@ const HTTP_CONTROLLERS: Type[] = [
         { method: 'POST', path: `/invoices/${foreignInvoiceId}/send` },
         { method: 'POST', path: `/invoices/${foreignInvoiceId}/mark-viewed` },
         { method: 'POST', path: `/invoices/${foreignInvoiceId}/write-off`, body: { reason: 'Auth probe' } },
+        {
+          method: 'PATCH',
+          path: `/invoices/${foreignInvoiceId}/debtor-notified`,
+          body: { debtor_notified_at: '2026-06-01' },
+        },
         {
           method: 'POST',
           path: '/invoice-lines',
@@ -721,6 +764,22 @@ const HTTP_CONTROLLERS: Type[] = [
         },
         { method: 'DELETE', path: `/payment-applications/${foreignPaymentApplicationId}` },
         { method: 'POST', path: `/payment-applications/${foreignPaymentApplicationId}/post` },
+        { method: 'GET', path: `/public-holidays?company_id=${foreignCompanyId}` },
+        {
+          method: 'POST',
+          path: '/public-holidays',
+          body: {
+            company_id: foreignCompanyId,
+            holiday_date: '2099-07-01',
+            description: 'Nope',
+          },
+        },
+        {
+          method: 'PATCH',
+          path: `/public-holidays/${foreignPublicHolidayId}`,
+          body: { holiday_date: '2099-07-02' },
+        },
+        { method: 'DELETE', path: `/public-holidays/${foreignPublicHolidayId}` },
       ];
 
       const failures: string[] = [];

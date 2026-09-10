@@ -175,4 +175,78 @@ export class SupabaseAccountingPeriodsRepository implements AccountingPeriodsRep
 
     return data as AccountingPeriod;
   }
+
+  async listPeriodsPendingEcl(): Promise<
+    Array<{ company_id: string; period_end: string }>
+  > {
+    const { data: periods, error: periodsError } = await this.supabase.client
+      .from('accounting_periods')
+      .select('company_id, period_end')
+      .neq('status', PeriodStatus.Closed);
+
+    if (periodsError) {
+      throw periodsError;
+    }
+
+    const { data: runs, error: runsError } = await this.supabase.client
+      .from('ecl_provision_runs')
+      .select('company_id, period_end_date');
+
+    if (runsError) {
+      throw runsError;
+    }
+
+    const done = new Set(
+      (runs ?? []).map(
+        (r) => `${r.company_id as string}|${r.period_end_date as string}`,
+      ),
+    );
+
+    const pending: Array<{ company_id: string; period_end: string }> = [];
+    for (const row of periods ?? []) {
+      const companyId = row.company_id as string;
+      const periodEnd = row.period_end as string;
+      if (!done.has(`${companyId}|${periodEnd}`)) {
+        pending.push({ company_id: companyId, period_end: periodEnd });
+      }
+    }
+    return pending;
+  }
+
+  async addBusinessDays(
+    companyId: string,
+    startDate: string,
+    n: number,
+  ): Promise<string> {
+    const { data, error } = await this.supabase.client.rpc('add_business_days', {
+      p_company_id: companyId,
+      p_start_date: startDate,
+      p_n: n,
+    });
+
+    if (error) {
+      throw error;
+    }
+
+    return data as string;
+  }
+
+  async runEclProvision(
+    companyId: string,
+    periodEndDate: string,
+    createdBy: string,
+  ): Promise<{ journal_entry_id: string | null }> {
+    const { data, error } = await this.supabase.client.rpc('run_ecl_provision', {
+      p_company_id: companyId,
+      p_period_end_date: periodEndDate,
+      p_created_by: createdBy,
+    });
+
+    if (error) {
+      throw error;
+    }
+
+    const result = data as { journal_entry_id?: string | null };
+    return { journal_entry_id: result.journal_entry_id ?? null };
+  }
 }

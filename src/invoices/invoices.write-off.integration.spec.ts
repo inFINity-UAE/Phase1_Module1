@@ -258,6 +258,30 @@ const OWNER_ID = INTEGRATION_USER_ID;
       expect(Number(lines[1].credit)).toBe(1050);
     });
 
+    it('§4.4 follow-up sets debtor_notified_at after write-off', async () => {
+      const inv = await createIssuedInvoice(100);
+      await fundAllowance(500);
+
+      await invoicesService.writeOff(
+        inv.id,
+        { reason: 'Notice later' },
+        OWNER_ID,
+        CompanyRole.Owner,
+      );
+
+      const notified = await invoicesService.setDebtorNotified(inv.id, {
+        debtor_notified_at: '2026-10-15',
+      });
+      expect(notified.debtor_notified_at).toBe('2026-10-15');
+
+      const { data: wo } = await supabase.client
+        .from('write_offs')
+        .select('debtor_notified_at')
+        .eq('invoice_id', inv.id)
+        .single();
+      expect(wo!.debtor_notified_at).toBe('2026-10-15');
+    });
+
     it('D-11: non-Owner write-off at/above write_off_approval_threshold → pending_approval', async () => {
       // 5000 + 5% = 5250 >= default write_off_approval_threshold 5000
       const inv = await createIssuedInvoice(5000);

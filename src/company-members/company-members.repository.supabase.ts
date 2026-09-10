@@ -23,6 +23,22 @@ export class SupabaseCompanyMembersRepository implements CompanyMembersRepositor
     return (data?.role as CompanyRole | undefined) ?? null;
   }
 
+  async findOwnerUserId(companyId: string): Promise<string | null> {
+    const { data, error } = await this.supabase.client
+      .from('company_members')
+      .select('user_id')
+      .eq('company_id', companyId)
+      .eq('role', CompanyRole.Owner)
+      .limit(1)
+      .maybeSingle();
+
+    if (error) {
+      throw error;
+    }
+
+    return (data?.user_id as string | undefined) ?? null;
+  }
+
   async findCompanyIdByJournalEntryId(entryId: string): Promise<string | null> {
     const { data, error } = await this.supabase.client
       .from('journal_entries')
@@ -276,5 +292,20 @@ export class SupabaseCompanyMembersRepository implements CompanyMembersRepositor
       return parent[0]?.company_id ?? null;
     }
     return parent.company_id ?? null;
+  }
+
+  async findCompanyIdByPublicHolidayId(holidayId: string): Promise<string | null> {
+    const { data, error } = await this.supabase.client
+      .from('public_holidays')
+      .select('company_id')
+      .eq('id', holidayId)
+      .maybeSingle();
+
+    if (error) {
+      throw error;
+    }
+
+    // UAE-wide rows (company_id null) are not tenant-resolvable — treat as missing.
+    return (data?.company_id as string | undefined) ?? null;
   }
 }

@@ -23,6 +23,25 @@ describe('ReportsService (period trial balance)', () => {
       getBalanceSheet: jest.fn().mockResolvedValue([]),
       getProfitAndLoss: jest.fn().mockResolvedValue([]),
       getGeneralLedger: jest.fn().mockResolvedValue([]),
+      getCustomerLedger: jest.fn().mockResolvedValue([]),
+      getAgedReceivables: jest.fn().mockResolvedValue([]),
+      checkCustomerCreditLimit: jest.fn().mockResolvedValue({
+        customer_id: '00000000-0000-0000-0000-000000000001',
+        credit_limit: null,
+        open_invoice_outstanding: 0,
+        unapplied_advance_credit: 0,
+        outstanding_balance: 0,
+        exceeds_credit_limit: false,
+        alert: null,
+      }),
+      getCustomerPaymentHistory: jest.fn().mockResolvedValue({
+        customer_id: '00000000-0000-0000-0000-000000000001',
+        invoice_count: 0,
+        average_actual_days_to_pay: null,
+        average_terms_days: null,
+        invoices: [],
+      }),
+      findCustomerCompanyRow: jest.fn(),
     };
     service = new ReportsService(repository);
   });
@@ -103,6 +122,25 @@ describe('ReportsService (balance sheet)', () => {
       getBalanceSheet: jest.fn().mockResolvedValue([]),
       getProfitAndLoss: jest.fn().mockResolvedValue([]),
       getGeneralLedger: jest.fn().mockResolvedValue([]),
+      getCustomerLedger: jest.fn().mockResolvedValue([]),
+      getAgedReceivables: jest.fn().mockResolvedValue([]),
+      checkCustomerCreditLimit: jest.fn().mockResolvedValue({
+        customer_id: '00000000-0000-0000-0000-000000000001',
+        credit_limit: null,
+        open_invoice_outstanding: 0,
+        unapplied_advance_credit: 0,
+        outstanding_balance: 0,
+        exceeds_credit_limit: false,
+        alert: null,
+      }),
+      getCustomerPaymentHistory: jest.fn().mockResolvedValue({
+        customer_id: '00000000-0000-0000-0000-000000000001',
+        invoice_count: 0,
+        average_actual_days_to_pay: null,
+        average_terms_days: null,
+        invoices: [],
+      }),
+      findCustomerCompanyRow: jest.fn(),
     };
     service = new ReportsService(repository);
   });
@@ -181,6 +219,25 @@ describe('ReportsService (profit and loss)', () => {
       getBalanceSheet: jest.fn(),
       getProfitAndLoss: jest.fn().mockResolvedValue([]),
       getGeneralLedger: jest.fn().mockResolvedValue([]),
+      getCustomerLedger: jest.fn().mockResolvedValue([]),
+      getAgedReceivables: jest.fn().mockResolvedValue([]),
+      checkCustomerCreditLimit: jest.fn().mockResolvedValue({
+        customer_id: '00000000-0000-0000-0000-000000000001',
+        credit_limit: null,
+        open_invoice_outstanding: 0,
+        unapplied_advance_credit: 0,
+        outstanding_balance: 0,
+        exceeds_credit_limit: false,
+        alert: null,
+      }),
+      getCustomerPaymentHistory: jest.fn().mockResolvedValue({
+        customer_id: '00000000-0000-0000-0000-000000000001',
+        invoice_count: 0,
+        average_actual_days_to_pay: null,
+        average_terms_days: null,
+        invoices: [],
+      }),
+      findCustomerCompanyRow: jest.fn(),
     };
     service = new ReportsService(repository);
   });
@@ -270,6 +327,25 @@ describe('ReportsService (general ledger)', () => {
       getBalanceSheet: jest.fn().mockResolvedValue([]),
       getProfitAndLoss: jest.fn().mockResolvedValue([]),
       getGeneralLedger: jest.fn().mockResolvedValue([]),
+      getCustomerLedger: jest.fn().mockResolvedValue([]),
+      getAgedReceivables: jest.fn().mockResolvedValue([]),
+      checkCustomerCreditLimit: jest.fn().mockResolvedValue({
+        customer_id: '00000000-0000-0000-0000-000000000001',
+        credit_limit: null,
+        open_invoice_outstanding: 0,
+        unapplied_advance_credit: 0,
+        outstanding_balance: 0,
+        exceeds_credit_limit: false,
+        alert: null,
+      }),
+      getCustomerPaymentHistory: jest.fn().mockResolvedValue({
+        customer_id: '00000000-0000-0000-0000-000000000001',
+        invoice_count: 0,
+        average_actual_days_to_pay: null,
+        average_terms_days: null,
+        invoices: [],
+      }),
+      findCustomerCompanyRow: jest.fn(),
     };
     service = new ReportsService(repository);
   });

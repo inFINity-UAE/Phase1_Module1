@@ -1,5 +1,10 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
+import {
+  ACCOUNTING_PERIODS_REPOSITORY,
+  AccountingPeriodsRepository,
+} from '../accounting-periods/accounting-periods.repository';
+import { CompanyMembersService } from '../company-members/company-members.service';
 import { INVOICES_REPOSITORY, InvoicesRepository } from '../invoices/invoices.repository';
 import {
   QUOTATIONS_REPOSITORY,
@@ -30,14 +35,11 @@ type CompanySweepSummary = {
 /**
  * [feature-spec.md decision #62] Unattended daily trigger for due recurring
  * templates, [feature-spec-1.1.C.md §8 decision #20] quotation expiration,
- * and [decision #21] invoice overdue marking. Calls existing runDueGenerations
- * per company — does not replace POST /run-due or POST /generate.
+ * [decision #21] invoice overdue marking, [feature-spec-1_1_D.md §4.5b]
+ * VAT-relief flags, and [§4.5a / D-10 / D-15] ECL provisioning at
+ * period_end + 5 business days.
  *
- * Interval: once daily (01:00 UTC). Recurring recurrence_frequency enum is
- * daily/weekly/monthly/quarterly/annually — none require sub-daily runs;
- * a daily sweep catches every due next_run_date. Quotation expiration runs
- * immediately after recurring; invoice overdue marking runs immediately after
- * quotation expiration in the same cron handler (same 01:00 UTC slot).
+ * Interval: once daily (01:00 UTC). One cron handler — no second scheduler.
  */
 @Injectable()
 export class RecurringJournalSchedulerService {
@@ -51,6 +53,9 @@ export class RecurringJournalSchedulerService {
     private readonly quotationsRepository: QuotationsRepository,
     @Inject(INVOICES_REPOSITORY)
     private readonly invoicesRepository: InvoicesRepository,
+    @Inject(ACCOUNTING_PERIODS_REPOSITORY)
+    private readonly accountingPeriodsRepository: AccountingPeriodsRepository,
+    private readonly companyMembersService: CompanyMembersService,
   ) {}
 
   @Cron(CronExpression.EVERY_DAY_AT_1AM)
@@ -58,6 +63,8 @@ export class RecurringJournalSchedulerService {
     const recurringSummary = await this.runScheduledDueGenerations();
     await this.runScheduledExpirations();
     await this.runScheduledOverdueMarking();
+    await this.runScheduledVatReliefFlagging();
+    await this.runScheduledEclProvisioning();
     return recurringSummary;
   }
 
@@ -147,6 +154,113 @@ export class RecurringJournalSchedulerService {
       companies_evaluated: sweep.companies_evaluated,
       invoices_marked_overdue: sweep.processed,
       company_failures: sweep.company_failures,
+    };
+  }
+
+  /**
+   * [feature-spec-1_1_D.md §4.5b] Flip write_offs.vat_relief_eligible when
+   * 6mo-since-supply + debtor_notified_at hold. Same 01:00 UTC slot as overdue.
+   */
+  async runScheduledVatReliefFlagging(asOfDate?: string): Promise<{
+    companies_evaluated: number;
+    write_offs_flagged: number;
+    company_failures: Array<{ company_id: string; error: string }>;
+  }> {
+    const runDate = asOfDate ?? new Date().toISOString().slice(0, 10);
+    const companyIds =
+      await this.invoicesRepository.listCompanyIdsWithUnflaggedWriteOffs();
+    const sweep = await this.sweepCompanies(
+      companyIds,
+      'VAT relief eligibility',
+      (companyId) =>
+        this.invoicesRepository.markVatReliefEligible(companyId, runDate),
+    );
+    this.logger.log(
+      `VAT relief eligibility as_of=${runDate}: companies=${sweep.companies_evaluated}, ` +
+        `write_offs_flagged=${sweep.processed}, company_failures=${sweep.company_failures.length}`,
+    );
+    return {
+      companies_evaluated: sweep.companies_evaluated,
+      write_offs_flagged: sweep.processed,
+      company_failures: sweep.company_failures,
+    };
+  }
+
+  /**
+   * [feature-spec-1_1_D.md §4.5a / D-10 / D-15]
+   * Run run_ecl_provision when as_of >= add_business_days(period_end, 5).
+   * Missed targets still execute (catch-up); unique + ecl: lock prevent double-post.
+   */
+  async runScheduledEclProvisioning(asOfDate?: string): Promise<{
+    as_of_date: string;
+    periods_evaluated: number;
+    runs_completed: number;
+    failures: Array<{ company_id: string; period_end: string; error: string }>;
+  }> {
+    const asOf = asOfDate ?? new Date().toISOString().slice(0, 10);
+    const pending = await this.accountingPeriodsRepository.listPeriodsPendingEcl();
+    const failures: Array<{ company_id: string; period_end: string; error: string }> =
+      [];
+    let runsCompleted = 0;
+
+    for (const { company_id: companyId, period_end: periodEnd } of pending) {
+      try {
+        // [D-10] T+5 business days after period_end via D-P4 helper.
+        const targetDate = await this.accountingPeriodsRepository.addBusinessDays(
+          companyId,
+          periodEnd,
+          5,
+        );
+        if (targetDate > asOf) {
+          continue;
+        }
+
+        const ownerId = await this.companyMembersService.findOwnerUserId(companyId);
+        if (!ownerId) {
+          failures.push({
+            company_id: companyId,
+            period_end: periodEnd,
+            error: 'COMPANY_OWNER_NOT_FOUND',
+          });
+          this.logger.error(
+            `ECL provision skipped for company ${companyId} period_end=${periodEnd}: no Owner`,
+          );
+          continue;
+        }
+
+        await this.accountingPeriodsRepository.runEclProvision(
+          companyId,
+          periodEnd,
+          ownerId,
+        );
+        runsCompleted += 1;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        // Race / catch-up re-entry — unique (company_id, period_end_date) already held.
+        if (/ECL_PROVISION_ALREADY_RUN/i.test(message)) {
+          continue;
+        }
+        failures.push({
+          company_id: companyId,
+          period_end: periodEnd,
+          error: message,
+        });
+        this.logger.error(
+          `ECL provision failed for company ${companyId} period_end=${periodEnd}: ${message}`,
+        );
+      }
+    }
+
+    this.logger.log(
+      `ECL provision as_of=${asOf}: periods_evaluated=${pending.length}, ` +
+        `runs_completed=${runsCompleted}, failures=${failures.length}`,
+    );
+
+    return {
+      as_of_date: asOf,
+      periods_evaluated: pending.length,
+      runs_completed: runsCompleted,
+      failures,
     };
   }
 
