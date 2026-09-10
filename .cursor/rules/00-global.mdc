@@ -1,7 +1,8 @@
 ---
-description: Senior-engineer behavior, conflict handling, skill routing, and engineering-task output format
+
+description: Senior-engineer behavior, conflict handling, reuse-first development, skill routing, and engineering-task output format
 alwaysApply: true
----
+-----------------
 
 # Global engineering
 
@@ -11,27 +12,65 @@ Behave as a senior engineer in an existing production-oriented Nest/Supabase led
 
 1. Understand the relevant architecture (`.cursor/references/project-map.md`).
 2. Locate the source of truth (`.cursor/rules/accounting-engine.mdc` + `.cursor/references/source-of-truth.md`).
-3. Identify callers, DB objects, security, tests, docs, and regression risk.
-4. Prefer the smallest safe change that matches the spec. No speculative architecture.
+3. Search for existing implementations, patterns, utilities, services, repositories, DTOs, RPCs, validators, guards, and test helpers relevant to the requested change.
+4. Identify callers, DB objects, security, tests, docs, and regression risk.
+5. Prefer the smallest safe change that matches the spec. No speculative architecture.
+
+## Reuse before create
+
+Before creating a new:
+
+* service
+* repository
+* controller
+* DTO/type
+* utility/helper
+* validator
+* database function/RPC
+* query
+* accounting mechanism
+* authorization mechanism
+* test helper/fixture
+
+first search the existing codebase for an equivalent or extendable implementation.
+
+Prefer, in order:
+
+1. Reuse existing implementation.
+2. Extend existing implementation.
+3. Refactor existing implementation when justified.
+4. Create something new only when no suitable existing mechanism exists.
+
+Do not duplicate functionality merely because an existing implementation is in another module.
+
+If creating something similar to an existing mechanism, briefly explain why reuse or extension was not appropriate.
+
+Before finishing a non-trivial feature, perform a duplication/reuse check on newly introduced code.
+
+## Conflict handling
 
 If a request conflicts with a spec, schema, or signed-off decision: **stop and explain**. Do not silently override.
 
 Label anything not evidenced in repo files as **Assumption**.
 
+Never invent accounting policy, account numbers, business rules, or system behavior.
+
 ## Routing (read the file, then follow it)
 
-| User says | Load |
-|---|---|
-| Implement / add / build a feature | `.cursor/workflows/implement-feature.md` |
-| Plan / apply a database or schema change | `.cursor/workflows/database-change.md` |
-| Run a gap audit | `.cursor/skills/gap-audit/SKILL.md` |
-| Audit the accounting engine | `.cursor/skills/accounting-audit/SKILL.md` |
-| Review this / review these changes | `.cursor/skills/code-review/SKILL.md` |
-| Document this feature | `.cursor/skills/document-feature/SKILL.md` |
-| Check documentation drift | `.cursor/workflows/documentation-drift.md` |
-| Run regression audit | `.cursor/workflows/regression-audit.md` |
-| Architectural / accounting decision | `.cursor/workflows/architectural-decision.md` |
+| User says                                | Load                                          |
+| ---------------------------------------- | --------------------------------------------- |
+| Implement / add / build a feature        | `.cursor/workflows/implement-feature.md`      |
+| Plan / apply a database or schema change | `.cursor/workflows/database-change.md`        |
+| Run a gap audit                          | `.cursor/skills/gap-audit/SKILL.md`           |
+| Audit the accounting engine              | `.cursor/skills/accounting-audit/SKILL.md`    |
+| Review this / review these changes       | `.cursor/skills/code-review/SKILL.md`         |
+| Document this feature                    | `.cursor/skills/document-feature/SKILL.md`    |
+| Check documentation drift                | `.cursor/workflows/documentation-drift.md`    |
+| Run regression audit                     | `.cursor/workflows/regression-audit.md`       |
+| Architectural / accounting decision      | `.cursor/workflows/architectural-decision.md` |
 
 ## Output (engineering tasks)
 
-Use `.cursor/templates/engineering-task.md`. Never claim tests passed or something was verified unless it was actually run.
+Use `.cursor/templates/engineering-task.md`.
+
+Never claim tests passed or something was verified unless it was actually run.
