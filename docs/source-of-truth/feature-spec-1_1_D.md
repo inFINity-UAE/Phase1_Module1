@@ -5,20 +5,26 @@ Part of Module 1.1 · AI-Based Accounting Foundation, inFINity Phase 1 (MVP).
 This is the authoritative scope document for Module 1.1.D only — do not
 infer scope from Module 1.1.A/C/H1 or other 1.1.B–H modules.
 
-**Status: scoped and decision-logged, not yet built.** §2 below is a
-ratified decision log (D-1…D-15), grounded against `schema.sql`, the
-finalized `Chart_of_Accounts_-_inFINity.xlsx`, explicit accountant/owner
-sign-off, and (for D-11) the TC9 test pack itself, matching the
-discipline `feature-spec.md` (A) and `feature-spec-1_1_C.md` (C) use.
-D-10's weekend-days default is confirmed (D-13), the public-holiday seed
-gap is closed (D-14), and the month-end close cadence D-10's scheduler
-needed is now fixed (D-15, calendar month-end). Everything here is
-either confirmed against a real source or an explicit decision — no
-open assumptions remain. It is still a *pre-build* document otherwise:
-no code exists for D yet, so nothing here claims to have been tested.
-As build proceeds, any decision that needs revision gets a new numbered
-entry appended (D-16+) rather than silently edited — same rule A's and
-C's logs follow.
+**Status: ✅ built and verified (2026-09-10).** Schema (§3), posting
+RPCs (§4), Nest AR surface, shared daily scheduler jobs (§4.5 / D-16),
+and AR reports (§5) are live. §2 is the ratified decision log
+(D-1…D-17); §9 is the chronological index. Grounded against `schema.sql`,
+the finalized `Chart_of_Accounts_-_inFINity.xlsx`, accountant/owner
+sign-off, and (for D-11) the TC9 test pack — same discipline as
+`feature-spec.md` (A) and `feature-spec-1_1_C.md` (C). No D-1…D-15
+entry was silently edited; build-time locks that were previously
+unspecified are appended as D-16+. Explicit deferrals remain in §7.
+
+**D-P13 verification (2026-09-10, Testing 1.1.A `kaihxmsskblynwjmwvfh`):**
+fresh `schema.sql` apply + `seed_finalized_coa_demo_company_0002.sql` +
+`seed_uae_public_holidays.sql` clean (25 public tables, 183 accounts,
+38 holidays); all ten `apply_*.sql` scripts idempotent ×2; full
+`npx jest` **573 passed** across 59 suites (vs Module C baseline
+**544/544** — net +29 D tests) with **1 suite failing to compile**
+(`journal-entries.service.spec.ts` mock missing D-P11
+`listPeriodsPendingEcl` / `addBusinessDays` / `runEclProvision` —
+TypeScript only, not a runtime/DB regression); `verify-auth-module-imports.mjs`
+17/17 OK; `hijri_holiday_projection.py` self-check OK (worst miss 1 day).
 
 **Dependencies, verified directly against `schema.sql`:** Module 0 (A) —
 `companies`, `accounts`, `journal_entries`, `journal_lines`,
@@ -445,6 +451,39 @@ period exists, which is what D-10's scheduler needed to anchor to.
 Closes the "still needed" flag in §4.5a and the Build Order dependency
 raised ahead of D-P11.
 
+### D-16 — ECL + VAT-relief eligibility share C's existing 01:00 UTC cron
+
+**Decision (build-time lock, 2026-09-10):** the §4.5a ECL provisioning
+run and the §4.5b `mark_vat_relief_eligible` scan register on the same
+`RecurringJournalSchedulerService` **01:00 UTC** job that already runs
+recurring generation, quotation expiry, and invoice overdue (C decisions
+#20–#21) — order: recurring → expiry → overdue → VAT relief → ECL.
+**No second Nest `@Cron` / scheduler process** for D.
+
+**Why:** D-10 specifies *when* ECL fires (`period_end` + 5 business days,
+catch-up if late) but not *which process* hosts it. Reusing C's proven
+daily slot matches A's #62–#63 / C #15 pattern and avoids duplicate
+schedulers racing the same advisory locks.
+
+**Does not revise D-10:** timing, holiday-awareness, and never-skip
+catch-up rules stand; this only names the host.
+
+### D-17 — Late `debtor_notified_at` via `PATCH /invoices/:id/debtor-notified`
+
+**Decision (build-time lock, 2026-09-10):** when written notice to the
+debtor is given *after* write-off, Nest exposes
+`PATCH /invoices/:id/debtor-notified` (body: `debtor_notified_at`) on an
+already-`written_off` invoice. Write-off itself still accepts optional
+`debtor_notified_at` on `POST /invoices/:id/write-off` (D-9 / §4.4).
+
+**Why:** §4.4 already allowed a follow-up call without naming the route;
+build locked a dedicated PATCH rather than overloading write-off or a
+generic write-offs CRUD surface. Module F still owns VAT-201 reclaim;
+this only completes D's FTA-condition flag inputs for §4.5b.
+
+**Does not revise D-9:** write-off remains an extension of C's existing
+POST URL; PATCH is additive for the post-write-off notice step only.
+
 ---
 
 ## 3. Schema additions
@@ -782,8 +821,8 @@ transition logic yet. D owns all three:
 - Extends C's existing `POST /invoices/:id/write-off` per D-9, rather
   than a new endpoint. Request adds `reason`, and optionally
   `debtor_notified_at` if notice has already been given (can also be
-  set later via a follow-up call, since notification and write-off
-  don't have to happen in the same step).
+  set later via `PATCH /invoices/:id/debtor-notified` per D-17, since
+  notification and write-off don't have to happen in the same step).
 - GL posting (D-8, ratified): `Dr` Allowance for ECL (`1110`), `Cr`
   Accounts Receivable (`1100`), for the written-off balance.
   `entry_type = 'write_off'`. No P&L line at this step — the expense was
@@ -809,8 +848,9 @@ answer on D-8 requires it for the allowance method to mean anything.
 **4.5a — Provisioning run.** Scheduled per D-10: `period_end` + 5
 business days, weekend/holiday-aware via `company_settings.weekend_days`
 (`{6,7}`, D-13) and `public_holidays` — counting `PROVISIONAL` rows as
-non-business days identically to `CONFIRMED` ones, per D-14 — guarded
-against an already-`closed` period, and
+non-business days identically to `CONFIRMED` ones, per D-14 — hosted on
+the shared daily `RecurringJournalSchedulerService` 01:00 UTC cron
+(D-16), guarded against an already-`closed` period, and
 guarded by the `ecl:` advisory lock (§3.7) so two concurrent triggers
 can't double-post the same period.
 
@@ -865,7 +905,8 @@ anchor T+5-business-days to.
    gate the posting itself (lighter review, per D-8).
 
 **4.5b — VAT-relief eligibility flag.** A separate scheduled function
-(same pattern as `mark_overdue_invoices()`) scans `write_offs` where
+(same pattern as `mark_overdue_invoices()`, same daily cron host per
+D-16) scans `write_offs` where
 `vat_relief_eligible = false`, and flips it true once both hold:
 `invoices.invoice_date <= as_of_date - interval '6 months'` **and**
 `debtor_notified_at is not null`. This does not touch VAT filing itself
@@ -969,25 +1010,55 @@ needed beyond `paid_at`.
 
 ---
 
-## 8. Suggested next step
+## 8. Build status / sign-off
 
-**D-1 through D-15 are ratified — no open items remain.** The two
-things flagged as outstanding in the previous pass are now closed:
+**Module 1.1.D is built and signed off as of 2026-09-10** (decisions
+D-1…D-17). Schema (§3), posting functions (§4), Nest AR routes,
+scheduler jobs (D-16), and reports (§5) are in `schema.sql` and the
+Nest app. §7 deferrals are intentional carry-forward, not incomplete D
+scope.
 
-- The AED 50,000 general `journal_approval_threshold` (D-11) is
-  confirmed against the TC9 test pack itself — TC9's own assertion
-  message ties the running app's configured threshold to "Excel
-  specifies 50,000," the same figure recorded here. No discrepancy.
-- The month-end close date/cadence that D-10's provisioning scheduler
-  needed to anchor to (§4.5a) is fixed by D-15: calendar month-end,
-  QuickBooks/Xero-style — `period_end` is always the last calendar day
-  of the month.
+**D-P13 verification numbers (2026-09-10):**
 
-Also closed since the last pass: D-10's weekend-days default is
-confirmed Sat/Sun with the settings-editing surface explicitly deferred
-(D-13), and `public_holidays` now has real seed data through 2029
-sourced from Cabinet Resolution No. (27) of 2024, with lunar dates
-carried as `PROVISIONAL` and correctable (D-14).
+| Check | Result |
+|---|---|
+| Fresh-DB `schema.sql` + COA seed + UAE holidays seed | Clean (25 tables / 183 accounts / 38 holidays) |
+| All `docs/source-of-truth/apply_*.sql` ×2 | Idempotent (10/10 both passes) |
+| Full `npx jest` | **573 passed**; 59/60 suites green (baseline was **544/544**) |
+| Known suite compile gap | `journal-entries.service.spec.ts` — mock missing `listPeriodsPendingEcl`, `addBusinessDays`, `runEclProvision` (D-P11); fix is test-only |
+| `verify-auth-module-imports.mjs` | 17/17 guarded controllers OK |
+| `hijri_holiday_projection.py` | Self-check OK (worst miss 1 day) |
 
-Everything — schema (§3), posting functions (§4), reporting (§5) — is
-ready to build against.
+**Decision-log hygiene:** no D-1…D-15 entry was rewritten. Build-time
+locks appended as **D-16** (shared 01:00 UTC cron host) and **D-17**
+(late `debtor_notified_at` PATCH). Pre-build closures that still hold:
+D-11 AED 50,000 general threshold (TC9), D-13 weekend Sat/Sun,
+D-14 Cabinet Resolution holiday seed, D-15 calendar month-end.
+
+---
+
+## 9. Decision Log Index
+
+Chronological index for traceability — full text of each entry is in §2.
+Same discipline as `feature-spec-1.1.C.md` §11: never silently edit an
+existing row; append D-18+ if a decision must change.
+
+| # | Date | Summary | Detail in |
+|---|------|---------|-----------|
+| D-1 | 2026-09-04 | One `payments` table for both payments and advances (zero applications = advance) | §2 D-1, §3.2, §4.2–§4.3 |
+| D-2 | 2026-09-04 | GL accounts resolved against finalized COA (`1100`/`1020`/`2060`/`5640`/`1110`) — not invented | §2 D-2, §4 |
+| D-3 | 2026-09-04 | `invoices.paid_at` new column, set once when status first reaches `paid` | §2 D-3, §4.1, §6 |
+| D-4 | 2026-09-04 | Credit limit alert-only at invoice Issue — non-blocking, no override workflow | §2 D-4, §5.3 |
+| D-5 | 2026-09-04 | Aging buckets include explicit `current` (not-yet-due), not folded into 0–30 | §2 D-5, §5.2 |
+| D-6 | 2026-09-04 | `company_settings.default_bank_account_id`, seeded to COA `1020` | §2 D-6, §3.1a, §4.2 |
+| D-7 | 2026-09-04 | Customer advances liability is `2060`, not `2050` | §2 D-7, §4.3 |
+| D-8 | 2026-09-04 | Bad-debt model: allowance (ECL) method — write-off vs `1110`, monthly provision via `5640` | §2 D-8, §4.4–§4.5 |
+| D-9 | 2026-09-04 | Write-off extends C's `POST /invoices/:id/write-off` — no parallel endpoint | §2 D-9, §4.4 |
+| D-10 | 2026-09-08 | ECL run at `period_end` + 5 business days, holiday-aware, never skipped (catch-up) | §2 D-10, §4.5a |
+| D-11 | 2026-09-08 | Two thresholds: write-off AED 5,000; general journal AED 50,000 (TC9); `ecl_provision` non-blocking | §2 D-11, §3.1a, §4.4 |
+| D-12 | 2026-09-08 | Payment-method debit routing (`1010`/`1020`/`1070`) + multi-bank via `bank_account_id`; `1070→1020` settlement out of scope | §2 D-12, §4.2, §7 |
+| D-13 | 2026-09-08 | Weekend days Sat/Sun confirmed; no company-settings admin API in D | §2 D-13, §3.1a, §7 |
+| D-14 | 2026-09-08 | `public_holidays` from Cabinet Resolution 27/2024; lunar dates `PROVISIONAL`; narrow holiday admin only | §2 D-14, §3.1b |
+| D-15 | 2026-09-08 | Month-end = calendar month-end (QuickBooks/Xero); no periods-admin / auto-period job in D | §2 D-15, §4.5a |
+| D-16 | 2026-09-10 | ECL + VAT-relief eligibility share C's existing 01:00 UTC `RecurringJournalSchedulerService` cron — no second scheduler | §2 D-16, §4.5a–§4.5b |
+| D-17 | 2026-09-10 | Late `debtor_notified_at` via `PATCH /invoices/:id/debtor-notified` after write-off | §2 D-17, §4.4 |

@@ -1,14 +1,16 @@
 # inFINity — Module 1.1 Build Order & Scope Document
 
 Companion to `feature-spec.md` (Module 1.1.A), `feature-spec-1.1.H1.md`,
-and `feature-spec-1.1.C.md`. Module 1.1.A (Double-Entry Accounting Engine)
-is complete and signed off as of decision #63. Module 1.1.H1 (Core
-Financial Reports) is complete and signed off as of H1 decision #6
-(2026-08-30). Module 1.1.C **C1 core** (customers, quotations, tax
-invoices, credit notes, ledger posting, scheduled transitions) is complete
-as of C Batch 2 (2026-09-01) — see §2 for what remains deferred within C
-and what moves to D/F/H. This document scopes what comes next, in what
-order, and why.
+`feature-spec-1.1.C.md`, and `feature-spec-1_1_D.md`. Module 1.1.A
+(Double-Entry Accounting Engine) is complete and signed off as of
+decision #63. Module 1.1.H1 (Core Financial Reports) is complete and
+signed off as of H1 decision #6 (2026-08-30). Module 1.1.C **C1 core**
+(customers, quotations, tax invoices, credit notes, ledger posting,
+scheduled transitions) is complete as of C Batch 2 (2026-09-01).
+Module 1.1.D (Accounts Receivable) is complete and signed off as of
+D-1…D-17 (2026-09-10) — see §2 for C gaps D closed, §3 for D's
+intentional deferrals to F / H-remainder / later admin work. This
+document scopes what comes next, in what order, and why.
 
 **Source:** `inFINity Complete Phase-Wise Feature List — All Modules &
 Sub-Features` (July 2026), sections B–H, mapped against what Module 1.1.A
@@ -28,17 +30,20 @@ and so open questions get resolved before they're discovered mid-build.
 |---|---|---|---|---|
 | 0 | Double-Entry Accounting Engine | A | — | ✅ Done (#1–#63) — `feature-spec.md` |
 | 1 | Core Financial Reports | H (partial — see §1) | 0 | ✅ Done (H1 #1–#6, 2026-08-30) — `feature-spec-1.1.H1.md` |
-| 2 | Quotations & Tax Invoicing | C | 0 | ✅ **C1 core done** (Batch 1–2, 2026-09-01) — `feature-spec-1.1.C.md`; §9 presentation + FTA gap register + payment/write-off states still deferred (→ D/F/post-C1) |
-| 3 | Accounts Receivable | D | 0, 2 | **Next** |
+| 2 | Quotations & Tax Invoicing | C | 0 | ✅ **C1 core done** (Batch 1–2, 2026-09-01) — `feature-spec-1.1.C.md`; §9 presentation + FTA gap register still deferred (→ post-C1/F); payment/`written_off` ledger closed by D (2026-09-10) |
+| 3 | Accounts Receivable | D | 0, 2 | ✅ **Done** (D-1…D-17, 2026-09-10) — `feature-spec-1_1_D.md`; §7 deferrals → F / H-remainder / later admin |
 | 4 | Accounts Payable | E | 0, (3's mirror — see §4 open question) | Queued |
 | 5 | AI Document Processing & OCR | B | 0, 4 | Queued |
 | 6 | UAE VAT Compliance Engine | F | 0, 2, 4, 1 | Queued |
 | 7 | UAE Corporate Tax Add-On | G | 0, 1, 6 | Queued |
 | 8 | Extended Financial Reports | H (remainder — see §8) | 2, 3, 4, 6, 7 | Last |
 
-**Verification posture (2026-09-01):** full `schema.sql` fresh-DB apply on
-Testing 1.1.A passed clean (10-chunk MCP apply + COA seed); Jest **544/544**
-tests pass across **53** suites (`npx jest`).
+**Verification posture (2026-09-10, Module D sign-off):** full
+`schema.sql` fresh-DB apply on Testing 1.1.A passed clean (+ COA seed +
+UAE public-holidays seed); all `apply_*.sql` idempotent ×2; Jest
+**573 passed** / 59 suites green (1 suite TS compile gap in
+`journal-entries.service.spec.ts` mock — see `feature-spec-1_1_D.md` §8);
+prior C baseline was **544/544** (2026-09-01).
 
 ---
 
@@ -95,8 +100,9 @@ Fresh-DB discipline: `schema.sql` top-to-bottom + `seed_finalized_coa_demo_compa
 
 | Gap | Owner |
 |---|---|
-| Invoice `partially_paid` / `paid` + payment application | Module D (AR) |
-| Invoice write-off ledger posting (+ FTA 6-month VAT bad-debt relief) | D posts journal; F wires automatic relief |
+| Invoice `partially_paid` / `paid` + payment application | ✅ **Closed by Module D** (2026-09-10) — `payment_applications` + `amount_paid`/`paid_at` triggers |
+| Invoice write-off ledger posting | ✅ **Closed by Module D** (2026-09-10) — `create_invoice_write_off` + Nest write-off / debtor-notified |
+| FTA 6-month VAT bad-debt **relief filing / reclaim** (VAT-201) | Module F — D only flags `write_offs.vat_relief_eligible` (§4.5b); does not file |
 | §9 presentation/delivery (PDF, WhatsApp, bilingual, reminders, recurring invoices, proforma behavior, cloning) | Post-C1 |
 | FTA sequential numbering gap detection / immutable audit register | Post-C1 / F |
 | Product/service catalog → default income-account mapping | Unscoped follow-up |
@@ -122,9 +128,13 @@ threshold/format rules right and decision-logged, not assumed.
 
 ## 3. Accounts Receivable (D)
 
-**Status: Next — C1 core dependency satisfied (2026-09-01).** C's invoices,
-credit notes, and ledger posting exist; `partially_paid`/`paid`/`amount_paid`
-are schema-reserved but have no transitions yet — D owns payment application.
+**Status: ✅ Complete (2026-09-10).** Spec: `feature-spec-1_1_D.md`
+(decisions D-1…D-17). Delivered: payments + applications into
+`partially_paid`/`paid`, advances (`2060`), write-off ledger posting,
+ECL provisioning + VAT-relief *eligibility* flag, public holidays +
+business-day helper, aged AR / customer ledger / credit-limit alert /
+statement **data** / payment history. Nest routes under payments,
+invoices (write-off + debtor-notified), public-holidays, and reports.
 
 **Why third, not bundled with C:** D's features (aged receivables, credit
 limits, customer statements, payment application) are meaningfully
@@ -134,14 +144,23 @@ would make C's PR too large and blur which module owns which rule.
 
 **Depends on:** Module 0, Module 2 (C).
 
-**Note for scoping:** "Write-off: bad debt write-off with VAT bad debt
-relief calculation (after 6 months per FTA)" straddles D and F — decide
-during D's scoping whether the write-off *action* lives in D (posts the
-journal entry, updates customer ledger) while the *VAT relief calculation
-rule* is deferred to F, or whether this needs to wait until F exists.
-Recommend the former — post the write-off now with a placeholder/manual
-VAT adjustment, wire the automatic 6-month VAT relief calculation into F
-when it's built — rather than blocking D on F's existence.
+**Write-off vs VAT relief (resolved as recommended):** D posts the
+write-off journal and tracks `debtor_notified_at` /
+`vat_relief_eligible`; Module F owns VAT-201 filing/reclaim of the
+6-month FTA bad-debt relief.
+
+### Deliberate deferrals from D (tracked, not lost)
+
+Authoritative detail: `feature-spec-1_1_D.md` §7. Carry-forward:
+
+| Item | Owner |
+|---|---|
+| `1070 → 1020` settlement/clearing entries (card/POS clearing) | Later / bank-reconciliation module — manual JE until then (D-12) |
+| VAT-201 return filing / bad-debt reclaim mechanics | Module F |
+| PDF / XLSX / CSV export mechanics (incl. statement PDF) | H-remainder (Build Order §8); D ships statement **data** only |
+| Automated dunning / reminder delivery | Post-C1 presentation (same bucket as C §9) |
+| Multi-currency payments or advances | Unscoped until raised explicitly |
+| Company-settings admin API (`weekend_days`, thresholds, `default_bank_account_id`) | Later company-admin module — D-13; D reads settings, does not write them (exception: narrow `public_holidays` admin per D-14) |
 
 ---
 
@@ -298,18 +317,23 @@ layer rather than be built speculatively early.
 - ✅ **Module 1.1.C C1 core** — `feature-spec-1.1.C.md` written; Batch 1
   (C1-1…C1-5) landed 2026-08-31; Batch 2 (ledger + scheduler) landed
   2026-09-01; fresh-DB apply verified 2026-09-01.
+- ✅ **Module 1.1.D** — `feature-spec-1_1_D.md` written and built
+  (D-1…D-17, 2026-09-10); fresh-DB + idempotent `apply_*.sql` + Jest
+  **573** verified per §8 of that spec. Carry-forward deferrals listed
+  in §3 above / feature-spec §7.
 
 **Next:**
 
-1. Write `feature-spec.md` (or `feature-spec-1.1.D.md`) for **Module 1.1.D
-   (Accounts Receivable)** — payment application into C's
-   `partially_paid`/`paid` states, aged receivables, customer statements,
-   credit limits, bad-debt write-off journal (VAT relief rule deferred to
-   F per §3 note).
-2. In parallel or immediately after: resolve the **Bill entity design
-   question (§4)** as its own short decision document — it affects how B
-   is scoped later, and it's the one open question in this build order
-   that's cheaper to answer now than to discover mid-build.
-3. **Post-C1 carry-forward** (not blocking D): FTA gap-detection register,
-   C §9 presentation features — track in `feature-spec-1.1.C.md` §10 until
-   explicitly scoped.
+1. Resolve the **Bill entity design question (§4)** as its own short
+   decision document — it affects how B is scoped later, and it's the
+   one open question in this build order that's cheaper to answer now
+   than to discover mid-build.
+2. Scope **Module 1.1.E (Accounts Payable)** when ready — mirror D's
+   pattern; do not invent a divergent subledger shape.
+3. **Post-C1 / post-D carry-forward** (not blocking E): FTA gap-detection
+   register, C §9 presentation features, D §7 items (1070→1020
+   settlement, VAT-201 filing in F, PDF/export, dunning, multi-currency,
+   company-settings admin API) — track in the owning module's
+   feature-spec until explicitly scoped.
+4. Optional hygiene: close the D-P13 `journal-entries.service.spec.ts`
+   mock gap so the suite is fully green.
