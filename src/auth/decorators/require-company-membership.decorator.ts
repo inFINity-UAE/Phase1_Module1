@@ -22,12 +22,14 @@ export type CompanyMembershipSource =
         | 'invoice'
         | 'invoice_line'
         | 'credit_note'
-        | 'credit_note_line';
+        | 'credit_note_line'
+        | 'payment'
+        | 'payment_application';
       param?: string;
     }
   | {
       type: 'body_ref';
-      resource: 'journal_entry' | 'quotation' | 'invoice' | 'credit_note';
+      resource: 'journal_entry' | 'quotation' | 'invoice' | 'credit_note' | 'payment';
       field?: string;
     };
 

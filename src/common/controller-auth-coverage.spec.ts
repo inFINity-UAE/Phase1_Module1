@@ -11,6 +11,9 @@ import { QuotationsService } from '../quotations/quotations.service';
 import { InvoicesController } from '../invoices/invoices.controller';
 import { InvoiceLinesController } from '../invoices/invoice-lines.controller';
 import { InvoicesService } from '../invoices/invoices.service';
+import { PaymentsController } from '../payments/payments.controller';
+import { PaymentApplicationsController } from '../payments/payment-applications.controller';
+import { PaymentsService } from '../payments/payments.service';
 import { CreditNotesController } from '../credit-notes/credit-notes.controller';
 import { CreditNoteLinesController } from '../credit-notes/credit-note-lines.controller';
 import { CreditNotesService } from '../credit-notes/credit-notes.service';
@@ -38,7 +41,7 @@ import { ReportsService } from '../reports/reports.service';
  * [feature-spec.md decisions #24/#27/#41; feature-spec-1.1.H1.md #1]
  * Controllers reject unauthenticated requests (401) and succeed for a
  * verified Bearer session with membership. Regression list covers all
- * 82 guarded HTTP routes across 15 controllers.
+ * 92 guarded HTTP routes across controllers.
  *
  * Blind spot (C1-3): this spec registers controllers in isolation and mocks
  * CompanyMembershipGuard + CompanyMembersService — it does NOT import real
@@ -69,6 +72,8 @@ describe('Controller auth coverage (decision #24)', () => {
   const invoiceLineId = '15151515-1515-1515-1515-151515151515';
   const creditNoteId = '16161616-1616-1616-1616-161616161616';
   const creditNoteLineId = '17171717-1717-1717-1717-171717171717';
+  const paymentId = '18181818-1818-1818-1818-181818181818';
+  const paymentApplicationId = '19191919-1919-1919-1919-191919191919';
 
   const journalEntryDetails = {
     entry: { id: entryId, company_id: companyId },
@@ -187,6 +192,37 @@ describe('Controller auth coverage (decision #24)', () => {
     },
     { method: 'PATCH', path: `/invoice-lines/${invoiceLineId}`, body: { quantity: 2 } },
     { method: 'DELETE', path: `/invoice-lines/${invoiceLineId}` },
+    {
+      method: 'POST',
+      path: '/payments',
+      body: {
+        company_id: companyId,
+        customer_id: customerId,
+        payment_date: '2026-06-15',
+        amount: 100,
+        payment_method: 'bank_transfer',
+      },
+    },
+    { method: 'GET', path: `/payments?company_id=${companyId}` },
+    { method: 'GET', path: `/payments/${paymentId}` },
+    {
+      method: 'PATCH',
+      path: `/payments/${paymentId}`,
+      body: { reference_number: 'REF' },
+    },
+    { method: 'DELETE', path: `/payments/${paymentId}` },
+    { method: 'POST', path: `/payments/${paymentId}/post` },
+    {
+      method: 'POST',
+      path: '/payment-applications',
+      body: {
+        payment_id: paymentId,
+        invoice_id: invoiceId,
+        applied_amount: 50,
+      },
+    },
+    { method: 'DELETE', path: `/payment-applications/${paymentApplicationId}` },
+    { method: 'POST', path: `/payment-applications/${paymentApplicationId}/post` },
     {
       method: 'POST',
       path: '/credit-notes',
@@ -401,6 +437,21 @@ describe('Controller auth coverage (decision #24)', () => {
       deleteLine: jest.fn().mockResolvedValue(undefined),
     };
 
+    const paymentsService = {
+      create: jest.fn().mockResolvedValue({ payment: { id: paymentId }, applications: [] }),
+      findAll: jest.fn().mockResolvedValue([]),
+      findOne: jest.fn().mockResolvedValue({ payment: { id: paymentId }, applications: [] }),
+      update: jest.fn().mockResolvedValue({ payment: { id: paymentId }, applications: [] }),
+      remove: jest.fn().mockResolvedValue(undefined),
+      post: jest.fn().mockResolvedValue({ payment: { id: paymentId }, applications: [] }),
+      createApplication: jest.fn().mockResolvedValue({ id: paymentApplicationId }),
+      deleteApplication: jest.fn().mockResolvedValue(undefined),
+      postAdvanceApplication: jest.fn().mockResolvedValue({
+        application: { id: paymentApplicationId },
+        journal_entry_id: '00000000-0000-0000-0000-000000000097',
+      }),
+    };
+
     const creditNotesService = {
       create: jest.fn().mockResolvedValue({ credit_note: { id: creditNoteId }, lines: [] }),
       findAll: jest.fn().mockResolvedValue([]),
@@ -511,6 +562,8 @@ describe('Controller auth coverage (decision #24)', () => {
         QuotationLinesController,
         InvoicesController,
         InvoiceLinesController,
+        PaymentsController,
+        PaymentApplicationsController,
         CreditNotesController,
         CreditNoteLinesController,
         AccountingPeriodsController,
@@ -528,6 +581,7 @@ describe('Controller auth coverage (decision #24)', () => {
         { provide: CustomersService, useValue: customersService },
         { provide: QuotationsService, useValue: quotationsService },
         { provide: InvoicesService, useValue: invoicesService },
+        { provide: PaymentsService, useValue: paymentsService },
         { provide: CreditNotesService, useValue: creditNotesService },
         { provide: AccountingPeriodsService, useValue: accountingPeriodsService },
         { provide: JournalEntriesService, useValue: journalEntriesService },
@@ -590,7 +644,7 @@ describe('Controller auth coverage (decision #24)', () => {
   }
 
   it('covers all guarded HTTP routes', () => {
-    expect(ALL_GUARDED_ROUTES).toHaveLength(83);
+    expect(ALL_GUARDED_ROUTES).toHaveLength(92);
   });
 
   it.each(ALL_GUARDED_ROUTES)(

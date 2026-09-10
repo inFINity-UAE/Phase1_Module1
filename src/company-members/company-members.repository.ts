@@ -15,7 +15,9 @@ export type CompanyResourceKind =
   | 'invoice'
   | 'invoice_line'
   | 'credit_note'
-  | 'credit_note_line';
+  | 'credit_note_line'
+  | 'payment'
+  | 'payment_application';
 
 export interface CompanyMembersRepository {
   findRole(userId: string, companyId: string): Promise<CompanyRole | null>;
@@ -32,4 +34,6 @@ export interface CompanyMembersRepository {
   findCompanyIdByInvoiceLineId(lineId: string): Promise<string | null>;
   findCompanyIdByCreditNoteId(creditNoteId: string): Promise<string | null>;
   findCompanyIdByCreditNoteLineId(lineId: string): Promise<string | null>;
+  findCompanyIdByPaymentId(paymentId: string): Promise<string | null>;
+  findCompanyIdByPaymentApplicationId(applicationId: string): Promise<string | null>;
 }

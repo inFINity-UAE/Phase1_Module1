@@ -7,6 +7,7 @@ import { CustomersModule } from './customers/customers.module';
 import { QuotationsModule } from './quotations/quotations.module';
 import { InvoicesModule } from './invoices/invoices.module';
 import { CreditNotesModule } from './credit-notes/credit-notes.module';
+import { PaymentsModule } from './payments/payments.module';
 import { JournalEntriesModule } from './journal-entries/journal-entries.module';
 import { RecurringJournalTemplatesModule } from './recurring-journal-templates/recurring-journal-templates.module';
 import { AuditLogModule } from './audit-log/audit-log.module';
@@ -22,6 +23,7 @@ import { ReportsModule } from './reports/reports.module';
     QuotationsModule,
     InvoicesModule,
     CreditNotesModule,
+    PaymentsModule,
     JournalEntriesModule,
     RecurringJournalTemplatesModule,
     AuditLogModule,

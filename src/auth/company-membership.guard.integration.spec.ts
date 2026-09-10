@@ -22,6 +22,8 @@ import { QuotationsController } from '../quotations/quotations.controller';
 import { QuotationLinesController } from '../quotations/quotation-lines.controller';
 import { InvoicesController } from '../invoices/invoices.controller';
 import { InvoiceLinesController } from '../invoices/invoice-lines.controller';
+import { PaymentsController } from '../payments/payments.controller';
+import { PaymentApplicationsController } from '../payments/payment-applications.controller';
 import { AccountingPeriodsController } from '../accounting-periods/accounting-periods.controller';
 import { AuditLogController } from '../audit-log/audit-log.controller';
 import { JournalEntriesController } from '../journal-entries/journal-entries.controller';
@@ -57,6 +59,8 @@ const HTTP_CONTROLLERS: Type[] = [
   QuotationLinesController,
   InvoicesController,
   InvoiceLinesController,
+  PaymentsController,
+  PaymentApplicationsController,
   AccountingPeriodsController,
   JournalEntriesController,
   JournalLinesController,
@@ -90,6 +94,8 @@ const HTTP_CONTROLLERS: Type[] = [
     let foreignCustomerId = '';
     let foreignInvoiceId = '';
     let foreignInvoiceLineId = '';
+    let foreignPaymentId = '';
+    let foreignPaymentApplicationId = '';
     let memberAccountId = '';
 
     beforeAll(async () => {
@@ -301,6 +307,49 @@ const HTTP_CONTROLLERS: Type[] = [
         throw invLineErr ?? new Error('foreign invoice line insert failed');
       }
       foreignInvoiceLineId = foreignInvoiceLine.id as string;
+
+      // Issued-enough for payment_applications trigger; auth probe only needs rows.
+      await supabase.client
+        .from('invoices')
+        .update({
+          status: 'issued',
+          grand_total: 105,
+          amount_paid: 0,
+        })
+        .eq('id', foreignInvoiceId);
+
+      const { data: foreignPayment, error: payErr } = await supabase.client
+        .from('payments')
+        .insert({
+          company_id: foreignCompanyId,
+          customer_id: foreignCustomerId,
+          payment_date: '2026-06-15',
+          amount: 50,
+          payment_method: 'bank_transfer',
+          unapplied_amount: 50,
+          created_by: INTEGRATION_USER_ID,
+        })
+        .select('id')
+        .single();
+      if (payErr || !foreignPayment) {
+        throw payErr ?? new Error('foreign payment insert failed');
+      }
+      foreignPaymentId = foreignPayment.id as string;
+
+      const { data: foreignApp, error: appErr } = await supabase.client
+        .from('payment_applications')
+        .insert({
+          payment_id: foreignPaymentId,
+          invoice_id: foreignInvoiceId,
+          applied_amount: 25,
+          applied_by: INTEGRATION_USER_ID,
+        })
+        .select('id')
+        .single();
+      if (appErr || !foreignApp) {
+        throw appErr ?? new Error('foreign payment application insert failed');
+      }
+      foreignPaymentApplicationId = foreignApp.id as string;
 
       const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
       const publishableKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!;
@@ -641,6 +690,37 @@ const HTTP_CONTROLLERS: Type[] = [
           body: { description: 'Nope' },
         },
         { method: 'DELETE', path: `/invoice-lines/${foreignInvoiceLineId}` },
+        { method: 'GET', path: `/payments?company_id=${foreignCompanyId}` },
+        { method: 'GET', path: `/payments/${foreignPaymentId}` },
+        {
+          method: 'POST',
+          path: '/payments',
+          body: {
+            company_id: foreignCompanyId,
+            customer_id: foreignCustomerId,
+            payment_date: '2026-06-15',
+            amount: 10,
+            payment_method: 'cash',
+          },
+        },
+        {
+          method: 'PATCH',
+          path: `/payments/${foreignPaymentId}`,
+          body: { reference_number: 'Nope' },
+        },
+        { method: 'DELETE', path: `/payments/${foreignPaymentId}` },
+        { method: 'POST', path: `/payments/${foreignPaymentId}/post` },
+        {
+          method: 'POST',
+          path: '/payment-applications',
+          body: {
+            payment_id: foreignPaymentId,
+            invoice_id: foreignInvoiceId,
+            applied_amount: 1,
+          },
+        },
+        { method: 'DELETE', path: `/payment-applications/${foreignPaymentApplicationId}` },
+        { method: 'POST', path: `/payment-applications/${foreignPaymentApplicationId}/post` },
       ];
 
       const failures: string[] = [];
