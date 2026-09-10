@@ -290,4 +290,25 @@ export class SupabaseInvoicesRepository implements InvoicesRepository {
     }
     return [...ids];
   }
+
+  async writeOffInvoice(
+    id: string,
+    createdBy: string,
+    reason: string,
+    debtorNotifiedAt: string | null,
+  ): Promise<{ journal_entry_id: string }> {
+    const { data, error } = await this.supabase.client.rpc('create_invoice_write_off', {
+      p_invoice_id: id,
+      p_created_by: createdBy,
+      p_reason: reason,
+      p_debtor_notified_at: debtorNotifiedAt,
+    });
+
+    if (error) {
+      throw error;
+    }
+
+    const result = data as { journal_entry_id: string };
+    return { journal_entry_id: result.journal_entry_id };
+  }
 }

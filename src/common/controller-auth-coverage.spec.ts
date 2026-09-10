@@ -172,7 +172,7 @@ describe('Controller auth coverage (decision #24)', () => {
     { method: 'POST', path: `/invoices/${invoiceId}/void`, body: { void_reason: 'Auth probe' } },
     { method: 'POST', path: `/invoices/${invoiceId}/send` },
     { method: 'POST', path: `/invoices/${invoiceId}/mark-viewed` },
-    { method: 'POST', path: `/invoices/${invoiceId}/write-off` },
+    { method: 'POST', path: `/invoices/${invoiceId}/write-off`, body: { reason: 'Auth probe' } },
     {
       method: 'POST',
       path: '/invoice-lines',

@@ -931,13 +931,15 @@ paid invoices don't yet have a completion date to measure.
 
 ## 6. Relationship to existing schema-reserved fields
 
-`partially_paid`/`paid`/`written_off`/`amount_paid` are schema-reserved
-on `invoice_status`/`invoices` with no transitions wired — confirmed
-directly in `schema.sql` (line ~1912's handoff comment). §4.1 and §4.4
-are that wiring. Beyond `paid_at` (D-3), D's write-off flow (§4.4-§4.5)
-adds `write_offs.debtor_notified_at` and `write_offs.vat_relief_eligible`
-as the FTA-condition tracking Module F will read from — no changes to
-C's `invoices`/`credit_notes` tables are needed beyond `paid_at`.
+`partially_paid`/`paid`/`amount_paid`/`paid_at` are wired by §4.1
+(`trg_refresh_invoice_amount_paid_from_applications` on
+`payment_applications`; client mutation of `amount_paid`/`paid_at`
+blocked). `written_off` is wired by §4.4 (`create_invoice_write_off` +
+Nest post via D-11 `write_off_approval_threshold`). Beyond `paid_at`
+(D-3), D's write-off flow (§4.4-§4.5) adds `write_offs.debtor_notified_at`
+and `write_offs.vat_relief_eligible` as the FTA-condition tracking Module F
+will read from — no changes to C's `invoices`/`credit_notes` tables are
+needed beyond `paid_at`.
 
 ---
 

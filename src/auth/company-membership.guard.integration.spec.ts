@@ -622,7 +622,7 @@ const HTTP_CONTROLLERS: Type[] = [
         },
         { method: 'POST', path: `/invoices/${foreignInvoiceId}/send` },
         { method: 'POST', path: `/invoices/${foreignInvoiceId}/mark-viewed` },
-        { method: 'POST', path: `/invoices/${foreignInvoiceId}/write-off` },
+        { method: 'POST', path: `/invoices/${foreignInvoiceId}/write-off`, body: { reason: 'Auth probe' } },
         {
           method: 'POST',
           path: '/invoice-lines',

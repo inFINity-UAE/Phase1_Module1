@@ -151,9 +151,11 @@ const FUTURE_DUE_INVOICE_DATE = '2026-08-01';
       await invoicesService.void(voidPast.invoice.id, { void_reason: 'test void' }, USER_ID);
 
       const writtenOffPast = await issuePastDue('written off past');
-      await invoicesService.send(writtenOffPast.invoice.id);
-      await invoicesService.markViewed(writtenOffPast.invoice.id);
-      await invoicesService.writeOff(writtenOffPast.invoice.id);
+      await invoicesService.writeOff(
+        writtenOffPast.invoice.id,
+        { reason: 'integration overdue probe write-off' },
+        USER_ID,
+      );
 
       const alreadyOverdue = await issuePastDue('already overdue');
       await setInvoiceStatus(alreadyOverdue.invoice.id, InvoiceStatus.Overdue);

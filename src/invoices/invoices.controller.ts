@@ -20,6 +20,7 @@ import { CreateInvoiceDto } from './dto/create-invoice.dto';
 import { IssueInvoiceDto } from './dto/issue-invoice.dto';
 import { UpdateInvoiceDto } from './dto/update-invoice.dto';
 import { VoidInvoiceDto } from './dto/void-invoice.dto';
+import { WriteOffInvoiceDto } from './dto/write-off-invoice.dto';
 import { InvoicesService } from './invoices.service';
 
 /** [feature-spec-1.1.C.md §1.3] Invoice header CRUD + status transitions. */
@@ -89,7 +90,11 @@ export class InvoicesController {
 
   @Post(':id/write-off')
   @RequireCompanyMembership({ type: 'param', resource: 'invoice' })
-  writeOff(@Param('id', ParseUUIDPipe) id: string) {
-    return this.invoicesService.writeOff(id);
+  writeOff(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: WriteOffInvoiceDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.invoicesService.writeOff(id, dto, user.id, user.role);
   }
 }

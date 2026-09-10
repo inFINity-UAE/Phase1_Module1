@@ -47,6 +47,7 @@ import {
   JournalEntriesRepository,
 } from './journal-entries.repository';
 import { assertEntryDateWithinPeriod } from './journal-period.validation';
+import { CompanySettings } from '../company-settings/entities/company-settings.entity';
 
 const POSTED_ENTRY_DELETE_BLOCKED = 'POSTED_ENTRY_DELETE_BLOCKED';
 const POSTED_LINE_DELETE_BLOCKED = 'POSTED_LINE_DELETE_BLOCKED';
@@ -55,6 +56,26 @@ const POSTED_ENTRY_DELETE_MESSAGE =
   'Posted journal entries cannot be deleted — use a reversing entry (entry_type = reversal)';
 const POSTED_LINE_DELETE_MESSAGE =
   'Cannot modify lines of a posted journal entry — reverse it instead';
+
+/**
+ * [feature-spec-1_1_D.md D-11] Which approval threshold applies for this entry_type.
+ * null = approval disabled (post directly). ecl_provision is always non-blocking.
+ */
+export function resolveApprovalThreshold(
+  entryType: JournalEntryType,
+  settings: CompanySettings | null,
+): number | null {
+  if (entryType === JournalEntryType.EclProvision) {
+    return null;
+  }
+  if (entryType === JournalEntryType.WriteOff) {
+    return settings != null ? Number(settings.write_off_approval_threshold) : 5000;
+  }
+  if (settings?.journal_approval_threshold == null) {
+    return null;
+  }
+  return Number(settings.journal_approval_threshold);
+}
 
 @Injectable()
 export class JournalEntriesService {
@@ -245,7 +266,11 @@ export class JournalEntriesService {
       const settings = await this.journalEntriesRepository.getCompanySettings(
         existing.entry.company_id,
       );
-      const threshold = settings?.journal_approval_threshold;
+      // [feature-spec-1_1_D.md D-11] Threshold by entry_type — reuse A's post path.
+      const threshold = resolveApprovalThreshold(
+        existing.entry.entry_type as JournalEntryType,
+        settings,
+      );
 
       if (threshold != null) {
         const entryTotal = computeEntryTotal(existing.lines);

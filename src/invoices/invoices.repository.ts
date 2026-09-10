@@ -38,4 +38,10 @@ export interface InvoicesRepository {
   }>;
   markOverdueInvoices(companyId: string): Promise<number>;
   listCompanyIdsWithOpenInvoices(): Promise<string[]>;
+  writeOffInvoice(
+    id: string,
+    createdBy: string,
+    reason: string,
+    debtorNotifiedAt: string | null,
+  ): Promise<{ journal_entry_id: string }>;
 }

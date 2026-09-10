@@ -1514,14 +1514,22 @@ security invoker
 set search_path = public, pg_temp
 as $$
 begin
-  if current_setting('app.invoice_recalc_in_progress', true) = 'true' then
-    return new;
+  -- Totals: only the draft recalc trigger may write these.
+  if current_setting('app.invoice_recalc_in_progress', true) is distinct from 'true' then
+    if new.subtotal is distinct from old.subtotal
+       or new.vat_total is distinct from old.vat_total
+       or new.grand_total is distinct from old.grand_total then
+      raise exception 'INVOICE_TOTALS_CLIENT_MUTATION_BLOCKED';
+    end if;
   end if;
 
-  if new.subtotal is distinct from old.subtotal
-     or new.vat_total is distinct from old.vat_total
-     or new.grand_total is distinct from old.grand_total then
-    raise exception 'INVOICE_TOTALS_CLIENT_MUTATION_BLOCKED';
+  -- [feature-spec-1_1_D.md §4.1 / D-3] amount_paid / paid_at only via
+  -- payment_applications refresh trigger (never client-set).
+  if current_setting('app.invoice_payment_apply_in_progress', true) is distinct from 'true' then
+    if new.amount_paid is distinct from old.amount_paid
+       or new.paid_at is distinct from old.paid_at then
+      raise exception 'INVOICE_AMOUNT_PAID_CLIENT_MUTATION_BLOCKED';
+    end if;
   end if;
 
   return new;
@@ -1983,8 +1991,8 @@ revoke all on function void_invoice(uuid, text, uuid) from anon;
 grant execute on function void_invoice(uuid, text, uuid) to service_role;
 
 -- [feature-spec-1.1.C.md §2.2 / §8 decision #7] Scheduled due_date → Overdue transition.
--- Pure status flip on due_date only — does not read or update amount_paid (§10;
--- Module D owns payment application). No ledger interaction.
+-- Pure status flip on due_date only — does not read or update amount_paid
+-- (feature-spec-1_1_D.md §4.1; payment_applications trigger owns that). No ledger interaction.
 -- Exception token: COMPANY_ID_REQUIRED
 create or replace function mark_overdue_invoices(p_company_id uuid)
 returns int
@@ -3223,8 +3231,9 @@ grant execute on function log_journal_entry_change() to service_role;
 --     (feature-spec-1_1_D.md §3.2, §3.3, §3.4, §3.4a, §3.4c, §3.7)
 -- Advisory-lock namespaces (hashtext('<ns>:' || id)):
 --   pay:  — serialise payment_applications against one payment (unapplied_amount)
---   wof:  — reserved for write-off numbering if a human-facing number is added later
+--   wof:  — serialise create_invoice_write_off against one invoice (§4.4)
 --   ecl:  — monthly ECL provisioning run (acquire_ecl_provision_lock)
+--   vrl:  — mark_vat_relief_eligible per company (§4.5b)
 -- ============================================================================
 
 create table payments (
@@ -3330,6 +3339,111 @@ create trigger trg_refresh_payment_unapplied_amount
   after insert or update or delete on payment_applications
   for each row execute function refresh_payment_unapplied_amount();
 
+-- [feature-spec-1_1_D.md §4.1 / D-3 / §4.3]
+-- amount_paid increments only from payment_applications (never client-set).
+-- For advances, the application row (paired with advance_application JE) is
+-- what moves amount_paid — not the original advance_receipt.
+-- Over-application past grand_total is rejected; excess stays on the payment
+-- as unapplied_amount for a different invoice.
+create or replace function refresh_invoice_amount_paid_from_applications()
+returns trigger
+language plpgsql
+security invoker
+set search_path = public, pg_temp
+as $$
+declare
+  v_invoice_ids uuid[] := array[]::uuid[];
+  v_invoice_id uuid;
+  v_invoice invoices%rowtype;
+  v_payment payments%rowtype;
+  v_paid numeric(18,2);
+  v_new_status invoice_status;
+  v_paid_at timestamptz;
+begin
+  if tg_op = 'UPDATE' and new.invoice_id is distinct from old.invoice_id then
+    v_invoice_ids := array[old.invoice_id, new.invoice_id];
+  else
+    v_invoice_ids := array[coalesce(new.invoice_id, old.invoice_id)];
+  end if;
+
+  foreach v_invoice_id in array v_invoice_ids
+  loop
+    -- Serialise concurrent applications against one invoice (belt-and-suspenders
+    -- with the over-apply check below).
+    perform pg_advisory_xact_lock(hashtext('invpay:' || v_invoice_id::text));
+
+    select * into v_invoice from invoices where id = v_invoice_id for update;
+    if not found then
+      raise exception 'INVOICE_NOT_FOUND';
+    end if;
+
+    -- On insert/update targeting this invoice, reject closed/uninvoiced statuses.
+    if tg_op in ('INSERT', 'UPDATE') and new.invoice_id = v_invoice_id then
+      if v_invoice.status in ('draft', 'void', 'written_off') then
+        raise exception 'INVOICE_NOT_OPEN_FOR_PAYMENT';
+      end if;
+
+      select * into v_payment
+        from payments
+       where id = new.payment_id;
+      if not found then
+        raise exception 'PAYMENT_NOT_FOUND';
+      end if;
+      if v_payment.company_id is distinct from v_invoice.company_id
+         or v_payment.customer_id is distinct from v_invoice.customer_id then
+        raise exception 'PAYMENT_INVOICE_CUSTOMER_MISMATCH';
+      end if;
+    end if;
+
+    select coalesce(sum(applied_amount), 0)
+      into v_paid
+      from payment_applications
+     where invoice_id = v_invoice_id;
+
+    if v_paid > v_invoice.grand_total then
+      raise exception 'INVOICE_PAYMENT_OVER_APPLIED';
+    end if;
+
+    if v_paid = 0 then
+      if v_invoice.status in ('partially_paid', 'paid') then
+        if v_invoice.due_date is not null and v_invoice.due_date < current_date then
+          v_new_status := 'overdue';
+        else
+          v_new_status := 'issued';
+        end if;
+      else
+        v_new_status := v_invoice.status;
+      end if;
+      v_paid_at := v_invoice.paid_at; -- D-3: never clear once set
+    elsif v_paid < v_invoice.grand_total then
+      v_new_status := 'partially_paid';
+      v_paid_at := v_invoice.paid_at;
+    else
+      -- amount_paid = grand_total
+      v_new_status := 'paid';
+      v_paid_at := coalesce(v_invoice.paid_at, now()); -- D-3: stamp once
+    end if;
+
+    perform set_config('app.invoice_payment_apply_in_progress', 'true', true);
+
+    update invoices
+       set amount_paid = v_paid,
+           status = v_new_status,
+           paid_at = v_paid_at,
+           updated_at = now()
+     where id = v_invoice_id;
+
+    perform set_config('app.invoice_payment_apply_in_progress', '', true);
+  end loop;
+
+  return coalesce(new, old);
+end;
+$$;
+
+create trigger trg_refresh_invoice_amount_paid_from_applications
+  after insert or update or delete on payment_applications
+  for each row execute function refresh_invoice_amount_paid_from_applications();
+
 -- [feature-spec-1_1_D.md §3.4] NO approved_by — approval lives on journal_entries (D-8).
 create table write_offs (
   id                     uuid primary key default gen_random_uuid(),
@@ -3415,10 +3529,1079 @@ revoke all on function refresh_payment_unapplied_amount() from authenticated;
 revoke all on function refresh_payment_unapplied_amount() from anon;
 grant execute on function refresh_payment_unapplied_amount() to service_role;
 
+revoke all on function refresh_invoice_amount_paid_from_applications() from public;
+revoke all on function refresh_invoice_amount_paid_from_applications() from authenticated;
+revoke all on function refresh_invoice_amount_paid_from_applications() from anon;
+grant execute on function refresh_invoice_amount_paid_from_applications() to service_role;
+
 revoke all on function acquire_ecl_provision_lock(uuid) from public;
 revoke all on function acquire_ecl_provision_lock(uuid) from authenticated;
 revoke all on function acquire_ecl_provision_lock(uuid) from anon;
 grant execute on function acquire_ecl_provision_lock(uuid) to service_role;
+
+-- ============================================================================
+-- 7f. Module 1.1.D — business-day helper (feature-spec-1_1_D.md §4.5a / D-10, D-14)
+-- period_end + N business days for ECL scheduling; weekends via
+-- company_settings.weekend_days (ISO isodow); holidays via public_holidays
+-- (PROVISIONAL ≡ CONFIRMED per D-14). Company-scoped holiday row wins over
+-- UAE-wide for the same date (§3.1b) — both statuses block the day.
+-- ============================================================================
+
+-- [feature-spec-1_1_D.md §3.1b / §4.5a] True when p_date is a working day for
+-- the company (not weekend, not an applicable public holiday).
+create or replace function is_business_day(
+  p_company_id uuid,
+  p_date date
+)
+returns boolean
+language plpgsql
+stable
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  v_weekend smallint[];
+  v_isodow smallint;
+  v_has_company_holiday boolean;
+  v_has_uae_holiday boolean;
+begin
+  if p_company_id is null or p_date is null then
+    raise exception 'COMPANY_ID_AND_DATE_REQUIRED';
+  end if;
+
+  select weekend_days into v_weekend
+    from company_settings
+   where company_id = p_company_id;
+
+  if not found then
+    raise exception 'COMPANY_SETTINGS_NOT_FOUND';
+  end if;
+
+  v_isodow := extract(isodow from p_date)::smallint;
+  if v_isodow = any (v_weekend) then
+    return false;
+  end if;
+
+  -- §3.1b resolution: company-scoped row for the date takes precedence.
+  -- If present → holiday (block). Else fall back to UAE-wide (company_id null).
+  -- D-14: PROVISIONAL and CONFIRMED both count as non-business days.
+  select exists (
+    select 1 from public_holidays
+     where holiday_date = p_date
+       and company_id = p_company_id
+  ) into v_has_company_holiday;
+
+  if v_has_company_holiday then
+    return false;
+  end if;
+
+  select exists (
+    select 1 from public_holidays
+     where holiday_date = p_date
+       and company_id is null
+  ) into v_has_uae_holiday;
+
+  if v_has_uae_holiday then
+    return false;
+  end if;
+
+  return true;
+end;
+$$;
+
+-- [feature-spec-1_1_D.md §4.5a / D-10] Return the date N business days after
+-- p_start_date (p_start_date itself is not counted). Always lands on a
+-- business day; n <= 0 returns p_start_date unchanged.
+create or replace function add_business_days(
+  p_company_id uuid,
+  p_start_date date,
+  p_n integer
+)
+returns date
+language plpgsql
+stable
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  v_current date;
+  v_remaining integer;
+begin
+  if p_company_id is null or p_start_date is null then
+    raise exception 'COMPANY_ID_AND_DATE_REQUIRED';
+  end if;
+  if p_n is null then
+    raise exception 'N_REQUIRED';
+  end if;
+
+  if p_n <= 0 then
+    return p_start_date;
+  end if;
+
+  v_current := p_start_date;
+  v_remaining := p_n;
+
+  while v_remaining > 0 loop
+    v_current := v_current + 1;
+    if is_business_day(p_company_id, v_current) then
+      v_remaining := v_remaining - 1;
+    end if;
+  end loop;
+
+  return v_current;
+end;
+$$;
+
+revoke all on function is_business_day(uuid, date) from public;
+revoke all on function is_business_day(uuid, date) from authenticated;
+revoke all on function is_business_day(uuid, date) from anon;
+grant execute on function is_business_day(uuid, date) to service_role;
+
+revoke all on function add_business_days(uuid, date, integer) from public;
+revoke all on function add_business_days(uuid, date, integer) from authenticated;
+revoke all on function add_business_days(uuid, date, integer) from anon;
+grant execute on function add_business_days(uuid, date, integer) to service_role;
+
+-- ============================================================================
+-- 7g. Module 1.1.D — payment / advance ledger posting
+--     (feature-spec-1_1_D.md §4.2, §4.3 / D-1, D-6, D-7, D-12)
+--
+-- [D-1] One `payments` table serves both invoice receipts and advances. The
+-- credit account at receipt time depends on whether payment_applications
+-- rows exist when we post — not on which table the row lives in:
+--   applications present → Cr 1100 AR, entry_type customer_payment (§4.2)
+--   no applications      → Cr 2060 advances, entry_type advance_receipt (§4.3)
+-- Later application of an advance posts a second, cash-free reclass
+-- (Dr 2060, Cr 1100, entry_type advance_application) — §4.3.
+-- ============================================================================
+
+-- [feature-spec-1_1_D.md §4.2 / D-12] Debit account: bank_account_id override,
+-- else payment_method routing (cash 1010; card/pos 1070; bank_transfer/cheque/
+-- other → company_settings.default_bank_account_id, falling back to 1020).
+create or replace function resolve_payment_debit_account_id(
+  p_company_id uuid,
+  p_bank_account_id uuid,
+  p_payment_method payment_method_type
+)
+returns uuid
+language plpgsql
+stable
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  v_account_id uuid;
+  v_default_bank uuid;
+  v_number text;
+begin
+  if p_company_id is null then
+    raise exception 'COMPANY_ID_REQUIRED';
+  end if;
+
+  if p_bank_account_id is not null then
+    select id into v_account_id
+      from accounts
+     where id = p_bank_account_id
+       and company_id = p_company_id
+       and is_active = true;
+    if v_account_id is null then
+      raise exception 'PAYMENT_BANK_ACCOUNT_INVALID';
+    end if;
+    return v_account_id;
+  end if;
+
+  if p_payment_method is null then
+    raise exception 'PAYMENT_METHOD_REQUIRED';
+  end if;
+
+  v_number := case p_payment_method
+    when 'cash' then '1010'
+    when 'card' then '1070'
+    when 'pos' then '1070'
+    else null
+  end;
+
+  if v_number is not null then
+    select id into v_account_id
+      from accounts
+     where company_id = p_company_id
+       and account_number = v_number
+       and is_active = true;
+    if v_account_id is null then
+      raise exception 'PAYMENT_DEBIT_ACCOUNT_NOT_FOUND';
+    end if;
+    return v_account_id;
+  end if;
+
+  -- bank_transfer, cheque, other → default bank (D-6 / D-12)
+  select default_bank_account_id into v_default_bank
+    from company_settings
+   where company_id = p_company_id;
+
+  if v_default_bank is not null then
+    select id into v_account_id
+      from accounts
+     where id = v_default_bank
+       and company_id = p_company_id
+       and is_active = true;
+    if v_account_id is not null then
+      return v_account_id;
+    end if;
+  end if;
+
+  select id into v_account_id
+    from accounts
+   where company_id = p_company_id
+     and account_number = '1020'
+     and is_active = true;
+  if v_account_id is null then
+    raise exception 'PAYMENT_DEBIT_ACCOUNT_NOT_FOUND';
+  end if;
+  return v_account_id;
+end;
+$$;
+
+-- [feature-spec-1_1_D.md §4.2 / §4.3 / D-1] Post the payment *receipt* journal
+-- once (not per application). Credit side switches on applications-at-post-time.
+create or replace function create_payment_journal_entry(
+  p_payment_id uuid,
+  p_created_by uuid
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  v_payment          payments%rowtype;
+  v_period           accounting_periods%rowtype;
+  v_entry_number     bigint;
+  v_entry            journal_entries%rowtype;
+  v_lines            jsonb;
+  v_debit_id         uuid;
+  v_credit_id        uuid;
+  v_credit_number    text;
+  v_entry_type       journal_entry_type;
+  v_has_applications boolean;
+  v_ref              text;
+  v_narration        text;
+begin
+  if p_created_by is null then
+    raise exception 'CREATED_BY_REQUIRED';
+  end if;
+
+  select * into v_payment from payments where id = p_payment_id for update;
+  if not found then
+    raise exception 'PAYMENT_NOT_FOUND';
+  end if;
+
+  if v_payment.journal_entry_id is not null then
+    raise exception 'PAYMENT_JOURNAL_ALREADY_POSTED';
+  end if;
+
+  -- [D-1] Same payments row: credit account depends on applications at post time.
+  select exists (
+    select 1 from payment_applications where payment_id = p_payment_id
+  ) into v_has_applications;
+
+  if v_has_applications then
+    -- §4.2 invoice receipt: Dr routed bank/cash, Cr 1100 AR
+    v_entry_type := 'customer_payment';
+    v_credit_number := '1100';
+    v_narration := 'Customer payment';
+  else
+    -- §4.3 advance receipt: Dr bank, Cr 2060 Customer Advances (D-7)
+    v_entry_type := 'advance_receipt';
+    v_credit_number := '2060';
+    v_narration := 'Customer advance receipt';
+  end if;
+
+  v_debit_id := resolve_payment_debit_account_id(
+    v_payment.company_id,
+    v_payment.bank_account_id,
+    v_payment.payment_method
+  );
+
+  select id into v_credit_id
+    from accounts
+   where company_id = v_payment.company_id
+     and account_number = v_credit_number
+     and is_active = true;
+  if v_credit_id is null then
+    raise exception 'PAYMENT_POSTING_ACCOUNT_NOT_FOUND';
+  end if;
+
+  select * into v_period
+    from accounting_periods
+   where company_id = v_payment.company_id
+     and status = 'open'
+     and period_start <= v_payment.payment_date
+     and period_end > v_payment.payment_date
+   order by period_start
+   limit 1;
+
+  if not found then
+    raise exception 'NO_OPEN_PERIOD_FOR_PAYMENT_DATE';
+  end if;
+
+  v_ref := coalesce(
+    nullif(btrim(v_payment.reference_number), ''),
+    'pay:' || v_payment.id::text
+  );
+
+  v_entry_number := allocate_next_entry_number(v_payment.company_id);
+
+  insert into journal_entries (
+    company_id,
+    entry_number,
+    period_id,
+    entry_date,
+    entry_type,
+    status,
+    narration,
+    reference_number,
+    created_by
+  ) values (
+    v_payment.company_id,
+    v_entry_number,
+    v_period.id,
+    v_payment.payment_date,
+    v_entry_type,
+    'draft',
+    v_narration || ' ' || v_ref,
+    v_ref,
+    p_created_by
+  )
+  returning * into v_entry;
+
+  insert into journal_lines (
+    journal_entry_id, line_number, account_id, debit, credit, description
+  ) values (
+    v_entry.id, 1, v_debit_id, v_payment.amount, 0, 'Payment receipt debit'
+  );
+
+  insert into journal_lines (
+    journal_entry_id, line_number, account_id, debit, credit, description
+  ) values (
+    v_entry.id, 2, v_credit_id, 0, v_payment.amount,
+    case
+      when v_entry_type = 'customer_payment' then 'Accounts Receivable - Trade'
+      else 'Customer Advances / Deposits Received'
+    end
+  );
+
+  update journal_entries
+     set status = 'posted'
+   where id = v_entry.id
+     and status = 'draft'
+  returning * into v_entry;
+
+  if not found then
+    raise exception 'Failed to post payment entry %', v_entry_number;
+  end if;
+
+  update payments
+     set journal_entry_id = v_entry.id,
+         updated_at = now()
+   where id = p_payment_id;
+
+  select coalesce(jsonb_agg(to_jsonb(jl) order by jl.line_number), '[]'::jsonb)
+    into v_lines
+    from journal_lines jl
+   where jl.journal_entry_id = v_entry.id;
+
+  return jsonb_build_object(
+    'entry', to_jsonb(v_entry),
+    'lines', v_lines,
+    'journal_entry_id', v_entry.id,
+    'entry_type', v_entry_type::text
+  );
+end;
+$$;
+
+-- [feature-spec-1_1_D.md §4.3] Cash-free reclass when an advance is applied to
+-- an invoice: Dr 2060, Cr 1100 for applied_amount. Does not touch the original
+-- advance_receipt journal. Invoice amount_paid / status: trg_refresh_invoice_amount_paid_from_applications (§4.1).
+create or replace function create_advance_application_journal_entry(
+  p_payment_application_id uuid,
+  p_created_by uuid
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  v_app              payment_applications%rowtype;
+  v_payment          payments%rowtype;
+  v_receipt_type     journal_entry_type;
+  v_period           accounting_periods%rowtype;
+  v_entry_number     bigint;
+  v_entry            journal_entries%rowtype;
+  v_lines            jsonb;
+  v_advances_id      uuid;
+  v_ar_id            uuid;
+  v_entry_date       date;
+  v_ref              text;
+begin
+  if p_created_by is null then
+    raise exception 'CREATED_BY_REQUIRED';
+  end if;
+
+  select * into v_app from payment_applications where id = p_payment_application_id;
+  if not found then
+    raise exception 'PAYMENT_APPLICATION_NOT_FOUND';
+  end if;
+
+  select * into v_payment from payments where id = v_app.payment_id for update;
+  if not found then
+    raise exception 'PAYMENT_NOT_FOUND';
+  end if;
+
+  if v_payment.journal_entry_id is null then
+    raise exception 'ADVANCE_RECEIPT_NOT_POSTED';
+  end if;
+
+  select entry_type into v_receipt_type
+    from journal_entries
+   where id = v_payment.journal_entry_id;
+  if v_receipt_type is distinct from 'advance_receipt' then
+    raise exception 'PAYMENT_NOT_ADVANCE_RECEIPT';
+  end if;
+
+  -- Idempotency: no journal_entry_id on payment_applications (§3.3) — use
+  -- reference_number prefix to block double-post of the same application.
+  v_ref := 'paa:' || v_app.id::text;
+  if exists (
+    select 1 from journal_entries
+     where company_id = v_payment.company_id
+       and entry_type = 'advance_application'
+       and reference_number = v_ref
+  ) then
+    raise exception 'ADVANCE_APPLICATION_JOURNAL_ALREADY_POSTED';
+  end if;
+
+  select id into v_advances_id
+    from accounts
+   where company_id = v_payment.company_id
+     and account_number = '2060'
+     and is_active = true;
+  if v_advances_id is null then
+    raise exception 'PAYMENT_POSTING_ACCOUNT_NOT_FOUND';
+  end if;
+
+  select id into v_ar_id
+    from accounts
+   where company_id = v_payment.company_id
+     and account_number = '1100'
+     and is_active = true;
+  if v_ar_id is null then
+    raise exception 'PAYMENT_POSTING_ACCOUNT_NOT_FOUND';
+  end if;
+
+  v_entry_date := v_app.applied_at::date;
+
+  select * into v_period
+    from accounting_periods
+   where company_id = v_payment.company_id
+     and status = 'open'
+     and period_start <= v_entry_date
+     and period_end > v_entry_date
+   order by period_start
+   limit 1;
+
+  if not found then
+    raise exception 'NO_OPEN_PERIOD_FOR_APPLICATION_DATE';
+  end if;
+
+  v_entry_number := allocate_next_entry_number(v_payment.company_id);
+
+  insert into journal_entries (
+    company_id,
+    entry_number,
+    period_id,
+    entry_date,
+    entry_type,
+    status,
+    narration,
+    reference_number,
+    created_by
+  ) values (
+    v_payment.company_id,
+    v_entry_number,
+    v_period.id,
+    v_entry_date,
+    'advance_application',
+    'draft',
+    'Advance application ' || v_ref,
+    v_ref,
+    p_created_by
+  )
+  returning * into v_entry;
+
+  insert into journal_lines (
+    journal_entry_id, line_number, account_id, debit, credit, description
+  ) values (
+    v_entry.id, 1, v_advances_id, v_app.applied_amount, 0,
+    'Customer Advances / Deposits Received'
+  );
+
+  insert into journal_lines (
+    journal_entry_id, line_number, account_id, debit, credit, description
+  ) values (
+    v_entry.id, 2, v_ar_id, 0, v_app.applied_amount,
+    'Accounts Receivable - Trade'
+  );
+
+  update journal_entries
+     set status = 'posted'
+   where id = v_entry.id
+     and status = 'draft'
+  returning * into v_entry;
+
+  if not found then
+    raise exception 'Failed to post advance application entry %', v_entry_number;
+  end if;
+
+  select coalesce(jsonb_agg(to_jsonb(jl) order by jl.line_number), '[]'::jsonb)
+    into v_lines
+    from journal_lines jl
+   where jl.journal_entry_id = v_entry.id;
+
+  return jsonb_build_object(
+    'entry', to_jsonb(v_entry),
+    'lines', v_lines,
+    'journal_entry_id', v_entry.id
+  );
+end;
+$$;
+
+revoke all on function resolve_payment_debit_account_id(uuid, uuid, payment_method_type) from public;
+revoke all on function resolve_payment_debit_account_id(uuid, uuid, payment_method_type) from authenticated;
+revoke all on function resolve_payment_debit_account_id(uuid, uuid, payment_method_type) from anon;
+grant execute on function resolve_payment_debit_account_id(uuid, uuid, payment_method_type) to service_role;
+
+revoke all on function create_payment_journal_entry(uuid, uuid) from public;
+revoke all on function create_payment_journal_entry(uuid, uuid) from authenticated;
+revoke all on function create_payment_journal_entry(uuid, uuid) from anon;
+grant execute on function create_payment_journal_entry(uuid, uuid) to service_role;
+
+revoke all on function create_advance_application_journal_entry(uuid, uuid) from public;
+revoke all on function create_advance_application_journal_entry(uuid, uuid) from authenticated;
+revoke all on function create_advance_application_journal_entry(uuid, uuid) from anon;
+grant execute on function create_advance_application_journal_entry(uuid, uuid) to service_role;
+
+-- [feature-spec-1_1_D.md §4.4 / D-8 / D-9]
+-- Write off remaining unpaid balance: Dr 1110 (and Dr 5640 for shortfall), Cr 1100.
+-- Creates draft write_off JE + write_offs row + sets invoices.status = written_off.
+-- Nest posts the draft via A's threshold path (D-11: write_off_approval_threshold).
+-- Undo: reverse_journal_entry on the JE — no bespoke undo.
+create or replace function create_invoice_write_off(
+  p_invoice_id uuid,
+  p_created_by uuid,
+  p_reason text,
+  p_debtor_notified_at date default null
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  v_invoice            invoices%rowtype;
+  v_period             accounting_periods%rowtype;
+  v_entry_number       bigint;
+  v_entry              journal_entries%rowtype;
+  v_write_off          write_offs%rowtype;
+  v_lines              jsonb;
+  v_ar_id              uuid;
+  v_allowance_id       uuid;
+  v_expense_id         uuid;
+  v_allowance_nb       normal_balance_type;
+  v_write_off_amount   numeric(18,2);
+  v_allowance_balance  numeric(18,2);
+  v_from_allowance     numeric(18,2);
+  v_shortfall          numeric(18,2);
+  v_line_number        int := 0;
+  v_entry_date         date := current_date;
+  v_ref                text;
+begin
+  if p_created_by is null then
+    raise exception 'CREATED_BY_REQUIRED';
+  end if;
+
+  if p_reason is null or btrim(p_reason) = '' then
+    raise exception 'WRITE_OFF_REASON_REQUIRED';
+  end if;
+
+  perform pg_advisory_xact_lock(hashtext('wof:' || p_invoice_id::text));
+
+  select * into v_invoice from invoices where id = p_invoice_id for update;
+  if not found then
+    raise exception 'INVOICE_NOT_FOUND';
+  end if;
+
+  -- [§4.4] Available only for issued / overdue / partially_paid.
+  if v_invoice.status not in ('issued', 'overdue', 'partially_paid') then
+    raise exception 'INVOICE_NOT_OPEN_FOR_WRITE_OFF';
+  end if;
+
+  if exists (select 1 from write_offs where invoice_id = p_invoice_id) then
+    raise exception 'INVOICE_ALREADY_WRITTEN_OFF';
+  end if;
+
+  v_write_off_amount := round((v_invoice.grand_total - v_invoice.amount_paid)::numeric, 2);
+  if v_write_off_amount <= 0 then
+    raise exception 'WRITE_OFF_NOTHING_DUE';
+  end if;
+
+  select id into v_ar_id
+    from accounts
+   where company_id = v_invoice.company_id
+     and account_number = '1100'
+     and is_active = true;
+  if v_ar_id is null then
+    raise exception 'WRITE_OFF_POSTING_ACCOUNT_NOT_FOUND';
+  end if;
+
+  select id, normal_balance into v_allowance_id, v_allowance_nb
+    from accounts
+   where company_id = v_invoice.company_id
+     and account_number = '1110'
+     and is_active = true;
+  if v_allowance_id is null then
+    raise exception 'WRITE_OFF_POSTING_ACCOUNT_NOT_FOUND';
+  end if;
+
+  select id into v_expense_id
+    from accounts
+   where company_id = v_invoice.company_id
+     and account_number = '5640'
+     and is_active = true;
+  if v_expense_id is null then
+    raise exception 'WRITE_OFF_POSTING_ACCOUNT_NOT_FOUND';
+  end if;
+
+  -- Current 1110 credit balance (allowance available to draw down).
+  select coalesce(
+           account_signed_balance(
+             v_allowance_nb,
+             sum(jl.debit),
+             sum(jl.credit)
+           ),
+           0
+         )
+    into v_allowance_balance
+    from journal_lines jl
+    join journal_entries je on je.id = jl.journal_entry_id
+   where jl.account_id = v_allowance_id
+     and is_ledger_truth_status(je.status);
+
+  v_allowance_balance := greatest(coalesce(v_allowance_balance, 0), 0);
+  v_from_allowance := least(v_write_off_amount, v_allowance_balance);
+  v_shortfall := round((v_write_off_amount - v_from_allowance)::numeric, 2);
+
+  select * into v_period
+    from accounting_periods
+   where company_id = v_invoice.company_id
+     and status = 'open'
+     and period_start <= v_entry_date
+     and period_end > v_entry_date
+   order by period_start
+   limit 1;
+
+  if not found then
+    raise exception 'NO_OPEN_PERIOD_FOR_WRITE_OFF_DATE';
+  end if;
+
+  v_ref := 'wof:' || p_invoice_id::text;
+  v_entry_number := allocate_next_entry_number(v_invoice.company_id);
+
+  insert into journal_entries (
+    company_id,
+    entry_number,
+    period_id,
+    entry_date,
+    entry_type,
+    status,
+    narration,
+    reference_number,
+    created_by
+  ) values (
+    v_invoice.company_id,
+    v_entry_number,
+    v_period.id,
+    v_entry_date,
+    'write_off',
+    'draft',
+    'Bad debt write-off ' || v_ref,
+    v_ref,
+    p_created_by
+  )
+  returning * into v_entry;
+
+  -- [D-8 / §4.4] Primary: Dr 1110 Allowance, Cr 1100 AR — no P&L when provision covers it.
+  if v_from_allowance > 0 then
+    v_line_number := v_line_number + 1;
+    insert into journal_lines (
+      journal_entry_id, line_number, account_id, debit, credit, description
+    ) values (
+      v_entry.id, v_line_number, v_allowance_id, v_from_allowance, 0,
+      'Allowance for Expected Credit Losses'
+    );
+  end if;
+
+  -- [§4.4 corner case] Undersized 1110 provision: shortfall posts Dr 5640 Bad Debt
+  -- Expense directly (not a silent rounding fix — explicit when allowance is short).
+  if v_shortfall > 0 then
+    v_line_number := v_line_number + 1;
+    insert into journal_lines (
+      journal_entry_id, line_number, account_id, debit, credit, description
+    ) values (
+      v_entry.id, v_line_number, v_expense_id, v_shortfall, 0,
+      'Bad Debt Expense (ECL) — allowance shortfall'
+    );
+  end if;
+
+  v_line_number := v_line_number + 1;
+  insert into journal_lines (
+    journal_entry_id, line_number, account_id, debit, credit, description
+  ) values (
+    v_entry.id, v_line_number, v_ar_id, 0, v_write_off_amount,
+    'Accounts Receivable - Trade'
+  );
+
+  insert into write_offs (
+    company_id,
+    customer_id,
+    invoice_id,
+    amount,
+    reason,
+    journal_entry_id,
+    debtor_notified_at,
+    created_by
+  ) values (
+    v_invoice.company_id,
+    v_invoice.customer_id,
+    p_invoice_id,
+    v_write_off_amount,
+    btrim(p_reason),
+    v_entry.id,
+    p_debtor_notified_at,
+    p_created_by
+  )
+  returning * into v_write_off;
+
+  update invoices
+     set status = 'written_off',
+         updated_at = now()
+   where id = p_invoice_id;
+
+  select coalesce(jsonb_agg(to_jsonb(jl) order by jl.line_number), '[]'::jsonb)
+    into v_lines
+    from journal_lines jl
+   where jl.journal_entry_id = v_entry.id;
+
+  return jsonb_build_object(
+    'write_off', to_jsonb(v_write_off),
+    'entry', to_jsonb(v_entry),
+    'lines', v_lines,
+    'journal_entry_id', v_entry.id
+  );
+end;
+$$;
+
+revoke all on function create_invoice_write_off(uuid, uuid, text, date) from public;
+revoke all on function create_invoice_write_off(uuid, uuid, text, date) from authenticated;
+revoke all on function create_invoice_write_off(uuid, uuid, text, date) from anon;
+grant execute on function create_invoice_write_off(uuid, uuid, text, date) to service_role;
+
+-- [feature-spec-1_1_D.md §4.5a / D-8 / D-10 / D-15]
+-- Monthly ECL provisioning run. Callable RPC only — D-P11 wires T+5 schedule.
+-- Guards: ecl: advisory lock, unique (company_id, period_end_date), period not closed.
+create or replace function run_ecl_provision(
+  p_company_id uuid,
+  p_period_end_date date,
+  p_created_by uuid
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  v_period              accounting_periods%rowtype;
+  v_as_of               date;
+  v_required            numeric(18,2) := 0;
+  v_prior               numeric(18,2) := 0;
+  v_adjustment          numeric(18,2);
+  v_allowance_id        uuid;
+  v_expense_id          uuid;
+  v_allowance_nb        normal_balance_type;
+  v_entry_number        bigint;
+  v_entry               journal_entries%rowtype;
+  v_journal_entry_id    uuid := null;
+  v_run                 ecl_provision_runs%rowtype;
+  v_lines               jsonb := '[]'::jsonb;
+  v_ref                 text;
+  v_missing_bucket      text;
+begin
+  if p_company_id is null then
+    raise exception 'COMPANY_ID_REQUIRED';
+  end if;
+  if p_period_end_date is null then
+    raise exception 'PERIOD_END_DATE_REQUIRED';
+  end if;
+  if p_created_by is null then
+    raise exception 'CREATED_BY_REQUIRED';
+  end if;
+
+  -- [§3.7 / §4.5a] Serialize concurrent runs for one company.
+  perform acquire_ecl_provision_lock(p_company_id);
+
+  if exists (
+    select 1 from ecl_provision_runs
+     where company_id = p_company_id
+       and period_end_date = p_period_end_date
+  ) then
+    raise exception 'ECL_PROVISION_ALREADY_RUN';
+  end if;
+
+  -- D-15: one calendar month per period; match by month start.
+  select * into v_period
+    from accounting_periods
+   where company_id = p_company_id
+     and period_start = date_trunc('month', p_period_end_date)::date;
+
+  if not found then
+    raise exception 'ACCOUNTING_PERIOD_NOT_FOUND';
+  end if;
+
+  -- [D-10] Loud refuse if already hard-closed — reuse period-status check, not a new workflow.
+  if v_period.status = 'closed' then
+    raise exception 'ACCOUNTING_PERIOD_CLOSED';
+  end if;
+
+  v_as_of := p_period_end_date;
+
+  select id, normal_balance into v_allowance_id, v_allowance_nb
+    from accounts
+   where company_id = p_company_id
+     and account_number = '1110'
+     and is_active = true;
+  if v_allowance_id is null then
+    raise exception 'ECL_POSTING_ACCOUNT_NOT_FOUND';
+  end if;
+
+  select id into v_expense_id
+    from accounts
+   where company_id = p_company_id
+     and account_number = '5640'
+     and is_active = true;
+  if v_expense_id is null then
+    raise exception 'ECL_POSTING_ACCOUNT_NOT_FOUND';
+  end if;
+
+  -- Active rates: latest effective_from <= as_of per bucket (§4.5a / §3.4a).
+  -- Rates are provisional industry midpoints until recalibrated (seed comment).
+  with active_rates as (
+    select distinct on (bucket) bucket, loss_rate
+      from ecl_loss_rate_policies
+     where company_id = p_company_id
+       and effective_from <= v_as_of
+     order by bucket, effective_from desc
+  ),
+  open_invoices as (
+    select
+      i.customer_id,
+      c.ecl_override_rate,
+      (i.grand_total - i.amount_paid)::numeric(18,2) as outstanding,
+      case
+        when i.due_date is null or (v_as_of - i.due_date) <= 0 then 'current'
+        when (v_as_of - i.due_date) between 1 and 30 then '0_30'
+        when (v_as_of - i.due_date) between 31 and 60 then '31_60'
+        when (v_as_of - i.due_date) between 61 and 90 then '61_90'
+        else '90_plus'
+      end as bucket
+      from invoices i
+      join customers c on c.id = i.customer_id
+     where i.company_id = p_company_id
+       and i.status in ('issued', 'overdue', 'partially_paid')
+       and i.amount_paid < i.grand_total
+  ),
+  -- Override customers: single rate × whole outstanding (step 2).
+  override_allowance as (
+    select coalesce(sum(round(oi.outstanding * oi.ecl_override_rate, 2)), 0)::numeric(18,2) as amt
+      from open_invoices oi
+     where oi.ecl_override_rate is not null
+  ),
+  -- Non-override: D-5 buckets × active policy rates (step 1).
+  bucketed as (
+    select oi.bucket, sum(oi.outstanding)::numeric(18,2) as bal
+      from open_invoices oi
+     where oi.ecl_override_rate is null
+     group by oi.bucket
+  ),
+  bucket_allowance as (
+    select coalesce(sum(round(b.bal * r.loss_rate, 2)), 0)::numeric(18,2) as amt
+      from bucketed b
+      join active_rates r on r.bucket = b.bucket
+  )
+  select
+    (select amt from override_allowance) + (select amt from bucket_allowance),
+    (
+      select b.bucket
+        from bucketed b
+       where not exists (select 1 from active_rates r where r.bucket = b.bucket)
+       limit 1
+    )
+    into v_required, v_missing_bucket;
+
+  if v_missing_bucket is not null then
+    raise exception 'ECL_LOSS_RATE_MISSING';
+  end if;
+
+  -- Current 1110 credit balance = prior_allowance (step 3).
+  select coalesce(
+           account_signed_balance(v_allowance_nb, sum(jl.debit), sum(jl.credit)),
+           0
+         )
+    into v_prior
+    from journal_lines jl
+    join journal_entries je on je.id = jl.journal_entry_id
+   where jl.account_id = v_allowance_id
+     and is_ledger_truth_status(je.status);
+
+  v_prior := greatest(coalesce(v_prior, 0), 0);
+  v_required := coalesce(v_required, 0);
+  v_adjustment := round((v_required - v_prior)::numeric, 2);
+
+  -- Step 4: post only when adjustment <> 0. D-11: ecl_provision is non-blocking — post directly.
+  if v_adjustment <> 0 then
+    v_ref := 'ecl:' || p_company_id::text || ':' || p_period_end_date::text;
+    v_entry_number := allocate_next_entry_number(p_company_id);
+
+    insert into journal_entries (
+      company_id, entry_number, period_id, entry_date, entry_type, status,
+      narration, reference_number, created_by
+    ) values (
+      p_company_id, v_entry_number, v_period.id, v_as_of, 'ecl_provision', 'draft',
+      'ECL provision ' || v_ref, v_ref, p_created_by
+    )
+    returning * into v_entry;
+
+    if v_adjustment > 0 then
+      -- Top-up: Dr 5640, Cr 1110
+      insert into journal_lines (
+        journal_entry_id, line_number, account_id, debit, credit, description
+      ) values
+        (v_entry.id, 1, v_expense_id, v_adjustment, 0, 'Bad Debt Expense (ECL)'),
+        (v_entry.id, 2, v_allowance_id, 0, v_adjustment, 'Allowance for Expected Credit Losses');
+    else
+      -- Release: Dr 1110, Cr 5640
+      insert into journal_lines (
+        journal_entry_id, line_number, account_id, debit, credit, description
+      ) values
+        (v_entry.id, 1, v_allowance_id, abs(v_adjustment), 0, 'Allowance for Expected Credit Losses'),
+        (v_entry.id, 2, v_expense_id, 0, abs(v_adjustment), 'Bad Debt Expense (ECL)');
+    end if;
+
+    update journal_entries
+       set status = 'posted'
+     where id = v_entry.id
+       and status = 'draft'
+    returning * into v_entry;
+
+    if not found then
+      raise exception 'Failed to post ECL provision entry %', v_entry_number;
+    end if;
+
+    v_journal_entry_id := v_entry.id;
+
+    select coalesce(jsonb_agg(to_jsonb(jl) order by jl.line_number), '[]'::jsonb)
+      into v_lines
+      from journal_lines jl
+     where jl.journal_entry_id = v_entry.id;
+  end if;
+
+  -- Step 5: record run; reviewed_by is null at post time (does not gate).
+  insert into ecl_provision_runs (
+    company_id,
+    period_end_date,
+    required_allowance,
+    prior_allowance,
+    adjustment_amount,
+    journal_entry_id,
+    created_by
+  ) values (
+    p_company_id,
+    p_period_end_date,
+    v_required,
+    v_prior,
+    v_adjustment,
+    v_journal_entry_id,
+    p_created_by
+  )
+  returning * into v_run;
+
+  return jsonb_build_object(
+    'run', to_jsonb(v_run),
+    'entry', case when v_journal_entry_id is null then null else to_jsonb(v_entry) end,
+    'lines', v_lines,
+    'journal_entry_id', v_journal_entry_id
+  );
+end;
+$$;
+
+revoke all on function run_ecl_provision(uuid, date, uuid) from public;
+revoke all on function run_ecl_provision(uuid, date, uuid) from authenticated;
+revoke all on function run_ecl_provision(uuid, date, uuid) from anon;
+grant execute on function run_ecl_provision(uuid, date, uuid) to service_role;
+
+-- [feature-spec-1_1_D.md §4.5b]
+-- Flag write_offs for VAT relief once 6 months past supply date + debtor notified.
+-- Sets the flag only — Module F owns VAT-201 filing. Same schedule pattern as
+-- mark_overdue_invoices (callable RPC; D-P11 wires cron).
+create or replace function mark_vat_relief_eligible(
+  p_company_id uuid,
+  p_as_of_date date default current_date
+)
+returns int
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  v_count int;
+  v_as_of date;
+begin
+  if p_company_id is null then
+    raise exception 'COMPANY_ID_REQUIRED';
+  end if;
+
+  v_as_of := coalesce(p_as_of_date, current_date);
+
+  perform pg_advisory_xact_lock(hashtext('vrl:' || p_company_id::text));
+
+  update write_offs wo
+     set vat_relief_eligible = true,
+         vat_relief_flagged_at = now()
+    from invoices i
+   where wo.invoice_id = i.id
+     and wo.company_id = p_company_id
+     and wo.vat_relief_eligible = false
+     and wo.debtor_notified_at is not null
+     and i.invoice_date <= (v_as_of - interval '6 months')::date;
+
+  get diagnostics v_count = row_count;
+  return v_count;
+end;
+$$;
+
+revoke all on function mark_vat_relief_eligible(uuid, date) from public;
+revoke all on function mark_vat_relief_eligible(uuid, date) from authenticated;
+revoke all on function mark_vat_relief_eligible(uuid, date) from anon;
+grant execute on function mark_vat_relief_eligible(uuid, date) to service_role;
 
 -- ============================================================================
 -- 8. ROW-LEVEL SECURITY (multi-tenant isolation)

@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { AuthModule } from '../auth/auth.module';
 import { DatabaseModule } from '../database/database.module';
+import { JournalEntriesModule } from '../journal-entries/journal-entries.module';
 import { InvoiceLinesController } from './invoice-lines.controller';
 import { INVOICES_REPOSITORY } from './invoices.repository';
 import { SupabaseInvoicesRepository } from './invoices.repository.supabase';
@@ -8,7 +9,7 @@ import { InvoicesController } from './invoices.controller';
 import { InvoicesService } from './invoices.service';
 
 @Module({
-  imports: [AuthModule, DatabaseModule],
+  imports: [AuthModule, DatabaseModule, JournalEntriesModule],
   controllers: [InvoicesController, InvoiceLinesController],
   providers: [
     InvoicesService,

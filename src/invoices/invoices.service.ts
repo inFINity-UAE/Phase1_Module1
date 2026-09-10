@@ -5,6 +5,8 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { handleDatabaseError } from '../common/errors/database-error.mapper';
+import { CompanyRole } from '../common/enums/company-role.enum';
+import { JournalEntriesService } from '../journal-entries/journal-entries.service';
 import { InvoiceStatus } from './common/enums/invoice-status.enum';
 import { InvoiceType } from './common/enums/invoice-type.enum';
 import { PaymentTermsType } from './common/enums/payment-terms-type.enum';
@@ -14,6 +16,7 @@ import { IssueInvoiceDto } from './dto/issue-invoice.dto';
 import { UpdateInvoiceLineDto } from './dto/update-invoice-line.dto';
 import { UpdateInvoiceDto } from './dto/update-invoice.dto';
 import { VoidInvoiceDto } from './dto/void-invoice.dto';
+import { WriteOffInvoiceDto } from './dto/write-off-invoice.dto';
 import { InvoiceIssueResult, InvoiceVoidResult } from './entities/invoice-with-lines.entity';
 import { InvoiceLine } from './entities/invoice-line.entity';
 import { InvoiceWithLines } from './entities/invoice-with-lines.entity';
@@ -22,10 +25,10 @@ import { INVOICES_REPOSITORY, InvoicesRepository } from './invoices.repository';
 
 const STATUS_TRANSITIONS: Record<InvoiceStatus, InvoiceStatus[]> = {
   [InvoiceStatus.Draft]: [InvoiceStatus.Issued],
-  [InvoiceStatus.Issued]: [InvoiceStatus.Sent, InvoiceStatus.Void],
+  [InvoiceStatus.Issued]: [InvoiceStatus.Sent, InvoiceStatus.Void, InvoiceStatus.WrittenOff],
   [InvoiceStatus.Sent]: [InvoiceStatus.Viewed, InvoiceStatus.Void],
-  [InvoiceStatus.Viewed]: [InvoiceStatus.WrittenOff, InvoiceStatus.Void],
-  [InvoiceStatus.PartiallyPaid]: [],
+  [InvoiceStatus.Viewed]: [InvoiceStatus.Void],
+  [InvoiceStatus.PartiallyPaid]: [InvoiceStatus.WrittenOff],
   [InvoiceStatus.Paid]: [],
   [InvoiceStatus.Overdue]: [InvoiceStatus.Void, InvoiceStatus.WrittenOff],
   [InvoiceStatus.WrittenOff]: [],
@@ -37,6 +40,7 @@ export class InvoicesService {
   constructor(
     @Inject(INVOICES_REPOSITORY)
     private readonly invoicesRepository: InvoicesRepository,
+    private readonly journalEntriesService: JournalEntriesService,
   ) {}
 
   async create(dto: CreateInvoiceDto, createdBy: string): Promise<InvoiceWithLines> {
@@ -193,11 +197,41 @@ export class InvoicesService {
   }
 
   /**
-   * ponytail: status flip only — no bad-debt journal or amount_paid change.
-   * Ceiling: 1100 still shows the receivable. Upgrade: Module D write-off RPC.
+   * [feature-spec-1_1_D.md §4.4 / D-8 / D-9 / D-11]
+   * Creates write_offs + draft write_off JE, then posts via A's threshold path
+   * (write_off_approval_threshold). Undo = reverse_journal_entry.
    */
-  async writeOff(id: string): Promise<InvoiceWithLines> {
-    return this.transition(id, InvoiceStatus.WrittenOff);
+  async writeOff(
+    id: string,
+    dto: WriteOffInvoiceDto,
+    userId: string,
+    role?: CompanyRole,
+  ): Promise<InvoiceWithLines> {
+    const current = await this.findOne(id);
+    const allowed = STATUS_TRANSITIONS[current.invoice.status] ?? [];
+    if (!allowed.includes(InvoiceStatus.WrittenOff)) {
+      throw new BadRequestException(
+        `Cannot transition invoice from ${current.invoice.status} to ${InvoiceStatus.WrittenOff}`,
+      );
+    }
+
+    try {
+      const result = await this.invoicesRepository.writeOffInvoice(
+        id,
+        userId,
+        dto.reason,
+        dto.debtor_notified_at ?? null,
+      );
+      await this.journalEntriesService.post(
+        result.journal_entry_id,
+        userId,
+        {},
+        role,
+      );
+      return this.findOne(id);
+    } catch (error) {
+      handleDatabaseError(error);
+    }
   }
 
   async createLine(dto: CreateInvoiceLineDto & { invoice_id: string }): Promise<InvoiceLine> {

@@ -145,6 +145,7 @@ describe('JournalEntriesService', () => {
   const companySettingsOpen = {
     company_id: COMPANY_ID,
     journal_approval_threshold: null,
+    write_off_approval_threshold: 5000,
     approval_threshold_currency: 'AED',
     default_period_length: 'monthly',
     allow_period_reopen: true,
@@ -867,6 +868,7 @@ describe('JournalEntriesService', () => {
     const companySettings = (threshold: number | null) => ({
       company_id: COMPANY_ID,
       journal_approval_threshold: threshold,
+      write_off_approval_threshold: 5000,
       approval_threshold_currency: 'AED',
       default_period_length: 'monthly',
       allow_period_reopen: true,
