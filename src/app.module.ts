@@ -13,6 +13,11 @@ import { JournalEntriesModule } from './journal-entries/journal-entries.module';
 import { RecurringJournalTemplatesModule } from './recurring-journal-templates/recurring-journal-templates.module';
 import { AuditLogModule } from './audit-log/audit-log.module';
 import { ReportsModule } from './reports/reports.module';
+import { SuppliersModule } from './suppliers/suppliers.module';
+import { PurchaseOrdersModule } from './purchase-orders/purchase-orders.module';
+import { GoodsReceiptsModule } from './goods-receipts/goods-receipts.module';
+import { BillsModule } from './bills/bills.module';
+import { SupplierPaymentsModule } from './supplier-payments/supplier-payments.module';
 
 @Module({
   imports: [
@@ -30,6 +35,11 @@ import { ReportsModule } from './reports/reports.module';
     RecurringJournalTemplatesModule,
     AuditLogModule,
     ReportsModule,
+    SuppliersModule,
+    PurchaseOrdersModule,
+    GoodsReceiptsModule,
+    BillsModule,
+    SupplierPaymentsModule,
   ],
 })
 export class AppModule {}

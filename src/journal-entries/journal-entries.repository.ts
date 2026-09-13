@@ -121,6 +121,12 @@ export interface JournalEntriesRepository {
     templateId: string,
     asOfDate: string,
   ): Promise<GenerateDueRecurringEntryResult>;
+  /** [feature-spec-1_1_E.md E-21] Manual GRNI accrual RPC — not a cron. */
+  accrueUnbilledReceipts(
+    companyId: string,
+    periodEndDate: string,
+    createdBy: string,
+  ): Promise<unknown>;
 }
 
 export type GenerateDueRecurringEntryResult =

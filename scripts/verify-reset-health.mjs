@@ -50,7 +50,7 @@ const hier = seed.filter((a) =>
 );
 
 const checks = [
-  ['total_count', seed.length, seed.length === 183],
+  ['total_count', seed.length, seed.length === 184],
   ['no_duplicate_account_numbers', dupN.length, dupN.length === 0],
   ['leading_digit_matches_category', badPrefix.length, badPrefix.length === 0],
   ['parent_depth_plus_one', badDepth.length, badDepth.length === 0],

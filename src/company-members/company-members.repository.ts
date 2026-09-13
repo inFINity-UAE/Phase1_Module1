@@ -18,7 +18,18 @@ export type CompanyResourceKind =
   | 'credit_note_line'
   | 'payment'
   | 'payment_application'
-  | 'public_holiday';
+  | 'public_holiday'
+  | 'supplier'
+  | 'purchase_order'
+  | 'purchase_order_line'
+  | 'goods_receipt'
+  | 'goods_receipt_line'
+  | 'bill'
+  | 'bill_line'
+  | 'supplier_payment'
+  | 'supplier_payment_application'
+  | 'supplier_payment_run'
+  | 'supplier_statement_line';
 
 export interface CompanyMembersRepository {
   findRole(userId: string, companyId: string): Promise<CompanyRole | null>;
@@ -39,4 +50,15 @@ export interface CompanyMembersRepository {
   findCompanyIdByPaymentId(paymentId: string): Promise<string | null>;
   findCompanyIdByPaymentApplicationId(applicationId: string): Promise<string | null>;
   findCompanyIdByPublicHolidayId(holidayId: string): Promise<string | null>;
+  findCompanyIdBySupplierId(supplierId: string): Promise<string | null>;
+  findCompanyIdByPurchaseOrderId(poId: string): Promise<string | null>;
+  findCompanyIdByPurchaseOrderLineId(lineId: string): Promise<string | null>;
+  findCompanyIdByGoodsReceiptId(grnId: string): Promise<string | null>;
+  findCompanyIdByGoodsReceiptLineId(lineId: string): Promise<string | null>;
+  findCompanyIdByBillId(billId: string): Promise<string | null>;
+  findCompanyIdByBillLineId(lineId: string): Promise<string | null>;
+  findCompanyIdBySupplierPaymentId(paymentId: string): Promise<string | null>;
+  findCompanyIdBySupplierPaymentApplicationId(applicationId: string): Promise<string | null>;
+  findCompanyIdBySupplierPaymentRunId(runId: string): Promise<string | null>;
+  findCompanyIdBySupplierStatementLineId(lineId: string): Promise<string | null>;
 }

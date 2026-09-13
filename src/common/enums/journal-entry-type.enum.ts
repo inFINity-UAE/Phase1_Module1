@@ -14,4 +14,10 @@ export enum JournalEntryType {
   AdvanceApplication = 'advance_application',
   WriteOff = 'write_off',
   EclProvision = 'ecl_provision',
+  // [feature-spec-1_1_E.md E-2 / §4.2 / §4.5 / E-21]
+  PurchaseInvoice = 'purchase_invoice',
+  SupplierPayment = 'supplier_payment',
+  SupplierAdvance = 'supplier_advance',
+  SupplierAdvanceApplication = 'supplier_advance_application',
+  GrniAccrual = 'grni_accrual',
 }

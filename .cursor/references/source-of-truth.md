@@ -18,13 +18,13 @@ When sources disagree, **do not guess**. Report the conflict. Authority order is
 
 Fresh DB = `schema.sql` + seeds only. Do not add separate `apply_*.sql` patches — fold DDL into `schema.sql` (per its header).
 
-Excel COA (`Chart of Accounts - inFINity.xlsx`) + `seed_finalized_coa_demo_company_0002.sql` are authoritative for account numbers/names. Demo company has 183 accounts (179 COA + hierarchy demo accounts per A §2.3).
+Excel COA (`Chart of Accounts - inFINity.xlsx`) + `seed_finalized_coa_demo_company_0002.sql` are authoritative for account numbers/names. Demo company has 184 accounts (180 COA + 4 hierarchy demos; E-23 added `1350` Supplier Advances).
 
 ## Known documentation drift (do not “fix” by inventing)
 
 These were true at inspection (2026-09-10). Prefer newer module specs / `schema.sql` / tests.
 
-1. **`.cursor/rules/accounting-engine.mdc` (pre-update)** said Module 1.1.A only. Build Order: A, H1, C1, D built; E specified.
+1. **`.cursor/rules/accounting-engine.mdc` (pre-E)** said next specified was E. E is built 2026-09-13; B/F/G/H-rest remain queued.
 2. **`README.md`** still titles “Module 1.1.A” and cites 34 suites / 339 tests. Later verified: C1-5 51/535; D-P13 **573 passed / 59 suites green** (1 unit-spec compile gap).
 3. **`feature-spec.md` §5.6 / §5.11** still mention 38 routes / 7 controllers. `controller-auth-coverage.spec.ts` covers **102** guarded routes. §7.2 C-era 83/83 is also stale vs D controllers (payments, holidays).
 4. **`feature-spec.md` §7.2** snapshot is post-C1-5 (535 tests), not D.
@@ -40,6 +40,6 @@ These were true at inspection (2026-09-10). Prefer newer module specs / `schema.
 - Company onboarding / members admin API
 - C §9 presentation (PDF, WhatsApp, bilingual, reminders, recurring invoices)
 - D §7: 1070→1020 settlement, VAT-201 filing, exports, dunning, multi-currency, company-settings write API
-- Module E (suppliers, bills, AP)
+- Module E (built 2026-09-13; §7 deferrals: vendor credits, unattended GRNI cron, inventory/landed costs, settings admin API)
 - Modules B, F, G, H remainder
 - Frontend

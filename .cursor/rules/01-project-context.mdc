@@ -15,7 +15,7 @@ alwaysApply: true
 | H1 reports | `feature-spec-1.1.H1.md` | Built (TB/BS/P&L/GL) |
 | C sales docs | `feature-spec-1.1.C.md` | C1 core built; §9 presentation deferred |
 | D AR | `feature-spec-1_1_D.md` | Built; §7 deferrals remain |
-| E AP | `feature-spec-1_1_E.md` | Spec only — no `suppliers`/`bills` |
+| E AP | `feature-spec-1_1_E.md` | Built; §7 deferrals remain |
 | B/F/G/H-rest | — | Queued |
 
 **Do not invent** a frontend, CI, local `supabase/` folder, generated types, or company-onboarding API — none exist.

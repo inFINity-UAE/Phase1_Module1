@@ -5,14 +5,14 @@ Part of Module 1.1 · AI-Based Accounting Foundation, inFINity Phase 1 (MVP).
 This is the scope document for Module 1.1.E only — do not infer scope
 from Module 1.1.A/C/D/H1 or other 1.1.B/F/G modules.
 
-**Status: 🟡 Drafted and grounded, not yet built (2026-09-10).** This spec
+**Status: 🟡 Drafted and grounded, not yet built (2026-09-13).** This spec
 follows the same discipline `feature-spec.md` (A), `feature-spec-1.1.C.md`
 (C), and `feature-spec-1_1_D.md` (D) used: decisions are numbered (E-1…);
-once ratified, nothing is silently edited — append E-25+. Every GL
+once written, nothing is silently edited — append E-29+. Every GL
 account number below is resolved against the real, finalized
 `Chart of Accounts - inFINity.xlsx` (via `seed_finalized_coa_demo_company_0002.sql`)
 and `schema.sql`. Open flags from the first draft are closed in E-2 and
-E-14…E-22.
+E-14…E-22. Six policy calls on 2026-09-13 are E-23…E-28.
 
 **Build Order context:** per `Module_1.1_Build_Order_Scope.md` §4, E is
 sequenced fourth — after A (Module 0) and D (Module 3), not strictly
@@ -42,7 +42,7 @@ or AP tables exist yet — E is fully greenfield on schema.
 | Cash on Hand | `1010` | D-12 routing, reused (credit side) |
 | Merchant / Payment Gateway Clearing | `1070` | D-12 routing, reused (credit side) |
 | VAT Receivable (Input VAT) | `1400` | `[Control][Recoverable Input VAT]`; pair of C's `2200` |
-| Supplier advances / trade prepayments | `1320` Prepaid Expenses - Other | E-2 — residual Prepayments bucket; no dedicated "Supplier Advances" account exists |
+| Supplier advances / trade prepayments | `1350` Supplier Advances | E-23 — dedicated asset, not `1320`; pair-symmetry with D keeping `2050` retainers off `2060` |
 | Purchase discounts (contra-expense) | `5060` Purchase Discounts & Returns | `[Contra-Expense]`, credit normal balance — pair of C's `4060` |
 | GRNI (goods received, not invoiced) | `2020` Accrued Purchases (Goods Received, Not Invoiced) | `[Detail]`; Accounting Rules §1.5 period-end accrual (E-21) |
 
@@ -102,8 +102,11 @@ entity, the mirror of C's `customers`.
 
 Numbered. E-1…E-13 were in the first draft; E-2 / E-3 / E-9 / E-12 are
 updated in place because this draft was never ratified and those four
-were explicitly OPEN or `[NEEDS VERIFICATION]`. Everything else that
-needed a new call is appended as E-14+.
+were explicitly OPEN or `[NEEDS VERIFICATION]`. E-14…E-22 closed the
+remaining first-pass flags. E-23…E-28 (2026-09-13) supersede specific
+rows of E-2 / E-10 / E-12 / E-20 — those original entries stay as
+written; standing rules in §3–§5 follow the later number. Further
+changes append E-29+.
 
 ### E-1 — Bill entity: separate `bills` table (Build Order Option A)
 
@@ -127,6 +130,10 @@ decision the Build Order flagged as needing to be made *before* scoping
 E; adopting its own recommendation rather than reopening the question.
 
 ### E-2 — GL accounts: resolved against the real COA, not invented
+
+**Superseded for supplier advances by E-23:** post advances to `1350`,
+not `1320`. The rest of this entry (control accounts, no default
+expense account, leave `1330`/`1140`/`1410`/`2210` alone) still stands.
 
 **Decision:** account numbers below are read directly from
 `seed_finalized_coa_demo_company_0002.sql` / the finalized xlsx, the
@@ -355,6 +362,10 @@ approved for payment."
 
 ### E-10 — Match tolerance: company-configurable, defaults to zero
 
+**Superseded by E-26:** do not use one blanket percentage. Quantity
+tolerance defaults to **0%**; price tolerance defaults to **2%**. Two
+`company_settings` columns replace `three_way_match_tolerance_pct`.
+
 **Decision:** `company_settings.three_way_match_tolerance_pct
 numeric(5,2)`, default `0` (exact match required). Applied to both
 quantity and price comparisons in E-9. Quantity uses
@@ -393,6 +404,11 @@ would duplicate work B is explicitly scoped to do, and would need
 reworking the moment B lands.
 
 ### E-12 — Document-engine posting posts the JE; no bespoke AP JE threshold
+
+**Superseded in part by E-28:** bill Issue **does** apply the existing
+`journal_approval_threshold` (AED 50,000 / TC9). Payment execution does
+**not**. The "no new AP-only threshold column" part of this entry still
+stands.
 
 **Decision (revised against live C/D posting, 2026-09-10):** bill Issue
 and supplier-payment posting **post the journal to `posted` in the same
@@ -548,6 +564,11 @@ rejected.
 
 ### E-20 — Payment is blocked on a failed three-way match (Rules §1.5)
 
+**Superseded in part by E-25:** the default is still a hard block;
+an Owner may override with a mandatory reason logged distinctly from a
+clean match. The "no silent force-pay / do not flip `match_status`"
+discipline still stands.
+
 **Decision:** `supplier_payment_applications` (ad hoc or via a
 payment run) are rejected unless the bill is `issued` or
 `partially_paid` **and** `match_status in ('matched', 'no_po')` **and**
@@ -620,6 +641,176 @@ setting is requested. Not 30 days — that window is E-8's duplicate
 detector, a different job, and would over-match recurring same-amount
 bills on a statement.
 
+### E-23 — Supplier advances post to `1350`, not `1320`
+
+**Decision:** create dedicated COA account **`1350 — Supplier Advances`**
+(asset, Prepayments, debit, `[Detail]`, default active). Supplier
+advance payment is `Dr 1350` / `Cr` routed bank/cash; application to a
+later bill is `Dr 2000` / `Cr 1350`. Do **not** post either leg to
+`1320 Prepaid Expenses - Other`.
+
+This is an explicit COA extension (180 Excel rows + 4 hierarchy demos
+= **184** accounts). `1320` remains the catch-all for time-amortised
+prepaid expenses that are not rent, insurance, or deposits. `1330`
+Deposits Paid (Refundable) and `1140` employee advances stay unused
+for this job.
+
+**Why not `1320`:** general prepaid expenses amortize on a time
+schedule; supplier advances are tracked per-vendor and applied against
+a specific future bill (which three-way match / `supplier_payment_applications`
+must reference directly). Dumping both into `1320` mixes two behaviors.
+This is the same call D made on the AR side: `2050` Retainer Liability
+was kept separate from generic liabilities, and customer deposits went
+to named `2060` rather than a residual bucket.
+
+**Why a new number is allowed here:** E-2 declined to invent `1350`
+because the then-current COA had no such row. This entry *is* that
+COA change, made on the owner's 2026-09-13 call, not a silent
+renumber of E-2.
+
+### E-24 — Period-end GRNI accrual is in this pass (confirms E-21)
+
+**Decision:** build `accrue_unbilled_receipts` now, as the
+manual-trigger RPC E-21 already designed. Not optional polish, not
+deferred, not a silent cron.
+
+**Why now:** Accounting Rules **§1.22** period-end close checklist
+assumes accruals are posted before trial-balance review. Skipping GRNI
+means every close where goods arrive before the supplier invoice —
+which will happen regularly — produces an understated balance sheet.
+Because the trigger is manual, this is a contained RPC, not a new
+automation subsystem. E-21's posting ( `Dr` PO-line `account_id` /
+`Cr 2020`, reversing in the next open period) is unchanged.
+
+### E-25 — Three-way match failure: block with authorized override
+
+**Decision:** payment is **blocked by default** exactly as E-20
+(`match_status in ('matched', 'no_po')`, not disputed, bill
+`issued`/`partially_paid`). An **Owner** may override that block with
+a **mandatory non-blank reason**. The mismatch itself is **not**
+rewritten to `matched` — `bills.match_status` and
+`three_way_match_results` stay as the check computed them. The
+override is a separate, auditable fact on the bill:
+
+```
+payment_match_override_reason  text
+payment_match_overridden_by    uuid  -- company_members / users
+payment_match_overridden_at    timestamptz
+```
+
+CHECK: all three override columns are null together, or the reason is
+non-blank *and* `overridden_by` / `overridden_at` are set (same shape
+as `ecl_override_reason` / period `reopen_reason`). Payable when
+`match_status in ('matched', 'no_po')` **or** the override triple is
+populated. Token remains `BILL_MATCH_BLOCKS_PAYMENT` when neither
+holds.
+
+**Who may override:** **Owner only** — the same authorized role as
+Module 1.1 TC10 / soft-closed period posting
+(`JournalEntriesService`: *"Only an Owner may post into a soft-closed
+period with override"*; reason required, logged on the period's
+`reopen_*` columns, distinct from a normal open-period post). Manager
+may approve a pending journal (A's journal-approve path) but may
+**not** override a failed three-way match. Accountant cannot.
+
+**Why not a flat never-override:** a quantity/price hard-stop with no
+recourse stalls legitimate payments (partial shipment, documented
+price renegotiation outside the PO) and creates pressure to work
+around the system. Block-by-default plus an explicit Owner reason
+keeps the control real without backing the business into a corner.
+
+**Audit:** the override is logged distinctly from a clean match — the
+results table still shows the discrepancy; the bill columns (and the
+existing journal/audit trail for the mutation) show who overrode and
+why. Do not invent a second audit table.
+
+### E-26 — Split three-way match tolerance: 0% quantity, 2% price
+
+**Decision:** replace the single E-10 column
+`three_way_match_tolerance_pct` with two `company_settings` columns,
+still DB-level configuration, still **no settings write API** this
+pass (D-13 boundary):
+
+- `three_way_match_qty_tolerance_pct numeric(5,2) not null default 0`
+- `three_way_match_price_tolerance_pct numeric(5,2) not null default 2`
+
+Quantity (E-9 partial-bill rule unchanged): billed is OK when
+`billed ≤ ordered × (1 + qty_pct/100)` **and**
+`billed ≤ received × (1 + qty_pct/100)`. Default **0%** means any
+billed quantity above ordered or received is always a
+`quantity_mismatch`. Partial bills (billed 50 against ordered 100 /
+received 100) still match.
+
+Price: `|bill_unit − po_unit| / po_unit ≤ price_pct/100`. Default
+**2%**. If `po_unit = 0`, any non-zero bill unit is a mismatch.
+
+**Why split, not one blanket %:** a quantity mismatch is almost always
+meaningful (partial delivery, short-shipment) and must always
+surface. Exact price matches fail often in practice from rounding or
+freight/duty allocation; 0% on price generates enough false-positive
+flags that people start ignoring them, which defeats the check.
+
+### E-27 — Statement matching window stays 7 calendar days
+
+**Decision:** E-22 stands as written. Suggested match is exact amount
++ reference, else exact amount ± **7 calendar days** (inclusive) each
+direction; user confirms; not a setting this pass.
+
+**Why keep 7, not same-day and not wider:** same-day-only misses valid
+matches (bank processing alone routinely lags 2–3 days). Widening
+further increases false-positive matches when two different invoices
+share a similar amount. 7 days each way is the starting default —
+same "start here, refine against real data later" approach used for
+ECL loss rates (D). Revisit as E-29+ only with evidence, not as a
+pre-build guess.
+
+### E-28 — AED 50,000 approval gate at bill Issue, not at payment
+
+**Decision:** apply the existing `company_settings.journal_approval_threshold`
+at **bill Issue only**. Do **not** invent a new number and do **not**
+add `bill_approval_threshold` / `payment_run_approval_threshold`. The
+product figure is **AED 50,000** (Module 1.1 TC9 / D-11). `null` on
+that column still means "approval disabled" (A's existing rule) — Issue
+posts immediately.
+
+**Issue flow** (`POST /bills/:id/issue`):
+
+- Allocate `bill_number` on this click (extends E-16: the number is
+  consumed when Issue is requested, including when the bill then
+  parks in `pending_approval`).
+- Compute `due_date`, run E-8 duplicate check.
+- If `grand_total <` threshold **or** the actor is Owner **or**
+  threshold is null: post the `purchase_invoice` JE immediately,
+  status `issued` (C's Issue equivalent).
+- If `grand_total ≥` threshold and the actor is not Owner: create the
+  JE in `pending_approval`, bill status **`pending_approval`**.
+  Owner or Manager then approve via `POST /bills/:id/approve` (thin
+  wrapper over A's journal-approve path: Owner bypasses; Owner or
+  Manager approve others). On post, bill becomes `issued`.
+
+`bill_status` therefore gains `pending_approval` (extends E-14). It is
+not named `approved` — that word stays a journal-entry status. A
+pending bill is mutation-blocked like `issued` (extends E-19). Payment
+applications still require `issued` / `partially_paid`, so a pending
+bill cannot be paid (`BILL_NOT_OPEN_FOR_PAYMENT`).
+
+For E-21 GRNI, a `pending_approval` bill does **not** count as billed
+(its JE is not ledger-truth). Unmatched receipts remain accruable.
+
+**Payment is not a second 50k gate.** Once the bill is `issued`,
+payment execution for that amount does not re-test
+`journal_approval_threshold`. Supplier-payment JEs still post
+immediately, like D's customer payments. Payment-run
+`draft → approved → executed` (E-5) stays an operational batch
+workflow (this set of bills is ready to disburse); it is **not** a
+second money-threshold approval.
+
+**Partial payments:** inherit the original bill Issue approval. Each
+partial application does **not** re-check `grand_total` (or the
+partial amount) against the threshold. An explicit re-check rule can
+be E-29+ if evidence warrants it; not a blocker now, but the inherit
+rule is locked so E's existing `partially_paid` state has one answer.
+
 ---
 
 ## 3. Schema additions
@@ -667,7 +858,7 @@ create index idx_suppliers_company on suppliers(company_id);
 inactive supplier are rejected; existing documents are never
 retroactively altered.
 
-### 3.2 `bills` (new) — per E-1, E-14, E-16, E-18
+### 3.2 `bills` (new) — per E-1, E-14, E-16, E-18, E-25, E-28
 
 ```
 id                      uuid primary key default gen_random_uuid()
@@ -690,6 +881,9 @@ match_status            bill_match_status
 possible_duplicate_of  uuid references bills(id)     -- E-8
 scheduled_payment_date  date                          -- E-7
 journal_entry_id        uuid references journal_entries(id)
+payment_match_override_reason  text                   -- E-25; null unless Owner override
+payment_match_overridden_by    uuid
+payment_match_overridden_at    timestamptz
 void_reason             text
 created_by              uuid not null
 created_at              timestamptz not null default now()
@@ -698,11 +892,23 @@ updated_at              timestamptz not null default now()
 check (amount_paid >= 0 and amount_paid <= grand_total)
 check (payment_terms <> 'custom' or (custom_days is not null and custom_days > 0))
 check (status <> 'void' or (void_reason is not null and btrim(void_reason) <> ''))
+check (
+  (payment_match_override_reason is null
+   and payment_match_overridden_by is null
+   and payment_match_overridden_at is null)
+  or (
+    payment_match_override_reason is not null
+    and btrim(payment_match_override_reason) <> ''
+    and payment_match_overridden_by is not null
+    and payment_match_overridden_at is not null
+  )
+)
 ```
 
 ```
 create type bill_status as enum (
-  'draft', 'matched', 'issued', 'partially_paid', 'paid', 'disputed', 'void'
+  'draft', 'matched', 'pending_approval', 'issued',
+  'partially_paid', 'paid', 'disputed', 'void'
 );
 create type bill_match_status as enum (
   'no_po', 'awaiting_receipt', 'quantity_mismatch', 'price_mismatch',
@@ -928,12 +1134,17 @@ created_at         timestamptz not null default now()
 unique (company_id, period_end_date)
 ```
 
-### 3.15 `company_settings` (extend) — per E-6, E-10
+### 3.15 `company_settings` (extend) — per E-6, E-26
 
 - No new bank-account column — reuses D-6's `default_bank_account_id`.
-- `three_way_match_tolerance_pct numeric(5,2) not null default 0` — E-10.
+- `three_way_match_qty_tolerance_pct numeric(5,2) not null default 0` — E-26.
+- `three_way_match_price_tolerance_pct numeric(5,2) not null default 2` — E-26.
+- Do **not** add `three_way_match_tolerance_pct` (that was E-10's single
+  column; E-26 replaced it before build).
 - Duplicate-detection window (30 days) and statement-match window
-  (7 days) are **not** settings (E-8, E-22).
+  (7 days) are **not** settings (E-8, E-22 / E-27).
+- Bill Issue reuses existing `journal_approval_threshold` (E-28); no
+  new AP threshold column.
 
 ### 3.16 `journal_entry_type` enum (extend) — per E-15
 
@@ -971,15 +1182,19 @@ approach.
 - `draft` — created, editable, no `bill_number`, no JE.
 - `matched` — three-way match (§4.7) has run; `match_status` populated.
   A bill with no PO goes `draft → matched` with `match_status = 'no_po'`.
-- `issued` — `POST /bills/:id/issue`: allocate `bill_number`, compute
-  `due_date` (E-18), run duplicate check (E-8), post `purchase_invoice`
-  JE (§4.2). This is the live-in-the-ledger state, C's Issue equivalent.
+- `pending_approval` — Issue was requested at/above
+  `journal_approval_threshold` by a non-Owner (E-28). `bill_number`
+  allocated; JE exists in `pending_approval`; header/lines locked.
+  Not payable.
+- `issued` — JE posted: either immediately on Issue (under threshold,
+  Owner, or threshold null) or after Owner/Manager `POST /bills/:id/approve`.
+  This is the live-in-the-ledger state, C's Issue equivalent.
 - `amount_paid` increments only via a `supplier_payment_applications`
   insert — never client-set (D §4.1).
 - `amount_paid < grand_total` → `partially_paid`.
 - `amount_paid = grand_total` → `paid`, `paid_at` stamped (D-3 mirror).
 - `disputed` — manual status when the bill is queried with the supplier;
-  blocks payment (E-20); does not reverse an already-posted JE. Clearing
+  blocks payment (E-20 / E-25); does not reverse an already-posted JE. Clearing
   dispute returns the bill to `issued` / `partially_paid` as implied by
   `amount_paid`.
 - `void` — requires `void_reason`; reverses the JE if posted (E-13).
@@ -987,7 +1202,8 @@ approach.
   `unapplied_amount` as advance credit against a different bill.
 
 Issue is allowed from `draft` (match runs first) or `matched`. Issue
-from `disputed`/`void`/`paid` is rejected.
+from `disputed`/`void`/`paid`/`pending_approval` is rejected.
+`POST /bills/:id/approve` is allowed only from `pending_approval`.
 
 ### 4.2 Bill posting (GL)
 
@@ -1000,24 +1216,27 @@ On Issue, atomic RPC `create_bill_journal_entry` + `issue_bill`
   as C omits `2200` when `vat_total = 0`)
 - `Cr 2000` for `grand_total`
 - `entry_type = 'purchase_invoice'`; `status = 'posted'` in the same
-  RPC (E-12)
+  RPC when under threshold / Owner / threshold null (E-28); otherwise
+  the JE is created `pending_approval` and posts on approve
 - Requires an open accounting period covering `bill_date`
 - Unbalanced → `BILL_POSTING_UNBALANCED`; missing `2000`/`1400`/`5060`
   → `BILL_POSTING_ACCOUNT_NOT_FOUND`
 
 ### 4.3 Batch payment (select multiple bills, one payment run)
 
-- User selects open (`issued`/`partially_paid`) bills whose
-  `match_status in ('matched','no_po')` (E-20), possibly across
+- User selects open (`issued`/`partially_paid`) bills that pass E-20 /
+  E-25 (matched, no_po, or Owner match-override present), possibly across
   suppliers, into a `supplier_payment_runs` row.
 - Run moves `draft → approved` (human; `approved_by` stamped) before
-  it can execute.
+  it can execute. This is operational batch-ready, **not** a second
+  AED 50,000 money gate (E-28).
 - On **execute** (`payrun:` lock): group included items by `supplier_id`.
   For each supplier group, create one `supplier_payments` row funding
   `supplier_payment_applications` against that supplier's selected
   bills, then post one JE per payment: `Dr 2000`, `Cr` routed account
-  (E-6). `entry_type = 'supplier_payment'`.
-- A bill that fails E-20 at execute time is skipped and the run item
+  (E-6). `entry_type = 'supplier_payment'`. Execute does not re-test
+  `journal_approval_threshold`.
+- A bill that fails E-20 / E-25 at execute time is skipped and the run item
   flagged, not a silent pay.
 
 ### 4.4 Payment scheduling
@@ -1031,13 +1250,13 @@ On Issue, atomic RPC `create_bill_journal_entry` + `issue_bill`
 
 - Recorded as a `supplier_payments` row with `unapplied_amount = amount`,
   no applications yet (D §4.3 reversed).
-- GL at payment: `Dr 1320`, `Cr` routed bank/cash (E-6).
+- GL at payment: `Dr 1350`, `Cr` routed bank/cash (E-6 / E-23).
   `entry_type = 'supplier_advance'`.
 - Application to a later bill: insert `supplier_payment_applications`,
-  `unapplied_amount` decrements, cash-free reclass: `Dr 2000`, `Cr 1320`,
+  `unapplied_amount` decrements, cash-free reclass: `Dr 2000`, `Cr 1350`,
   `entry_type = 'supplier_advance_application'`. That reclass — not the
   original advance — is what moves `amount_paid` (D §4.3 mirror).
-- Applying an advance still needs E-20 (the *bill* must be payable);
+- Applying an advance still needs E-20 / E-25 (the *bill* must be payable);
   the advance itself can be recorded before any bill exists.
 
 ### 4.6 Duplicate bill detection
@@ -1050,17 +1269,21 @@ On Issue, atomic RPC `create_bill_journal_entry` + `issue_bill`
 
 - Runs on `POST /bills/:id/match`, on linking/unlinking a PO, on
   relevant line edits while pre-Issue, and again inside Issue.
-- Per E-9: billed qty ≤ ordered and ≤ received (tolerance E-10);
-  billed unit price vs PO unit price (tolerance E-10).
+- Per E-9 / E-26: billed qty ≤ ordered and ≤ received (qty tolerance
+  default 0%); billed unit price vs PO unit price (price tolerance
+  default 2%).
 - Persists to `three_way_match_results`; sets `bills.match_status`.
-- Mismatch does not block Issue; it blocks payment (E-20).
+- Mismatch does not block Issue; it blocks payment unless an Owner
+  override is recorded (E-20 / E-25). Do not flip `match_status` to
+  `matched` on override.
 
 ### 4.8 Period-end GRNI accrual
 
-- RPC `accrue_unbilled_receipts` per E-21. One run per company per
+- RPC `accrue_unbilled_receipts` per E-21 / E-24. One run per company per
   `period_end`. Posts `Dr` PO-line `account_id` / `Cr 2020`,
   `entry_type = 'grni_accrual'`. Next-period reversal via
   `reverse_journal_entry`. Not a silent cron in this pass.
+  `pending_approval` bills do not count as billed (E-28).
 
 ---
 
@@ -1077,7 +1300,7 @@ only rows with a non-null `journal_entry_id` (actually posted) count.
 `get_supplier_ledger(company_id, supplier_id, date_from?, date_to?)`
 — same signature shape as `get_customer_ledger` (schema.sql 5255–5272).
 Unions posted bills (credit `2000`), supplier payments (debit `2000`),
-advance payments (debit `1320` — shown separately, `affects_ap = false`,
+advance payments (debit `1350` — shown separately, `affects_ap = false`,
 not netted into the AP running balance, mirroring D §5.1's treatment
 of customer advances), advance applications (debit `2000`), ordered by
 date, running balance in SQL.
@@ -1120,13 +1343,15 @@ Same guard stack as C/D: `SupabaseAuthGuard` + `CompanyMembershipGuard`
 | CRUD + lines | `/goods-receipts`, `/goods-receipts/:id/lines` | Number at create |
 | CRUD + lines | `/bills`, `/bills/:id/lines` | Totals recalc while draft/matched |
 | POST | `/bills/:id/match` | E-9 |
-| POST | `/bills/:id/issue` | E-14 / §4.2 |
+| POST | `/bills/:id/issue` | E-14 / E-28 / §4.2 |
+| POST | `/bills/:id/approve` | E-28 — Owner/Manager; pending_approval → issued |
+| POST | `/bills/:id/override-match-block` | E-25 — Owner; body `{ reason }` |
 | POST | `/bills/:id/void` | E-13; body `void_reason` |
 | PATCH | `/bills/:id/schedule` | `{ scheduled_payment_date }` E-7 |
 | PATCH | `/bills/:id/dispute` | `{ disputed: boolean }` |
 | CRUD + post | `/supplier-payments` | Mirror `/payments` + `POST :id/post` |
-| POST / DELETE | `/supplier-payments/:id/applications` | E-20 |
-| CRUD + approve + execute | `/supplier-payment-runs` | E-5 |
+| POST / DELETE | `/supplier-payments/:id/applications` | E-20 / E-25 |
+| CRUD + approve + execute | `/supplier-payment-runs` | E-5 / E-28 — execute is not a 50k gate |
 | CRUD + confirm-match | `/supplier-statement-lines` | E-11 / E-22 |
 | GET | `/reports/supplier-ledger` | §5.1 |
 | GET | `/reports/aged-payables` | §5.2 |
@@ -1134,7 +1359,7 @@ Same guard stack as C/D: `SupabaseAuthGuard` + `CompanyMembershipGuard`
 | POST | `/reports/reconcile-supplier-statement` | §5.3 |
 | POST | `/journal-entries/accrue-unbilled-receipts` | E-21 — next to other period RPCs, not a "report" |
 
-No company-settings write API (E-10 / D-13).
+No company-settings write API (E-26 / D-13).
 
 ---
 
@@ -1149,8 +1374,11 @@ No company-settings write API (E-10 / D-13).
 D already owns, beyond:
 
 - reusing (not altering) D-6's `company_settings.default_bank_account_id`
-- adding `company_settings.three_way_match_tolerance_pct` (E-10)
+- adding `company_settings.three_way_match_qty_tolerance_pct` and
+  `three_way_match_price_tolerance_pct` (E-26)
 - additive `journal_entry_type` values (E-15)
+- additive COA row `1350` (E-23); seed + Excel, not a `schema.sql`
+  table change
 
 No changes to `customers`, `invoices`, `credit_notes`, `payments`, or
 any D/C table. E is a fully separate subledger, structurally parallel to
@@ -1168,12 +1396,13 @@ D, not layered on top of it.
 - **OCR / automated ingestion** of bills, POs, GRNs, or supplier
   statements — Module B (Build Order §5).
 - **PDF/XLSX/CSV export** — Build Order §8 (H-remainder).
-- **Duplicate-bill hard-block / force-pay override** — only if E-8 /
-  E-20 are revisited.
+- **Duplicate-bill hard-block** — E-8 stays alert-only. Match-payment
+  override is in scope (E-25); do not extend that override to
+  duplicates unless E-29+ says so.
 - **Automatic/unattended scheduled payment execution** — §4.4 is a
   flag; auto-pay is a new decision (E-7).
-- **Unattended GRNI cron** — E-21 is an explicit RPC; a 01:00 UTC host
-  is E-25+ if an accountant wants D-16-style scheduling.
+- **Unattended GRNI cron** — E-21 / E-24 is an explicit RPC; a 01:00 UTC host
+  is E-29+ if an accountant wants D-16-style scheduling.
 - **Vendor credits / supplier credit notes** — Rules §4.2 names
   them; they are not one of the eight deliverables. Out of scope until
   raised, same as C deferred presentation.
@@ -1184,7 +1413,7 @@ D, not layered on top of it.
 - **`1070 → 1020` settlement** — D-12 / D §7.
 - **Multi-currency** bills, payments, or advances.
 - **Company-settings admin API/UI** — D-13 boundary.
-- **Configurable duplicate / statement windows** — E-8 / E-22.
+- **Configurable duplicate / statement windows** — E-8 / E-22 / E-27.
 - **Supplier onboarding / bank-detail-change fraud controls** — Rules
   §1.24 "segregation of create-vendor from approve-payment" is a
   role-design concern for a later admin module; E uses the existing
@@ -1196,25 +1425,25 @@ D, not layered on top of it.
 
 ## 8. Build status / sign-off
 
-**Module 1.1.E is a grounded draft, not yet built.** Pre-build
-verification items from the first draft's §8 are closed:
+**Module 1.1.E is built** (schema + RPCs + Nest §5.5 + reports). Pre-build
+verification items from the first draft's §8 remain closed:
 
 | # | Item | Resolution |
 |---|---|---|
-| 1 | OPEN GL accounts vs COA | E-2 — `2000` / `1400` / `1320` / `5060` / `2020` / D-12 cash accounts |
+| 1 | OPEN GL accounts vs COA | E-2 / E-23 — `2000` / `1400` / `1350` / `5060` / `2020` / D-12 cash accounts |
 | 2 | `customers` field shapes | E-3 — `supplier_name`, `trn`, `billing_address`, C #1/#17 |
-| 3 | `issued` vs `approved` | E-14 — `issued`; no `approved` on `bill_status` |
+| 3 | `issued` vs `approved` | E-14 / E-28 — live state `issued`; `pending_approval` only for the 50k Issue gate |
 | 4 | `journal_entry_type` name | E-15 — confirmed `journal_entry_type`; values listed |
 
-Remaining before the same signed-off status D reached:
+Remaining for D-style signed-off status:
 
-1. Build schema, RPCs, Nest AP routes, and reports per §3–§5.
-2. Run D-P13 discipline: fresh-DB `schema.sql` + COA seed (+ other
-   seeds as needed), full test suite, `verify-auth-module-imports.mjs`.
-   Fold all DDL into `schema.sql` — do not add separate `apply_*.sql`
-   patches (per `schema.sql` header).
-3. Ratify E-1…E-22. After ratification, never silently edit; append
-   E-25+.
+1. ~~Build schema, RPCs, Nest AP routes, and reports per §3–§5.~~ Done 2026-09-13.
+2. D-P13 discipline: a **full** fresh-DB `schema.sql` + COA seed + entire Jest
+   suite was **not** re-run in the E landing pass (incremental apply to the
+   Testing 1.1.A project). Unit 544 + E AP 8 + membership 3 + D invoices/payments
+   24 were run. Fold all DDL into `schema.sql` — do not add separate
+   `apply_*.sql` patches (per `schema.sql` header).
+3. After E-23…E-28, never silently edit; append E-29+.
 
 ---
 
@@ -1222,12 +1451,12 @@ Remaining before the same signed-off status D reached:
 
 Chronological index — full text of each entry is in §2. Same
 discipline as `feature-spec-1_1_D.md` §9: never silently edit an
-existing row once ratified; append E-25+ if a decision must change.
+existing row once written; append E-29+ if a decision must change.
 
 | # | Date | Summary | Detail in |
 |---|------|---------|-----------|
 | E-1 | 2026-09-10 | Bill entity is its own `bills` table (Build Order Option A) | §2 E-1 |
-| E-2 | 2026-09-10 | GL accounts resolved: `2000`/`1400`/`1320`/`5060`/`2020`; no default expense account | §2 E-2, §4.2–§4.5, §4.8 |
+| E-2 | 2026-09-10 | GL accounts resolved: `2000`/`1400`/`1320`/`5060`/`2020`; no default expense account. **Advances superseded by E-23.** | §2 E-2, §4.2–§4.5, §4.8 |
 | E-3 | 2026-09-10 | `suppliers` mirrors `customers` (`supplier_name`, TRN unique+immutable, `iban`) | §2 E-3, §3.1 |
 | E-4 | 2026-09-10 | One `supplier_payments` table for payments and advances | §2 E-4, §3.9, §4.5 |
 | E-5 | 2026-09-10 | Payment run is a wrapper above per-supplier `supplier_payments` | §2 E-5, §3.11–§3.12, §4.3 |
@@ -1235,16 +1464,22 @@ existing row once ratified; append E-25+ if a decision must change.
 | E-7 | 2026-09-10 | Payment scheduling is a flag on the bill, not auto-pay | §2 E-7, §3.2, §4.4 |
 | E-8 | 2026-09-10 | Duplicate detection: alert-only; 30-day amount **or** same supplier invoice number | §2 E-8, §4.6 |
 | E-9 | 2026-09-10 | Three-way match via new PO + GRN tables; partial bills OK; results persisted | §2 E-9, §3.4–§3.8, §4.7 |
-| E-10 | 2026-09-10 | Match tolerance is a company setting, default 0; no settings API | §2 E-10, §3.15 |
+| E-10 | 2026-09-10 | Match tolerance is a company setting, default 0; no settings API. **Superseded by E-26.** | §2 E-10, §3.15 |
 | E-11 | 2026-09-10 | Statement reconciliation: E matches structured lines; B ingests documents | §2 E-11, §3.13, §5.3 |
-| E-12 | 2026-09-10 | Bill/payment RPCs post the JE (like C/D); no bespoke AP JE threshold | §2 E-12, §4.2–§4.3 |
+| E-12 | 2026-09-10 | Bill/payment RPCs post the JE (like C/D); no bespoke AP JE threshold. **Issue gate superseded by E-28.** | §2 E-12, §4.2–§4.3 |
 | E-13 | 2026-09-10 | Undo reuses `reverse_journal_entry`; void needs `void_reason` | §2 E-13, §4.1 |
-| E-14 | 2026-09-10 | `bill_status` live state is `issued`, not `approved`; no overdue cron | §2 E-14, §4.1 |
+| E-14 | 2026-09-10 | `bill_status` live state is `issued`, not `approved`; no overdue cron. **`pending_approval` added by E-28.** | §2 E-14, §4.1 |
 | E-15 | 2026-09-10 | `journal_entry_type`: `purchase_invoice` / `supplier_payment` / `supplier_advance` / `supplier_advance_application` / `grni_accrual` | §2 E-15, §3.16 |
 | E-16 | 2026-09-10 | `BILL-YYYY-NNNN` at Issue; `PO-` / `GRN-` at create | §2 E-16, §3.2, §3.4, §3.6 |
 | E-17 | 2026-09-10 | Bill lines mirror invoice lines (VAT, discounts, `5060`); `account_id` required at Issue | §2 E-17, §3.3, §4.2 |
 | E-18 | 2026-09-10 | `payment_terms_type` + server-derived `due_date` at Issue | §2 E-18, §3.1–§3.2 |
 | E-19 | 2026-09-10 | Draft/matched editable; issued locked; totals never client-set | §2 E-19, §4.1 |
-| E-20 | 2026-09-10 | Payment blocked unless `matched` or `no_po` (Rules §1.5); Issue still allowed | §2 E-20, §4.3, §4.5 |
+| E-20 | 2026-09-10 | Payment blocked unless `matched` or `no_po` (Rules §1.5); Issue still allowed. **Override added by E-25.** | §2 E-20, §4.3, §4.5 |
 | E-21 | 2026-09-10 | Period-end GRNI accrual to `2020`; receipts themselves do not post; no silent cron | §2 E-21, §3.14, §4.8 |
 | E-22 | 2026-09-10 | Statement match: reference+amount, else amount ± 7 days; user confirms | §2 E-22, §5.3 |
+| E-23 | 2026-09-13 | Supplier advances = `1350` Supplier Advances, not `1320`; COA extended to 184 accounts | §2 E-23, §4.5, §5.1 |
+| E-24 | 2026-09-13 | GRNI accrual is in this pass (confirms E-21); required by Rules §1.22 close checklist | §2 E-24, §4.8 |
+| E-25 | 2026-09-13 | Match-failure payment block with Owner override + mandatory reason; do not flip `match_status` | §2 E-25, §3.2, §4.3, §4.7 |
+| E-26 | 2026-09-13 | Split tolerance: qty 0%, price 2%; two `company_settings` columns; no settings API | §2 E-26, §3.15, §4.7 |
+| E-27 | 2026-09-13 | Statement window stays 7 calendar days (confirms E-22) | §2 E-27, §5.3 |
+| E-28 | 2026-09-13 | AED 50,000 gate at bill Issue via `journal_approval_threshold`; payment not re-gated; partials inherit | §2 E-28, §4.1–§4.3 |

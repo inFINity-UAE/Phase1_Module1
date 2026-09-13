@@ -117,6 +117,51 @@ export class CompanyMembersService {
         companyId =
           await this.companyMembersRepository.findCompanyIdByPublicHolidayId(resourceId);
         break;
+      case 'supplier':
+        companyId = await this.companyMembersRepository.findCompanyIdBySupplierId(resourceId);
+        break;
+      case 'purchase_order':
+        companyId =
+          await this.companyMembersRepository.findCompanyIdByPurchaseOrderId(resourceId);
+        break;
+      case 'purchase_order_line':
+        companyId =
+          await this.companyMembersRepository.findCompanyIdByPurchaseOrderLineId(resourceId);
+        break;
+      case 'goods_receipt':
+        companyId =
+          await this.companyMembersRepository.findCompanyIdByGoodsReceiptId(resourceId);
+        break;
+      case 'goods_receipt_line':
+        companyId =
+          await this.companyMembersRepository.findCompanyIdByGoodsReceiptLineId(resourceId);
+        break;
+      case 'bill':
+        companyId = await this.companyMembersRepository.findCompanyIdByBillId(resourceId);
+        break;
+      case 'bill_line':
+        companyId = await this.companyMembersRepository.findCompanyIdByBillLineId(resourceId);
+        break;
+      case 'supplier_payment':
+        companyId =
+          await this.companyMembersRepository.findCompanyIdBySupplierPaymentId(resourceId);
+        break;
+      case 'supplier_payment_application':
+        companyId =
+          await this.companyMembersRepository.findCompanyIdBySupplierPaymentApplicationId(
+            resourceId,
+          );
+        break;
+      case 'supplier_payment_run':
+        companyId =
+          await this.companyMembersRepository.findCompanyIdBySupplierPaymentRunId(resourceId);
+        break;
+      case 'supplier_statement_line':
+        companyId =
+          await this.companyMembersRepository.findCompanyIdBySupplierStatementLineId(
+            resourceId,
+          );
+        break;
       default: {
         const _exhaustive: never = resource;
         throw new NotFoundException(`Unknown resource kind ${_exhaustive}`);

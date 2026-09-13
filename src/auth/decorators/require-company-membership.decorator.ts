@@ -25,12 +25,32 @@ export type CompanyMembershipSource =
         | 'credit_note_line'
         | 'payment'
         | 'payment_application'
-        | 'public_holiday';
+        | 'public_holiday'
+        | 'supplier'
+        | 'purchase_order'
+        | 'purchase_order_line'
+        | 'goods_receipt'
+        | 'goods_receipt_line'
+        | 'bill'
+        | 'bill_line'
+        | 'supplier_payment'
+        | 'supplier_payment_application'
+        | 'supplier_payment_run'
+        | 'supplier_statement_line';
       param?: string;
     }
   | {
       type: 'body_ref';
-      resource: 'journal_entry' | 'quotation' | 'invoice' | 'credit_note' | 'payment';
+      resource:
+        | 'journal_entry'
+        | 'quotation'
+        | 'invoice'
+        | 'credit_note'
+        | 'payment'
+        | 'supplier_payment'
+        | 'purchase_order'
+        | 'goods_receipt'
+        | 'bill';
       field?: string;
     };
 

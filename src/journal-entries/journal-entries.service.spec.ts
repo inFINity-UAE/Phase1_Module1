@@ -191,6 +191,7 @@ describe('JournalEntriesService', () => {
       rejectEntry: jest.fn(),
       insertGeneratedFromTemplate: jest.fn(),
       generateDueRecurringEntry: jest.fn(),
+      accrueUnbilledReceipts: jest.fn(),
       postEntry: jest.fn(),
       reverseEntry: jest.fn(),
       insertLine: jest.fn(),
@@ -208,6 +209,9 @@ describe('JournalEntriesService', () => {
       hasPostedJournalActivity: jest.fn(),
       softClose: jest.fn(),
       logSoftClosedPostingOverride: jest.fn(),
+      listPeriodsPendingEcl: jest.fn(),
+      addBusinessDays: jest.fn(),
+      runEclProvision: jest.fn(),
     };
     periodsRepository.findById.mockResolvedValue(samplePeriod());
 

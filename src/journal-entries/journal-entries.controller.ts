@@ -8,6 +8,7 @@ import { JournalEntriesService } from './journal-entries.service';
 import { CreateJournalEntryDto } from './dto/create-journal-entry.dto';
 import { CreateOpeningBalanceDto } from './dto/create-opening-balance.dto';
 import { CreateYearEndClosingDto } from './dto/create-year-end-closing.dto';
+import { AccrueUnbilledReceiptsDto } from './dto/accrue-unbilled-receipts.dto';
 import { UpdateJournalEntryDto } from './dto/update-journal-entry.dto';
 import {
   ApproveJournalEntryDto,
@@ -47,6 +48,19 @@ export class JournalEntriesController {
     @CurrentUser() user: AuthenticatedUser,
   ) {
     return this.journalEntriesService.runYearEndClosing(dto, user.id);
+  }
+
+  /**
+   * [feature-spec-1_1_E.md E-21 / §5.5] Static path before `:id` routes.
+   * Manual GRNI accrual — not a second scheduler.
+   */
+  @Post('accrue-unbilled-receipts')
+  @RequireCompanyMembership({ type: 'body' })
+  accrueUnbilledReceipts(
+    @Body() dto: AccrueUnbilledReceiptsDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.journalEntriesService.accrueUnbilledReceipts(dto, user.id);
   }
 
   /**

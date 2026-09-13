@@ -38,12 +38,24 @@ import { SupabaseAuthGuard } from '../auth/guards/supabase-auth.guard';
 import { CompanyRole } from './enums/company-role.enum';
 import { ReportsController } from '../reports/reports.controller';
 import { ReportsService } from '../reports/reports.service';
+import { SuppliersController } from '../suppliers/suppliers.controller';
+import { SuppliersService } from '../suppliers/suppliers.service';
+import { PurchaseOrdersController } from '../purchase-orders/purchase-orders.controller';
+import { PurchaseOrdersService } from '../purchase-orders/purchase-orders.service';
+import { GoodsReceiptsController } from '../goods-receipts/goods-receipts.controller';
+import { GoodsReceiptsService } from '../goods-receipts/goods-receipts.service';
+import { BillsController } from '../bills/bills.controller';
+import { BillsService } from '../bills/bills.service';
+import { SupplierPaymentsController } from '../supplier-payments/supplier-payments.controller';
+import { SupplierPaymentRunsController } from '../supplier-payments/supplier-payment-runs.controller';
+import { SupplierStatementLinesController } from '../supplier-payments/supplier-statement-lines.controller';
+import { SupplierPaymentsService } from '../supplier-payments/supplier-payments.service';
 
 /**
  * [feature-spec.md decisions #24/#27/#41; feature-spec-1.1.H1.md #1]
  * Controllers reject unauthenticated requests (401) and succeed for a
  * verified Bearer session with membership. Regression list covers all
- * 102 guarded HTTP routes across controllers.
+ * 166 guarded HTTP routes across controllers.
  *
  * Blind spot (C1-3): this spec registers controllers in isolation and mocks
  * CompanyMembershipGuard + CompanyMembersService — it does NOT import real
@@ -77,6 +89,17 @@ describe('Controller auth coverage (decision #24)', () => {
   const paymentId = '18181818-1818-1818-1818-181818181818';
   const paymentApplicationId = '19191919-1919-1919-1919-191919191919';
   const publicHolidayId = '1a1a1a1a-1a1a-1a1a-1a1a-1a1a1a1a1a1a';
+  const supplierId = '1b1b1b1b-1b1b-1b1b-1b1b-1b1b1b1b1b1b';
+  const purchaseOrderId = '1c1c1c1c-1c1c-1c1c-1c1c-1c1c1c1c1c1c';
+  const purchaseOrderLineId = '1d1d1d1d-1d1d-1d1d-1d1d-1d1d1d1d1d1d';
+  const goodsReceiptId = '1e1e1e1e-1e1e-1e1e-1e1e-1e1e1e1e1e1e';
+  const goodsReceiptLineId = '1f1f1f1f-1f1f-1f1f-1f1f-1f1f1f1f1f1f';
+  const billId = '20202020-2020-2020-2020-202020202020';
+  const billLineId = '21212121-2121-2121-2121-212121212121';
+  const supplierPaymentId = '22222222-2222-2222-2222-222222222221';
+  const supplierPaymentAppId = '23232323-2323-2323-2323-232323232323';
+  const paymentRunId = '24242424-2424-2424-2424-242424242424';
+  const statementLineId = '25252525-2525-2525-2525-252525252525';
 
   const journalEntryDetails = {
     entry: { id: entryId, company_id: companyId },
@@ -121,6 +144,27 @@ describe('Controller auth coverage (decision #24)', () => {
     {
       method: 'GET',
       path: `/reports/customer-payment-history?company_id=${companyId}&customer_id=${customerId}`,
+    },
+    {
+      method: 'GET',
+      path: `/reports/supplier-ledger?company_id=${companyId}&supplier_id=${supplierId}`,
+    },
+    {
+      method: 'GET',
+      path: `/reports/aged-payables?company_id=${companyId}&as_of_date=2026-01-31`,
+    },
+    {
+      method: 'GET',
+      path: `/reports/bills-due?company_id=${companyId}&as_of_date=2026-01-31`,
+    },
+    {
+      method: 'POST',
+      path: '/reports/reconcile-supplier-statement',
+      body: {
+        company_id: companyId,
+        supplier_id: supplierId,
+        statement_date: '2026-01-31',
+      },
     },
     { method: 'GET', path: `/accounts?company_id=${companyId}` },
     { method: 'GET', path: `/accounts/${accountId}` },
@@ -253,6 +297,161 @@ describe('Controller auth coverage (decision #24)', () => {
     { method: 'POST', path: `/payment-applications/${paymentApplicationId}/post` },
     {
       method: 'POST',
+      path: '/suppliers',
+      body: { company_id: companyId, supplier_name: 'Auth coverage supplier' },
+    },
+    { method: 'GET', path: `/suppliers?company_id=${companyId}` },
+    { method: 'GET', path: `/suppliers/${supplierId}` },
+    { method: 'PATCH', path: `/suppliers/${supplierId}`, body: { supplier_name: 'Renamed' } },
+    { method: 'PATCH', path: `/suppliers/${supplierId}/deactivate` },
+    {
+      method: 'POST',
+      path: '/purchase-orders',
+      body: { company_id: companyId, supplier_id: supplierId, po_date: '2026-06-01' },
+    },
+    { method: 'GET', path: `/purchase-orders?company_id=${companyId}` },
+    { method: 'GET', path: `/purchase-orders/${purchaseOrderId}` },
+    { method: 'PATCH', path: `/purchase-orders/${purchaseOrderId}`, body: { po_date: '2026-06-02' } },
+    { method: 'DELETE', path: `/purchase-orders/${purchaseOrderId}` },
+    {
+      method: 'POST',
+      path: `/purchase-orders/${purchaseOrderId}/lines`,
+      body: {
+        line_number: 1,
+        description: 'Item',
+        quantity: 1,
+        unit_price: 10,
+        account_id: accountId,
+      },
+    },
+    {
+      method: 'PATCH',
+      path: `/purchase-orders/${purchaseOrderId}/lines/${purchaseOrderLineId}`,
+      body: { quantity: 2 },
+    },
+    { method: 'DELETE', path: `/purchase-orders/${purchaseOrderId}/lines/${purchaseOrderLineId}` },
+    {
+      method: 'POST',
+      path: '/goods-receipts',
+      body: {
+        company_id: companyId,
+        supplier_id: supplierId,
+        purchase_order_id: purchaseOrderId,
+        receipt_date: '2026-06-03',
+      },
+    },
+    { method: 'GET', path: `/goods-receipts?company_id=${companyId}` },
+    { method: 'GET', path: `/goods-receipts/${goodsReceiptId}` },
+    { method: 'PATCH', path: `/goods-receipts/${goodsReceiptId}`, body: { receipt_date: '2026-06-04' } },
+    { method: 'DELETE', path: `/goods-receipts/${goodsReceiptId}` },
+    {
+      method: 'POST',
+      path: `/goods-receipts/${goodsReceiptId}/lines`,
+      body: { purchase_order_line_id: purchaseOrderLineId, quantity_received: 1 },
+    },
+    {
+      method: 'PATCH',
+      path: `/goods-receipts/${goodsReceiptId}/lines/${goodsReceiptLineId}`,
+      body: { quantity_received: 2 },
+    },
+    { method: 'DELETE', path: `/goods-receipts/${goodsReceiptId}/lines/${goodsReceiptLineId}` },
+    {
+      method: 'POST',
+      path: '/bills',
+      body: { company_id: companyId, supplier_id: supplierId, bill_date: '2026-06-05' },
+    },
+    { method: 'GET', path: `/bills?company_id=${companyId}` },
+    { method: 'GET', path: `/bills/${billId}` },
+    { method: 'PATCH', path: `/bills/${billId}`, body: { payment_terms: 'net_30' } },
+    { method: 'DELETE', path: `/bills/${billId}` },
+    { method: 'POST', path: `/bills/${billId}/match` },
+    { method: 'POST', path: `/bills/${billId}/issue` },
+    { method: 'POST', path: `/bills/${billId}/approve` },
+    { method: 'POST', path: `/bills/${billId}/override-match-block`, body: { reason: 'Owner override' } },
+    { method: 'POST', path: `/bills/${billId}/void`, body: { void_reason: 'Auth probe' } },
+    { method: 'PATCH', path: `/bills/${billId}/schedule`, body: { scheduled_payment_date: '2026-07-01' } },
+    { method: 'PATCH', path: `/bills/${billId}/dispute`, body: { disputed: true } },
+    {
+      method: 'POST',
+      path: `/bills/${billId}/lines`,
+      body: {
+        line_number: 1,
+        description: 'Expense',
+        quantity: 1,
+        unit_price: 10,
+        vat_rate: 5,
+        account_id: accountId,
+      },
+    },
+    { method: 'PATCH', path: `/bills/${billId}/lines/${billLineId}`, body: { quantity: 2 } },
+    { method: 'DELETE', path: `/bills/${billId}/lines/${billLineId}` },
+    {
+      method: 'POST',
+      path: '/supplier-payments',
+      body: {
+        company_id: companyId,
+        supplier_id: supplierId,
+        payment_date: '2026-06-15',
+        amount: 100,
+        payment_method: 'bank_transfer',
+      },
+    },
+    { method: 'GET', path: `/supplier-payments?company_id=${companyId}` },
+    { method: 'GET', path: `/supplier-payments/${supplierPaymentId}` },
+    { method: 'PATCH', path: `/supplier-payments/${supplierPaymentId}`, body: { reference_number: 'REF' } },
+    { method: 'DELETE', path: `/supplier-payments/${supplierPaymentId}` },
+    { method: 'POST', path: `/supplier-payments/${supplierPaymentId}/post` },
+    {
+      method: 'POST',
+      path: `/supplier-payments/${supplierPaymentId}/applications`,
+      body: { bill_id: billId, applied_amount: 50 },
+    },
+    { method: 'DELETE', path: `/supplier-payments/${supplierPaymentId}/applications/${supplierPaymentAppId}` },
+    { method: 'POST', path: `/supplier-payments/${supplierPaymentId}/applications/${supplierPaymentAppId}/post` },
+    {
+      method: 'POST',
+      path: '/supplier-payment-runs',
+      body: {
+        company_id: companyId,
+        run_date: '2026-06-16',
+        payment_method: 'bank_transfer',
+        items: [{ bill_id: billId, supplier_id: supplierId, amount_to_pay: 50 }],
+      },
+    },
+    { method: 'GET', path: `/supplier-payment-runs?company_id=${companyId}` },
+    { method: 'GET', path: `/supplier-payment-runs/${paymentRunId}` },
+    { method: 'PATCH', path: `/supplier-payment-runs/${paymentRunId}`, body: { run_date: '2026-06-17' } },
+    { method: 'POST', path: `/supplier-payment-runs/${paymentRunId}/cancel` },
+    { method: 'POST', path: `/supplier-payment-runs/${paymentRunId}/approve` },
+    { method: 'POST', path: `/supplier-payment-runs/${paymentRunId}/execute` },
+    { method: 'DELETE', path: `/supplier-payment-runs/${paymentRunId}` },
+    {
+      method: 'POST',
+      path: '/supplier-statement-lines',
+      body: {
+        company_id: companyId,
+        supplier_id: supplierId,
+        statement_date: '2026-06-30',
+        line_date: '2026-06-05',
+        line_type: 'invoice',
+        amount: 100,
+      },
+    },
+    { method: 'GET', path: `/supplier-statement-lines?company_id=${companyId}` },
+    { method: 'GET', path: `/supplier-statement-lines/${statementLineId}` },
+    {
+      method: 'PATCH',
+      path: `/supplier-statement-lines/${statementLineId}`,
+      body: { amount: 110 },
+    },
+    {
+      method: 'PATCH',
+      path: `/supplier-statement-lines/${statementLineId}/confirm-match`,
+      body: { matched_bill_id: billId },
+    },
+    { method: 'DELETE', path: `/supplier-statement-lines/${statementLineId}` },
+    {
+      method: 'POST',
       path: '/public-holidays',
       body: {
         company_id: companyId,
@@ -351,6 +550,11 @@ describe('Controller auth coverage (decision #24)', () => {
       method: 'POST',
       path: '/journal-entries/year-end-close',
       body: { company_id: companyId, fiscal_year: 2026 },
+    },
+    {
+      method: 'POST',
+      path: '/journal-entries/accrue-unbilled-receipts',
+      body: { company_id: companyId, period_end_date: '2026-01-31' },
     },
     { method: 'GET', path: `/journal-entries?company_id=${companyId}` },
     { method: 'GET', path: `/journal-entries/${entryId}` },
@@ -543,6 +747,7 @@ describe('Controller auth coverage (decision #24)', () => {
       create: jest.fn().mockResolvedValue(journalEntryDetails),
       createOpeningBalance: jest.fn().mockResolvedValue(journalEntryDetails),
       runYearEndClosing: jest.fn().mockResolvedValue(journalEntryDetails),
+      accrueUnbilledReceipts: jest.fn().mockResolvedValue({ accrual_amount: 0 }),
       post: jest.fn().mockResolvedValue(journalEntryDetails),
       approve: jest.fn().mockResolvedValue(journalEntryDetails),
       reject: jest.fn().mockResolvedValue(journalEntryDetails),
@@ -626,7 +831,66 @@ describe('Controller auth coverage (decision #24)', () => {
         average_terms_days: null,
         invoices: [],
       }),
+      getSupplierLedger: jest.fn().mockResolvedValue([]),
+      getAgedPayables: jest.fn().mockResolvedValue([]),
+      getBillsDue: jest.fn().mockResolvedValue([]),
+      reconcileSupplierStatement: jest.fn().mockResolvedValue({}),
     };
+
+    const apStub = {
+      create: jest.fn().mockResolvedValue({ id: supplierId }),
+      findAll: jest.fn().mockResolvedValue([]),
+      findOne: jest.fn().mockResolvedValue({ id: supplierId }),
+      update: jest.fn().mockResolvedValue({ id: supplierId }),
+      deactivate: jest.fn().mockResolvedValue({ id: supplierId }),
+      remove: jest.fn().mockResolvedValue(undefined),
+      createLine: jest.fn().mockResolvedValue({ id: purchaseOrderLineId }),
+      updateLine: jest.fn().mockResolvedValue({ id: purchaseOrderLineId }),
+      deleteLine: jest.fn().mockResolvedValue(undefined),
+      match: jest.fn().mockResolvedValue({ bill: { id: billId }, lines: [] }),
+      issue: jest.fn().mockResolvedValue({ bill: { id: billId }, lines: [] }),
+      approve: jest.fn().mockResolvedValue({ bill: { id: billId }, lines: [] }),
+      overrideMatchBlock: jest.fn().mockResolvedValue({ bill: { id: billId }, lines: [] }),
+      void: jest.fn().mockResolvedValue({
+        bill: { id: billId },
+        lines: [],
+        ledger_reversal_status: 'reversed',
+      }),
+      schedule: jest.fn().mockResolvedValue({ bill: { id: billId }, lines: [] }),
+      dispute: jest.fn().mockResolvedValue({ bill: { id: billId }, lines: [] }),
+      createPayment: jest.fn().mockResolvedValue({ payment: { id: supplierPaymentId }, applications: [] }),
+      findAllPayments: jest.fn().mockResolvedValue([]),
+      findPayment: jest.fn().mockResolvedValue({ payment: { id: supplierPaymentId }, applications: [] }),
+      updatePayment: jest.fn().mockResolvedValue({ payment: { id: supplierPaymentId }, applications: [] }),
+      removePayment: jest.fn().mockResolvedValue(undefined),
+      postPayment: jest.fn().mockResolvedValue({ payment: { id: supplierPaymentId }, applications: [] }),
+      createApplication: jest.fn().mockResolvedValue({ id: supplierPaymentAppId }),
+      deleteApplication: jest.fn().mockResolvedValue(undefined),
+      postAdvanceApplication: jest.fn().mockResolvedValue({
+        application: { id: supplierPaymentAppId },
+        journal_entry_id: '00000000-0000-0000-0000-000000000096',
+      }),
+      createRun: jest.fn().mockResolvedValue({ run: { id: paymentRunId }, items: [] }),
+      findAllRuns: jest.fn().mockResolvedValue([]),
+      findRun: jest.fn().mockResolvedValue({ run: { id: paymentRunId }, items: [] }),
+      updateRunHeader: jest.fn().mockResolvedValue({ run: { id: paymentRunId }, items: [] }),
+      cancelRun: jest.fn().mockResolvedValue({ run: { id: paymentRunId }, items: [] }),
+      approveRun: jest.fn().mockResolvedValue({ run: { id: paymentRunId }, items: [] }),
+      executeRun: jest.fn().mockResolvedValue({ payments: [], skipped: [] }),
+      removeRun: jest.fn().mockResolvedValue(undefined),
+      createStatementLine: jest.fn().mockResolvedValue({ id: statementLineId }),
+      findAllStatementLines: jest.fn().mockResolvedValue([]),
+      findStatementLine: jest.fn().mockResolvedValue({ id: statementLineId }),
+      updateStatementLine: jest.fn().mockResolvedValue({ id: statementLineId }),
+      confirmStatementMatch: jest.fn().mockResolvedValue({ id: statementLineId, match_status: 'matched' }),
+      removeStatementLine: jest.fn().mockResolvedValue(undefined),
+    };
+
+    const suppliersService = apStub;
+    const purchaseOrdersService = apStub;
+    const goodsReceiptsService = apStub;
+    const billsService = apStub;
+    const supplierPaymentsService = apStub;
 
     const module: TestingModule = await Test.createTestingModule({
       controllers: [
@@ -648,6 +912,13 @@ describe('Controller auth coverage (decision #24)', () => {
         RecurringJournalTemplateLinesController,
         AuditLogController,
         ReportsController,
+        SuppliersController,
+        PurchaseOrdersController,
+        GoodsReceiptsController,
+        BillsController,
+        SupplierPaymentsController,
+        SupplierPaymentRunsController,
+        SupplierStatementLinesController,
       ],
       providers: [
         SupabaseAuthGuard,
@@ -664,6 +935,11 @@ describe('Controller auth coverage (decision #24)', () => {
         { provide: RecurringJournalTemplatesService, useValue: recurringService },
         { provide: AuditLogService, useValue: auditLogService },
         { provide: ReportsService, useValue: reportsService },
+        { provide: SuppliersService, useValue: suppliersService },
+        { provide: PurchaseOrdersService, useValue: purchaseOrdersService },
+        { provide: GoodsReceiptsService, useValue: goodsReceiptsService },
+        { provide: BillsService, useValue: billsService },
+        { provide: SupplierPaymentsService, useValue: supplierPaymentsService },
         {
           provide: SupabaseService,
           useValue: {
@@ -720,7 +996,7 @@ describe('Controller auth coverage (decision #24)', () => {
   }
 
   it('covers all guarded HTTP routes', () => {
-    expect(ALL_GUARDED_ROUTES).toHaveLength(102);
+    expect(ALL_GUARDED_ROUTES).toHaveLength(166);
   });
 
   it.each(ALL_GUARDED_ROUTES)(

@@ -1,8 +1,9 @@
 -- seed_finalized_coa_demo_company_0002.sql
--- [feature-spec.md decision #17] Apply this file in Supabase to mint the new demo company.
+-- [feature-spec.md decision #17] Apply this file in Supabase to mint the demo company.
 -- INSERT-ONLY — does not touch 00000000-0000-0000-0000-000000000001.
 --
--- Module 1.1.A UAE Chart of Accounts seed (finalized 179-account COA + 4 hierarchy demos)
+-- Module 1.1.A UAE Chart of Accounts seed (finalized 180-account COA + 4 hierarchy demos = 184)
+-- [feature-spec-1_1_E.md E-23] adds 1350 Supplier Advances (not 1320)
 -- Source: Chart of Accounts - inFINity.xlsx → "Chart of Accounts" sheet
 -- [feature-spec.md decision #5] normal_balance lowercase debit/credit only
 -- [feature-spec.md decision #6] Demo company fixed UUID for seed only
@@ -50,6 +51,7 @@ INSERT INTO public.accounts (company_id, account_number, account_name, category,
 INSERT INTO public.accounts (company_id, account_number, account_name, category, sub_category, normal_balance, parent_account_id, depth, is_system_account, is_active, description) VALUES ('00000000-0000-0000-0000-000000000002', '1320', 'Prepaid Expenses - Other', 'asset', 'Prepayments', 'debit', NULL, 1, false, true, '[Detail]');
 INSERT INTO public.accounts (company_id, account_number, account_name, category, sub_category, normal_balance, parent_account_id, depth, is_system_account, is_active, description) VALUES ('00000000-0000-0000-0000-000000000002', '1330', 'Deposits Paid (Refundable)', 'asset', 'Prepayments', 'debit', NULL, 1, false, true, '[Detail]');
 INSERT INTO public.accounts (company_id, account_number, account_name, category, sub_category, normal_balance, parent_account_id, depth, is_system_account, is_active, description) VALUES ('00000000-0000-0000-0000-000000000002', '1340', 'Staff Visa / Labour Card Deposits', 'asset', 'Prepayments', 'debit', NULL, 1, false, true, '[Detail] UAE labour/immigration deposits');
+INSERT INTO public.accounts (company_id, account_number, account_name, category, sub_category, normal_balance, parent_account_id, depth, is_system_account, is_active, description) VALUES ('00000000-0000-0000-0000-000000000002', '1350', 'Supplier Advances', 'asset', 'Prepayments', 'debit', NULL, 1, false, true, '[Detail] Trade prepayments to suppliers, tracked per-vendor and applied against a future bill. Distinct from 1320 (time-amortised prepaid). [feature-spec-1_1_E.md E-23]');
 INSERT INTO public.accounts (company_id, account_number, account_name, category, sub_category, normal_balance, parent_account_id, depth, is_system_account, is_active, description) VALUES ('00000000-0000-0000-0000-000000000002', '1400', 'VAT Receivable (Input VAT)', 'asset', 'Tax Recoverable', 'debit', NULL, 1, false, true, '[Control][Recoverable Input VAT] FTA Federal Decree-Law No. 8/2017');
 INSERT INTO public.accounts (company_id, account_number, account_name, category, sub_category, normal_balance, parent_account_id, depth, is_system_account, is_active, description) VALUES ('00000000-0000-0000-0000-000000000002', '1410', 'VAT Receivable - Reverse Charge (Input Leg)', 'asset', 'Tax Recoverable', 'debit', NULL, 1, false, true, '[Detail][RCM Input]');
 INSERT INTO public.accounts (company_id, account_number, account_name, category, sub_category, normal_balance, parent_account_id, depth, is_system_account, is_active, description) VALUES ('00000000-0000-0000-0000-000000000002', '1420', 'VAT Refund Receivable from FTA', 'asset', 'Tax Recoverable', 'debit', NULL, 1, false, true, '[Detail] Approved refund claim pending disbursement');
@@ -213,16 +215,6 @@ INSERT INTO public.accounts (company_id, account_number, account_name, category,
 
 -- depth 3 accounts
 INSERT INTO public.accounts (company_id, account_number, account_name, category, sub_category, normal_balance, parent_account_id, depth, is_system_account, is_active, description) VALUES ('00000000-0000-0000-0000-000000000002', '5102', 'Salaries & Wages Expense - Head Office - Management', 'expense', 'Payroll', 'debit', (SELECT id FROM public.accounts WHERE company_id = '00000000-0000-0000-0000-000000000002' AND account_number = '5101'), 3, false, true, '[Detail] Hierarchy demo child of 5101. [feature-spec.md decision #15]');
-
--- [feature-spec-1_1_D.md §3.1a / D-6] company_settings is inserted before accounts exist
--- (no create trigger) — backfill default bank to 1020 once the COA row is present.
-UPDATE public.company_settings cs
-SET default_bank_account_id = a.id
-FROM public.accounts a
-WHERE cs.company_id = '00000000-0000-0000-0000-000000000002'
-  AND a.company_id = cs.company_id
-  AND a.account_number = '1020'
-  AND cs.default_bank_account_id IS NULL;
 
 COMMIT;
 

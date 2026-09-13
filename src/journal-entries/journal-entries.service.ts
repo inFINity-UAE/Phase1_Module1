@@ -24,6 +24,7 @@ import { JournalEntryType } from '../common/enums/journal-entry-type.enum';
 import { CreateJournalEntryDto } from './dto/create-journal-entry.dto';
 import { CreateOpeningBalanceDto } from './dto/create-opening-balance.dto';
 import { CreateYearEndClosingDto } from './dto/create-year-end-closing.dto';
+import { AccrueUnbilledReceiptsDto } from './dto/accrue-unbilled-receipts.dto';
 import { UpdateJournalEntryDto } from './dto/update-journal-entry.dto';
 import {
   ApproveJournalEntryDto,
@@ -159,6 +160,25 @@ export class JournalEntriesService {
       return posted;
     } catch (error) {
       this.throwMappedJournalRpcError(error, dto.fiscal_year);
+    }
+  }
+
+  /**
+   * [feature-spec-1_1_E.md E-21 / §5.5] Period-end GRNI accrual via RPC.
+   * Not a cron — month-end is a human call.
+   */
+  async accrueUnbilledReceipts(
+    dto: AccrueUnbilledReceiptsDto,
+    createdBy: string,
+  ): Promise<unknown> {
+    try {
+      return await this.journalEntriesRepository.accrueUnbilledReceipts(
+        dto.company_id,
+        dto.period_end_date,
+        createdBy,
+      );
+    } catch (error) {
+      handleDatabaseError(error);
     }
   }
 

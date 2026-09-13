@@ -199,8 +199,10 @@ def verify(accounts: list[tuple]) -> None:
     nums = [a[0] for a in accounts]
     if len(nums) != len(set(nums)):
         errors.append("duplicate account_numbers")
-    if len(accounts) != 183:
-        errors.append(f"expected 183 accounts (179 Excel + 4 hierarchy), got {len(accounts)}")
+    if len(accounts) != 184:
+        errors.append(f"expected 184 accounts (180 Excel + 4 hierarchy), got {len(accounts)}")
+    if "1350" not in {a[0] for a in accounts}:
+        errors.append("missing 1350 Supplier Advances [feature-spec-1_1_E.md E-23]")
 
     by_num = {a[0]: a for a in accounts}
     for a in accounts:
@@ -276,7 +278,8 @@ def write_seed(accounts: list[tuple]) -> None:
         "-- [feature-spec.md decision #17] Apply this file in Supabase to mint the demo company.",
         "-- INSERT-ONLY — does not touch 00000000-0000-0000-0000-000000000001.",
         "--",
-        "-- Module 1.1.A UAE Chart of Accounts seed (finalized 179-account COA + 4 hierarchy demos)",
+        "-- Module 1.1.A UAE Chart of Accounts seed (finalized 180-account COA + 4 hierarchy demos = 184)",
+        "-- [feature-spec-1_1_E.md E-23] adds 1350 Supplier Advances (not 1320)",
         "-- Source: Chart of Accounts - inFINity.xlsx → \"Chart of Accounts\" sheet",
         "-- [feature-spec.md decision #5] normal_balance lowercase debit/credit only",
         "-- [feature-spec.md decision #6] Demo company fixed UUID for seed only",
@@ -334,12 +337,12 @@ def write_seed(accounts: list[tuple]) -> None:
 
 def write_verify_sql() -> None:
     sql = f"""-- verify_chart_of_accounts.sql
--- Stage 1 verification against finalized UAE COA seed (183 rows)
+-- Stage 1 verification against finalized UAE COA seed (184 rows)
 WITH seed AS (
   SELECT * FROM public.accounts WHERE company_id = '{COMPANY_ID}'
 ),
 checks AS (
-  SELECT 'total_count' AS check_name, count(*)::text AS value, (count(*) = 183) AS pass FROM seed
+  SELECT 'total_count' AS check_name, count(*)::text AS value, (count(*) = 184) AS pass FROM seed
   UNION ALL
   SELECT 'no_duplicate_account_numbers', count(*)::text, count(*) = 0
   FROM (SELECT account_number FROM seed GROUP BY account_number HAVING count(*) > 1) d

@@ -42,6 +42,11 @@ describe('ReportsService (period trial balance)', () => {
         invoices: [],
       }),
       findCustomerCompanyRow: jest.fn(),
+      findSupplierCompanyRow: jest.fn(),
+      getSupplierLedger: jest.fn().mockResolvedValue([]),
+      getAgedPayables: jest.fn().mockResolvedValue([]),
+      getBillsDue: jest.fn().mockResolvedValue([]),
+      reconcileSupplierStatement: jest.fn().mockResolvedValue({}),
     };
     service = new ReportsService(repository);
   });
@@ -141,6 +146,11 @@ describe('ReportsService (balance sheet)', () => {
         invoices: [],
       }),
       findCustomerCompanyRow: jest.fn(),
+      findSupplierCompanyRow: jest.fn(),
+      getSupplierLedger: jest.fn().mockResolvedValue([]),
+      getAgedPayables: jest.fn().mockResolvedValue([]),
+      getBillsDue: jest.fn().mockResolvedValue([]),
+      reconcileSupplierStatement: jest.fn().mockResolvedValue({}),
     };
     service = new ReportsService(repository);
   });
@@ -238,6 +248,11 @@ describe('ReportsService (profit and loss)', () => {
         invoices: [],
       }),
       findCustomerCompanyRow: jest.fn(),
+      findSupplierCompanyRow: jest.fn(),
+      getSupplierLedger: jest.fn().mockResolvedValue([]),
+      getAgedPayables: jest.fn().mockResolvedValue([]),
+      getBillsDue: jest.fn().mockResolvedValue([]),
+      reconcileSupplierStatement: jest.fn().mockResolvedValue({}),
     };
     service = new ReportsService(repository);
   });
@@ -346,6 +361,11 @@ describe('ReportsService (general ledger)', () => {
         invoices: [],
       }),
       findCustomerCompanyRow: jest.fn(),
+      findSupplierCompanyRow: jest.fn(),
+      getSupplierLedger: jest.fn().mockResolvedValue([]),
+      getAgedPayables: jest.fn().mockResolvedValue([]),
+      getBillsDue: jest.fn().mockResolvedValue([]),
+      reconcileSupplierStatement: jest.fn().mockResolvedValue({}),
     };
     service = new ReportsService(repository);
   });

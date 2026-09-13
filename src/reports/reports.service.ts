@@ -10,6 +10,9 @@ import {
 import { CreditLimitCheck } from './entities/credit-limit-check.entity';
 import { CustomerLedgerRow } from './entities/customer-ledger-row.entity';
 import { CustomerPaymentHistory } from './entities/customer-payment-history.entity';
+import { AgedPayablesRow } from './entities/aged-payables-row.entity';
+import { BillsDueRow } from './entities/bills-due-row.entity';
+import { SupplierLedgerRow } from './entities/supplier-ledger-row.entity';
 import { GeneralLedgerRow } from './entities/general-ledger-row.entity';
 import { PeriodTrialBalanceRow } from './entities/period-trial-balance-row.entity';
 import {
@@ -314,6 +317,85 @@ export class ReportsService {
       return await this.reportsRepository.getCustomerPaymentHistory(
         companyId,
         customerId,
+      );
+    } catch (error) {
+      handleDatabaseError(error);
+    }
+  }
+
+  private async assertSupplierUsableForCompany(
+    companyId: string,
+    supplierId: string,
+  ): Promise<void> {
+    const supplier = await this.reportsRepository.findSupplierCompanyRow(supplierId);
+    if (!supplier) {
+      throw new NotFoundException(`Supplier ${supplierId} not found`);
+    }
+    if (supplier.company_id !== companyId) {
+      throw new BadRequestException(
+        `Supplier ${supplierId} does not belong to company ${companyId}`,
+      );
+    }
+  }
+
+  /** [feature-spec-1_1_E.md §5.1] Supplier ledger — thin RPC pass-through. */
+  async getSupplierLedger(
+    companyId: string,
+    supplierId: string,
+    dateFrom?: string,
+    dateTo?: string,
+  ): Promise<SupplierLedgerRow[]> {
+    if (dateFrom != null && dateTo != null && dateTo < dateFrom) {
+      throw new BadRequestException(
+        `date_to (${dateTo}) must be on or after date_from (${dateFrom})`,
+      );
+    }
+
+    try {
+      await this.assertSupplierUsableForCompany(companyId, supplierId);
+      return await this.reportsRepository.getSupplierLedger(
+        companyId,
+        supplierId,
+        dateFrom ?? null,
+        dateTo ?? null,
+      );
+    } catch (error) {
+      handleDatabaseError(error);
+    }
+  }
+
+  /** [feature-spec-1_1_E.md §5.2] Aged payables. */
+  async getAgedPayables(companyId: string, asOfDate?: string): Promise<AgedPayablesRow[]> {
+    try {
+      const resolvedAsOf = asOfDate ?? serverAsOfDateToday();
+      return await this.reportsRepository.getAgedPayables(companyId, resolvedAsOf);
+    } catch (error) {
+      handleDatabaseError(error);
+    }
+  }
+
+  /** [feature-spec-1_1_E.md §5.2 / §5.4] Open bills due. */
+  async getBillsDue(companyId: string, asOfDate?: string): Promise<BillsDueRow[]> {
+    try {
+      const resolvedAsOf = asOfDate ?? serverAsOfDateToday();
+      return await this.reportsRepository.getBillsDue(companyId, resolvedAsOf);
+    } catch (error) {
+      handleDatabaseError(error);
+    }
+  }
+
+  /** [feature-spec-1_1_E.md §5.3 / E-22] Suggested statement match. */
+  async reconcileSupplierStatement(
+    companyId: string,
+    supplierId: string,
+    statementDate: string,
+  ): Promise<unknown> {
+    try {
+      await this.assertSupplierUsableForCompany(companyId, supplierId);
+      return await this.reportsRepository.reconcileSupplierStatement(
+        companyId,
+        supplierId,
+        statementDate,
       );
     } catch (error) {
       handleDatabaseError(error);

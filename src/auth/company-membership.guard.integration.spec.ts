@@ -34,6 +34,13 @@ import {
   RecurringJournalTemplatesController,
 } from '../recurring-journal-templates/recurring-journal-templates.controller';
 import { ReportsController } from '../reports/reports.controller';
+import { SuppliersController } from '../suppliers/suppliers.controller';
+import { PurchaseOrdersController } from '../purchase-orders/purchase-orders.controller';
+import { GoodsReceiptsController } from '../goods-receipts/goods-receipts.controller';
+import { BillsController } from '../bills/bills.controller';
+import { SupplierPaymentsController } from '../supplier-payments/supplier-payments.controller';
+import { SupplierPaymentRunsController } from '../supplier-payments/supplier-payment-runs.controller';
+import { SupplierStatementLinesController } from '../supplier-payments/supplier-statement-lines.controller';
 import { REQUIRE_COMPANY_MEMBERSHIP_KEY } from '../auth/decorators/require-company-membership.decorator';
 import { SupabaseService } from '../database/supabase.service';
 import { CompanyRole } from '../common/enums/company-role.enum';
@@ -70,6 +77,13 @@ const HTTP_CONTROLLERS: Type[] = [
   RecurringJournalTemplateLinesController,
   AuditLogController,
   ReportsController,
+  SuppliersController,
+  PurchaseOrdersController,
+  GoodsReceiptsController,
+  BillsController,
+  SupplierPaymentsController,
+  SupplierPaymentRunsController,
+  SupplierStatementLinesController,
 ];
 
 /**
@@ -99,6 +113,13 @@ const HTTP_CONTROLLERS: Type[] = [
     let foreignPaymentId = '';
     let foreignPaymentApplicationId = '';
     let foreignPublicHolidayId = '';
+    let foreignSupplierId = '';
+    let foreignPurchaseOrderId = '';
+    let foreignGoodsReceiptId = '';
+    let foreignBillId = '';
+    let foreignSupplierPaymentId = '';
+    let foreignPaymentRunId = '';
+    let foreignStatementLineId = '';
     let memberAccountId = '';
 
     beforeAll(async () => {
@@ -369,6 +390,114 @@ const HTTP_CONTROLLERS: Type[] = [
       }
       foreignPublicHolidayId = foreignHoliday.id as string;
 
+      const { data: foreignSupplier, error: supplierErr } = await supabase.client
+        .from('suppliers')
+        .insert({
+          company_id: foreignCompanyId,
+          supplier_name: `foreign-supplier-${randomUUID()}`,
+        })
+        .select('id')
+        .single();
+      if (supplierErr || !foreignSupplier) {
+        throw supplierErr ?? new Error('foreign supplier insert failed');
+      }
+      foreignSupplierId = foreignSupplier.id as string;
+
+      const { data: foreignPo, error: poErr } = await supabase.client
+        .from('purchase_orders')
+        .insert({
+          company_id: foreignCompanyId,
+          supplier_id: foreignSupplierId,
+          po_date: '2026-06-01',
+          created_by: INTEGRATION_USER_ID,
+        })
+        .select('id')
+        .single();
+      if (poErr || !foreignPo) {
+        throw poErr ?? new Error('foreign purchase order insert failed');
+      }
+      foreignPurchaseOrderId = foreignPo.id as string;
+
+      const { data: foreignGrn, error: grnErr } = await supabase.client
+        .from('goods_receipts')
+        .insert({
+          company_id: foreignCompanyId,
+          supplier_id: foreignSupplierId,
+          purchase_order_id: foreignPurchaseOrderId,
+          receipt_date: '2026-06-02',
+          created_by: INTEGRATION_USER_ID,
+        })
+        .select('id')
+        .single();
+      if (grnErr || !foreignGrn) {
+        throw grnErr ?? new Error('foreign goods receipt insert failed');
+      }
+      foreignGoodsReceiptId = foreignGrn.id as string;
+
+      const { data: foreignBill, error: billErr } = await supabase.client
+        .from('bills')
+        .insert({
+          company_id: foreignCompanyId,
+          supplier_id: foreignSupplierId,
+          bill_date: '2026-06-05',
+          created_by: INTEGRATION_USER_ID,
+        })
+        .select('id')
+        .single();
+      if (billErr || !foreignBill) {
+        throw billErr ?? new Error('foreign bill insert failed');
+      }
+      foreignBillId = foreignBill.id as string;
+
+      const { data: foreignSpay, error: spayErr } = await supabase.client
+        .from('supplier_payments')
+        .insert({
+          company_id: foreignCompanyId,
+          supplier_id: foreignSupplierId,
+          payment_date: '2026-06-15',
+          amount: 50,
+          payment_method: 'bank_transfer',
+          created_by: INTEGRATION_USER_ID,
+        })
+        .select('id')
+        .single();
+      if (spayErr || !foreignSpay) {
+        throw spayErr ?? new Error('foreign supplier payment insert failed');
+      }
+      foreignSupplierPaymentId = foreignSpay.id as string;
+
+      const { data: foreignRun, error: runErr } = await supabase.client
+        .from('supplier_payment_runs')
+        .insert({
+          company_id: foreignCompanyId,
+          run_date: '2026-06-16',
+          payment_method: 'bank_transfer',
+          created_by: INTEGRATION_USER_ID,
+        })
+        .select('id')
+        .single();
+      if (runErr || !foreignRun) {
+        throw runErr ?? new Error('foreign payment run insert failed');
+      }
+      foreignPaymentRunId = foreignRun.id as string;
+
+      const { data: foreignStmt, error: stmtErr } = await supabase.client
+        .from('supplier_statement_lines')
+        .insert({
+          company_id: foreignCompanyId,
+          supplier_id: foreignSupplierId,
+          statement_date: '2026-06-30',
+          line_date: '2026-06-05',
+          line_type: 'invoice',
+          amount: 100,
+        })
+        .select('id')
+        .single();
+      if (stmtErr || !foreignStmt) {
+        throw stmtErr ?? new Error('foreign statement line insert failed');
+      }
+      foreignStatementLineId = foreignStmt.id as string;
+
       const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
       const publishableKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!;
       const userClient = createClient(url, publishableKey, {
@@ -556,6 +685,11 @@ const HTTP_CONTROLLERS: Type[] = [
         },
         {
           method: 'POST',
+          path: '/journal-entries/accrue-unbilled-receipts',
+          body: { company_id: foreignCompanyId, period_end_date: '2026-01-31' },
+        },
+        {
+          method: 'POST',
           path: '/journal-lines',
           body: {
             journal_entry_id: foreignEntryId,
@@ -666,6 +800,27 @@ const HTTP_CONTROLLERS: Type[] = [
         {
           method: 'GET',
           path: `/reports/customer-payment-history?company_id=${foreignCompanyId}&customer_id=${foreignCustomerId}`,
+        },
+        {
+          method: 'GET',
+          path: `/reports/supplier-ledger?company_id=${foreignCompanyId}&supplier_id=${foreignSupplierId}`,
+        },
+        {
+          method: 'GET',
+          path: `/reports/aged-payables?company_id=${foreignCompanyId}&as_of_date=2026-01-31`,
+        },
+        {
+          method: 'GET',
+          path: `/reports/bills-due?company_id=${foreignCompanyId}&as_of_date=2026-01-31`,
+        },
+        {
+          method: 'POST',
+          path: '/reports/reconcile-supplier-statement',
+          body: {
+            company_id: foreignCompanyId,
+            supplier_id: foreignSupplierId,
+            statement_date: '2026-01-31',
+          },
         },
         { method: 'GET', path: `/customers?company_id=${foreignCompanyId}` },
         { method: 'GET', path: `/customers/${foreignCustomerId}` },
@@ -780,6 +935,46 @@ const HTTP_CONTROLLERS: Type[] = [
           body: { holiday_date: '2099-07-02' },
         },
         { method: 'DELETE', path: `/public-holidays/${foreignPublicHolidayId}` },
+        { method: 'GET', path: `/suppliers?company_id=${foreignCompanyId}` },
+        { method: 'GET', path: `/suppliers/${foreignSupplierId}` },
+        {
+          method: 'POST',
+          path: '/suppliers',
+          body: { company_id: foreignCompanyId, supplier_name: 'Nope' },
+        },
+        { method: 'PATCH', path: `/suppliers/${foreignSupplierId}`, body: { supplier_name: 'Nope' } },
+        { method: 'PATCH', path: `/suppliers/${foreignSupplierId}/deactivate` },
+        { method: 'GET', path: `/purchase-orders?company_id=${foreignCompanyId}` },
+        { method: 'GET', path: `/purchase-orders/${foreignPurchaseOrderId}` },
+        {
+          method: 'POST',
+          path: '/purchase-orders',
+          body: {
+            company_id: foreignCompanyId,
+            supplier_id: foreignSupplierId,
+            po_date: '2026-06-01',
+          },
+        },
+        { method: 'GET', path: `/goods-receipts?company_id=${foreignCompanyId}` },
+        { method: 'GET', path: `/goods-receipts/${foreignGoodsReceiptId}` },
+        { method: 'GET', path: `/bills?company_id=${foreignCompanyId}` },
+        { method: 'GET', path: `/bills/${foreignBillId}` },
+        {
+          method: 'POST',
+          path: '/bills',
+          body: {
+            company_id: foreignCompanyId,
+            supplier_id: foreignSupplierId,
+            bill_date: '2026-06-05',
+          },
+        },
+        { method: 'POST', path: `/bills/${foreignBillId}/issue` },
+        { method: 'GET', path: `/supplier-payments?company_id=${foreignCompanyId}` },
+        { method: 'GET', path: `/supplier-payments/${foreignSupplierPaymentId}` },
+        { method: 'GET', path: `/supplier-payment-runs?company_id=${foreignCompanyId}` },
+        { method: 'GET', path: `/supplier-payment-runs/${foreignPaymentRunId}` },
+        { method: 'GET', path: `/supplier-statement-lines?company_id=${foreignCompanyId}` },
+        { method: 'GET', path: `/supplier-statement-lines/${foreignStatementLineId}` },
       ];
 
       const failures: string[] = [];

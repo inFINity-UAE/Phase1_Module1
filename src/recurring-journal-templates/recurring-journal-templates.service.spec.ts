@@ -173,6 +173,7 @@ describe('RecurringJournalTemplatesService', () => {
       getTrialBalanceTotals: jest.fn(),
       insertGeneratedFromTemplate: jest.fn(),
       generateDueRecurringEntry: jest.fn(),
+      accrueUnbilledReceipts: jest.fn(),
       getCompanySettings: jest.fn(),
       submitForApproval: jest.fn(),
       approveAndPostEntry: jest.fn(),

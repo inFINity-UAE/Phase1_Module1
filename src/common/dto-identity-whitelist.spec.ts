@@ -22,6 +22,11 @@ import { QueryAuditLogDto } from '../audit-log/dto/query-audit-log.dto';
 import { AccountCategory } from './enums/account-category.enum';
 import { NormalBalance } from './enums/normal-balance.enum';
 import { RecurrenceFrequency } from './enums/recurrence-frequency.enum';
+import { CreateBillDto } from '../bills/dto/create-bill.dto';
+import { CreateSupplierDto } from '../suppliers/dto/create-supplier.dto';
+import { UpdateSupplierDto } from '../suppliers/dto/update-supplier.dto';
+import { CreateSupplierPaymentDto } from '../supplier-payments/dto/create-supplier-payment.dto';
+import { AccrueUnbilledReceiptsDto } from '../journal-entries/dto/accrue-unbilled-receipts.dto';
 
 /**
  * [feature-spec.md decisions #10/#11/#21/#24/#27] Global ValidationPipe whitelist must reject
@@ -111,6 +116,29 @@ describe('DTO identity whitelist (forbidNonWhitelisted)', () => {
     normal_balance: NormalBalance.Debit,
   };
 
+  const validBill: Record<string, unknown> = {
+    company_id: companyId,
+    supplier_id: '1b1b1b1b-1b1b-1b1b-1b1b-1b1b1b1b1b1b',
+    bill_date: '2026-06-01',
+  };
+
+  const validSupplier: Record<string, unknown> = {
+    company_id: companyId,
+    supplier_name: 'Whitelist supplier',
+  };
+
+  const validSupplierPayment: Record<string, unknown> = {
+    company_id: companyId,
+    supplier_id: '1b1b1b1b-1b1b-1b1b-1b1b-1b1b1b1b1b1b',
+    payment_date: '2026-06-15',
+    amount: 100,
+  };
+
+  const validAccrueUnbilled: Record<string, unknown> = {
+    company_id: companyId,
+    period_end_date: '2026-06-30',
+  };
+
   const validJournalLine: Record<string, unknown> = {
     journal_entry_id: 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
     line_number: 1,
@@ -178,6 +206,13 @@ describe('DTO identity whitelist (forbidNonWhitelisted)', () => {
     ['created_by', UpdateJournalLineDto, { debit: 1 }],
     ['journal_entry_id', UpdateJournalLineDto, { debit: 1 }],
     ['actor_role', UpdateJournalLineDto, { debit: 1 }],
+    ['created_by', CreateBillDto, validBill],
+    ['actor_id', CreateBillDto, validBill],
+    ['created_by', CreateSupplierDto, validSupplier],
+    ['trn', UpdateSupplierDto, { supplier_name: 'Renamed' }],
+    ['company_id', UpdateSupplierDto, { supplier_name: 'Renamed' }],
+    ['created_by', CreateSupplierPaymentDto, validSupplierPayment],
+    ['created_by', AccrueUnbilledReceiptsDto, validAccrueUnbilled],
   ] as const)(
     'rejects spoofed %s on %s',
     async (field, dtoClass, validBody) => {

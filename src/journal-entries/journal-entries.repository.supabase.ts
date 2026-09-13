@@ -1112,4 +1112,23 @@ export class SupabaseJournalEntriesRepository implements JournalEntriesRepositor
       }),
     };
   }
+
+  /** [feature-spec-1_1_E.md E-21] Manual GRNI accrual — not a second scheduler. */
+  async accrueUnbilledReceipts(
+    companyId: string,
+    periodEndDate: string,
+    createdBy: string,
+  ): Promise<unknown> {
+    const { data, error } = await this.supabase.client.rpc('accrue_unbilled_receipts', {
+      p_company_id: companyId,
+      p_period_end_date: periodEndDate,
+      p_created_by: createdBy,
+    });
+
+    if (error) {
+      throw error;
+    }
+
+    return data;
+  }
 }

@@ -308,4 +308,118 @@ export class SupabaseCompanyMembersRepository implements CompanyMembersRepositor
     // UAE-wide rows (company_id null) are not tenant-resolvable — treat as missing.
     return (data?.company_id as string | undefined) ?? null;
   }
+
+  async findCompanyIdBySupplierId(supplierId: string): Promise<string | null> {
+    return this.findDirectCompanyId('suppliers', supplierId);
+  }
+
+  async findCompanyIdByPurchaseOrderId(poId: string): Promise<string | null> {
+    return this.findDirectCompanyId('purchase_orders', poId);
+  }
+
+  async findCompanyIdByPurchaseOrderLineId(lineId: string): Promise<string | null> {
+    return this.findNestedCompanyId(
+      'purchase_order_lines',
+      lineId,
+      'po_id, purchase_orders!inner(company_id)',
+      'purchase_orders',
+    );
+  }
+
+  async findCompanyIdByGoodsReceiptId(grnId: string): Promise<string | null> {
+    return this.findDirectCompanyId('goods_receipts', grnId);
+  }
+
+  async findCompanyIdByGoodsReceiptLineId(lineId: string): Promise<string | null> {
+    return this.findNestedCompanyId(
+      'goods_receipt_lines',
+      lineId,
+      'goods_receipt_id, goods_receipts!inner(company_id)',
+      'goods_receipts',
+    );
+  }
+
+  async findCompanyIdByBillId(billId: string): Promise<string | null> {
+    return this.findDirectCompanyId('bills', billId);
+  }
+
+  async findCompanyIdByBillLineId(lineId: string): Promise<string | null> {
+    return this.findNestedCompanyId(
+      'bill_lines',
+      lineId,
+      'bill_id, bills!inner(company_id)',
+      'bills',
+    );
+  }
+
+  async findCompanyIdBySupplierPaymentId(paymentId: string): Promise<string | null> {
+    return this.findDirectCompanyId('supplier_payments', paymentId);
+  }
+
+  async findCompanyIdBySupplierPaymentApplicationId(
+    applicationId: string,
+  ): Promise<string | null> {
+    return this.findNestedCompanyId(
+      'supplier_payment_applications',
+      applicationId,
+      'supplier_payment_id, supplier_payments!inner(company_id)',
+      'supplier_payments',
+    );
+  }
+
+  async findCompanyIdBySupplierPaymentRunId(runId: string): Promise<string | null> {
+    return this.findDirectCompanyId('supplier_payment_runs', runId);
+  }
+
+  async findCompanyIdBySupplierStatementLineId(lineId: string): Promise<string | null> {
+    return this.findDirectCompanyId('supplier_statement_lines', lineId);
+  }
+
+  private async findDirectCompanyId(
+    table: string,
+    id: string,
+  ): Promise<string | null> {
+    const { data, error } = await this.supabase.client
+      .from(table)
+      .select('company_id')
+      .eq('id', id)
+      .maybeSingle();
+
+    if (error) {
+      throw error;
+    }
+
+    return (data?.company_id as string | undefined) ?? null;
+  }
+
+  private async findNestedCompanyId(
+    table: string,
+    id: string,
+    select: string,
+    parentKey: string,
+  ): Promise<string | null> {
+    const { data, error } = await this.supabase.client
+      .from(table)
+      .select(select)
+      .eq('id', id)
+      .maybeSingle();
+
+    if (error) {
+      throw error;
+    }
+
+    const row = data as Record<string, unknown> | null;
+    const parent = row?.[parentKey] as
+      | { company_id?: string }
+      | { company_id?: string }[]
+      | null
+      | undefined;
+    if (!parent) {
+      return null;
+    }
+    if (Array.isArray(parent)) {
+      return parent[0]?.company_id ?? null;
+    }
+    return parent.company_id ?? null;
+  }
 }

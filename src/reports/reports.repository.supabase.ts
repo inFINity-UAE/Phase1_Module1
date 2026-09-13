@@ -8,7 +8,10 @@ import { CustomerPaymentHistory } from './entities/customer-payment-history.enti
 import { GeneralLedgerRow } from './entities/general-ledger-row.entity';
 import { PeriodTrialBalanceRow } from './entities/period-trial-balance-row.entity';
 import { ProfitAndLossAccountRow } from './entities/profit-and-loss.entity';
+import { AgedPayablesRow } from './entities/aged-payables-row.entity';
+import { BillsDueRow } from './entities/bills-due-row.entity';
 import { ReportsRepository } from './reports.repository';
+import { SupplierLedgerRow } from './entities/supplier-ledger-row.entity';
 
 
 function asMoney(value: unknown): number {
@@ -361,5 +364,120 @@ export class SupabaseReportsRepository implements ReportsRepository {
     }
 
     return data as { id: string; company_id: string } | null;
+  }
+
+  async findSupplierCompanyRow(
+    supplierId: string,
+  ): Promise<{ id: string; company_id: string } | null> {
+    const { data, error } = await this.supabase.client
+      .from('suppliers')
+      .select('id, company_id')
+      .eq('id', supplierId)
+      .maybeSingle();
+
+    if (error) {
+      throw error;
+    }
+
+    return data as { id: string; company_id: string } | null;
+  }
+
+  /** [feature-spec-1_1_E.md §5.1] Supplier ledger RPC. */
+  async getSupplierLedger(
+    companyId: string,
+    supplierId: string,
+    dateFrom?: string | null,
+    dateTo?: string | null,
+  ): Promise<SupplierLedgerRow[]> {
+    const { data, error } = await this.supabase.client.rpc('get_supplier_ledger', {
+      p_company_id: companyId,
+      p_supplier_id: supplierId,
+      p_date_from: dateFrom ?? null,
+      p_date_to: dateTo ?? null,
+    });
+
+    if (error) {
+      throw error;
+    }
+
+    return ((data as Record<string, unknown>[]) ?? []).map((row) => ({
+      entry_date: String(row.entry_date),
+      source_type: String(row.source_type),
+      source_id: String(row.source_id),
+      document_number: row.document_number == null ? null : String(row.document_number),
+      description: String(row.description),
+      debit: asMoney(row.debit),
+      credit: asMoney(row.credit),
+      affects_ap: Boolean(row.affects_ap),
+      running_balance: row.running_balance == null ? null : asMoney(row.running_balance),
+      journal_entry_id: String(row.journal_entry_id),
+    }));
+  }
+
+  /** [feature-spec-1_1_E.md §5.2] Aged payables RPC. */
+  async getAgedPayables(companyId: string, asOfDate: string): Promise<AgedPayablesRow[]> {
+    const { data, error } = await this.supabase.client.rpc('get_aged_payables', {
+      p_company_id: companyId,
+      p_as_of_date: asOfDate,
+    });
+
+    if (error) {
+      throw error;
+    }
+
+    return ((data as Record<string, unknown>[]) ?? []).map((row) => ({
+      supplier_id: row.supplier_id == null ? null : String(row.supplier_id),
+      supplier_name: String(row.supplier_name),
+      is_totals: Boolean(row.is_totals),
+      bucket_current: asMoney(row.bucket_current),
+      bucket_0_30: asMoney(row.bucket_0_30),
+      bucket_31_60: asMoney(row.bucket_31_60),
+      bucket_61_90: asMoney(row.bucket_61_90),
+      bucket_90_plus: asMoney(row.bucket_90_plus),
+      total: asMoney(row.total),
+    }));
+  }
+
+  /** [feature-spec-1_1_E.md §5.2 / §5.4] Bills-due RPC. */
+  async getBillsDue(companyId: string, asOfDate: string): Promise<BillsDueRow[]> {
+    const { data, error } = await this.supabase.client.rpc('get_bills_due', {
+      p_company_id: companyId,
+      p_as_of_date: asOfDate,
+    });
+
+    if (error) {
+      throw error;
+    }
+
+    return ((data as Record<string, unknown>[]) ?? []).map((row) => ({
+      bill_id: String(row.bill_id),
+      supplier_id: String(row.supplier_id),
+      supplier_name: String(row.supplier_name),
+      bill_number: row.bill_number == null ? null : String(row.bill_number),
+      due_date: row.due_date == null ? null : String(row.due_date),
+      scheduled_payment_date:
+        row.scheduled_payment_date == null ? null : String(row.scheduled_payment_date),
+      match_status: row.match_status == null ? null : String(row.match_status),
+      outstanding: asMoney(row.outstanding),
+    }));
+  }
+
+  /** [feature-spec-1_1_E.md §5.3 / E-22] Statement reconcile RPC. */
+  async reconcileSupplierStatement(
+    companyId: string,
+    supplierId: string,
+    statementDate: string,
+  ): Promise<unknown> {
+    const { data, error } = await this.supabase.client.rpc('reconcile_supplier_statement', {
+      p_company_id: companyId,
+      p_supplier_id: supplierId,
+      p_statement_date: statementDate,
+    });
+
+    if (error) {
+      throw error;
+    }
+
+    return data;
   }
 }

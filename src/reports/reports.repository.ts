@@ -6,6 +6,9 @@ import { AgedReceivablesRow } from './entities/aged-receivables-row.entity';
 import { CreditLimitCheck } from './entities/credit-limit-check.entity';
 import { CustomerLedgerRow } from './entities/customer-ledger-row.entity';
 import { CustomerPaymentHistory } from './entities/customer-payment-history.entity';
+import { AgedPayablesRow } from './entities/aged-payables-row.entity';
+import { BillsDueRow } from './entities/bills-due-row.entity';
+import { SupplierLedgerRow } from './entities/supplier-ledger-row.entity';
 
 export const REPORTS_REPOSITORY = Symbol('REPORTS_REPOSITORY');
 
@@ -68,4 +71,29 @@ export interface ReportsRepository {
   findCustomerCompanyRow(
     customerId: string,
   ): Promise<{ id: string; company_id: string } | null>;
+
+  findSupplierCompanyRow(
+    supplierId: string,
+  ): Promise<{ id: string; company_id: string } | null>;
+
+  /** [feature-spec-1_1_E.md §5.1] */
+  getSupplierLedger(
+    companyId: string,
+    supplierId: string,
+    dateFrom?: string | null,
+    dateTo?: string | null,
+  ): Promise<SupplierLedgerRow[]>;
+
+  /** [feature-spec-1_1_E.md §5.2] */
+  getAgedPayables(companyId: string, asOfDate: string): Promise<AgedPayablesRow[]>;
+
+  /** [feature-spec-1_1_E.md §5.2 / §5.4] */
+  getBillsDue(companyId: string, asOfDate: string): Promise<BillsDueRow[]>;
+
+  /** [feature-spec-1_1_E.md §5.3 / E-22] */
+  reconcileSupplierStatement(
+    companyId: string,
+    supplierId: string,
+    statementDate: string,
+  ): Promise<unknown>;
 }

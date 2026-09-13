@@ -39,6 +39,7 @@ create type period_status as enum ('open', 'soft_closed', 'closed');
 -- [feature-spec-1.1.C.md decision #13 / Batch 2 prerequisite] Module 1.1.C
 -- ledger posting entry classification — additive only; no existing rows use these values.
 -- [feature-spec-1_1_D.md §3.6] Module 1.1.D AR posting types — additive only.
+-- [feature-spec-1_1_E.md E-15] Module 1.1.E AP posting types — additive only.
 create type journal_entry_type as enum (
   'manual',
   'recurring',
@@ -52,7 +53,12 @@ create type journal_entry_type as enum (
   'advance_receipt',
   'advance_application',
   'write_off',
-  'ecl_provision'
+  'ecl_provision',
+  'purchase_invoice',
+  'supplier_payment',
+  'supplier_advance',
+  'supplier_advance_application',
+  'grni_accrual'
 );
 
 -- [feature-spec-1_1_D.md §3.2 / D-12] Payment method → debit-account routing.
@@ -118,6 +124,9 @@ create table company_settings (
   default_bank_account_id       uuid,                 -- D-6; FK + 1020 seed after accounts
   write_off_approval_threshold  numeric(18,2) not null default 5000, -- D-11 AED 5,000
   weekend_days                  smallint[] not null default '{6,7}', -- D-10/D-13 ISO Sat/Sun
+  -- [feature-spec-1_1_E.md E-26] split three-way match tolerance; no settings write API
+  three_way_match_qty_tolerance_pct   numeric(5,2) not null default 0,
+  three_way_match_price_tolerance_pct numeric(5,2) not null default 2,
   updated_at                    timestamptz not null default now()
 );
 
@@ -4604,6 +4613,2039 @@ revoke all on function mark_vat_relief_eligible(uuid, date) from anon;
 grant execute on function mark_vat_relief_eligible(uuid, date) to service_role;
 
 -- ============================================================================
+-- 7e. MODULE 1.1.E — Accounts Payable (feature-spec-1_1_E.md E-1…E-28)
+-- Bill entity Option A (`bills` table). GL: 2000 / 1400 / 1350 / 5060 / 2020.
+-- ============================================================================
+
+create type bill_status as enum (
+  'draft', 'matched', 'pending_approval', 'issued',
+  'partially_paid', 'paid', 'disputed', 'void'
+);
+create type bill_match_status as enum (
+  'no_po', 'awaiting_receipt', 'quantity_mismatch', 'price_mismatch',
+  'quantity_and_price_mismatch', 'matched'
+);
+create type po_status as enum (
+  'open', 'partially_received', 'received', 'closed', 'cancelled'
+);
+create type payment_run_status as enum (
+  'draft', 'approved', 'executed', 'cancelled'
+);
+
+create table suppliers (
+  id                      uuid primary key default gen_random_uuid(),
+  company_id              uuid not null references companies(id) on delete cascade,
+  supplier_name           text not null,
+  trn                     text,
+  email                   text,
+  phone                   text,
+  billing_address         text,
+  default_payment_terms   payment_terms_type not null default 'net_30',
+  custom_days             int,
+  bank_name               text,
+  iban                    text,
+  is_active               boolean not null default true,
+  created_at              timestamptz not null default now(),
+  updated_at              timestamptz not null default now(),
+  constraint suppliers_custom_days_required check (
+    default_payment_terms <> 'custom'
+    or (custom_days is not null and custom_days > 0)
+  )
+);
+create unique index suppliers_company_trn_unique
+  on suppliers(company_id, trn) where trn is not null;
+create index idx_suppliers_company on suppliers(company_id);
+
+create table purchase_orders (
+  id            uuid primary key default gen_random_uuid(),
+  company_id    uuid not null references companies(id),
+  supplier_id   uuid not null references suppliers(id),
+  po_number     text not null,
+  po_date       date not null,
+  status        po_status not null default 'open',
+  created_by    uuid not null,
+  created_at    timestamptz not null default now(),
+  updated_at    timestamptz not null default now(),
+  unique (company_id, po_number)
+);
+create index idx_purchase_orders_company on purchase_orders(company_id);
+
+create table purchase_order_lines (
+  id            uuid primary key default gen_random_uuid(),
+  po_id         uuid not null references purchase_orders(id) on delete cascade,
+  line_number   smallint not null,
+  description   text not null,
+  quantity      numeric(18,4) not null check (quantity > 0),
+  unit_price    numeric(18,2) not null check (unit_price >= 0),
+  account_id    uuid not null references accounts(id),
+  line_total    numeric(18,2) not null default 0,
+  unique (po_id, line_number)
+);
+
+create table goods_receipts (
+  id                  uuid primary key default gen_random_uuid(),
+  company_id          uuid not null references companies(id),
+  supplier_id         uuid not null references suppliers(id),
+  purchase_order_id   uuid not null references purchase_orders(id),
+  receipt_number      text not null,
+  receipt_date        date not null,
+  created_by          uuid not null,
+  created_at          timestamptz not null default now(),
+  unique (company_id, receipt_number)
+);
+create index idx_goods_receipts_po on goods_receipts(purchase_order_id);
+
+create table goods_receipt_lines (
+  id                      uuid primary key default gen_random_uuid(),
+  goods_receipt_id        uuid not null references goods_receipts(id) on delete cascade,
+  purchase_order_line_id  uuid not null references purchase_order_lines(id),
+  quantity_received       numeric(18,4) not null check (quantity_received > 0)
+);
+
+create table bills (
+  id                      uuid primary key default gen_random_uuid(),
+  company_id              uuid not null references companies(id),
+  supplier_id             uuid not null references suppliers(id),
+  bill_number             text,
+  supplier_invoice_number text,
+  purchase_order_id       uuid references purchase_orders(id),
+  bill_date               date not null,
+  due_date                date,
+  payment_terms           payment_terms_type not null default 'net_30',
+  custom_days             int,
+  subtotal                numeric(18,2) not null default 0,
+  vat_total               numeric(18,2) not null default 0,
+  grand_total             numeric(18,2) not null default 0,
+  amount_paid             numeric(18,2) not null default 0,
+  paid_at                 timestamptz,
+  status                  bill_status not null default 'draft',
+  match_status            bill_match_status,
+  possible_duplicate_of   uuid references bills(id),
+  scheduled_payment_date  date,
+  journal_entry_id        uuid references journal_entries(id),
+  payment_match_override_reason  text,
+  payment_match_overridden_by    uuid,
+  payment_match_overridden_at    timestamptz,
+  void_reason             text,
+  created_by              uuid not null,
+  created_at              timestamptz not null default now(),
+  updated_at              timestamptz not null default now(),
+  check (amount_paid >= 0 and amount_paid <= grand_total),
+  check (payment_terms <> 'custom' or (custom_days is not null and custom_days > 0)),
+  check (status <> 'void' or (void_reason is not null and btrim(void_reason) <> '')),
+  check (
+    (payment_match_override_reason is null
+     and payment_match_overridden_by is null
+     and payment_match_overridden_at is null)
+    or (
+      payment_match_override_reason is not null
+      and btrim(payment_match_override_reason) <> ''
+      and payment_match_overridden_by is not null
+      and payment_match_overridden_at is not null
+    )
+  )
+);
+create unique index bills_company_number_unique
+  on bills(company_id, bill_number) where bill_number is not null;
+create index idx_bills_company on bills(company_id);
+create index idx_bills_supplier on bills(supplier_id);
+create index idx_bills_status on bills(company_id, status);
+
+create table bill_lines (
+  id                      uuid primary key default gen_random_uuid(),
+  bill_id                 uuid not null references bills(id) on delete cascade,
+  line_number             smallint not null,
+  purchase_order_line_id  uuid references purchase_order_lines(id),
+  description             text not null,
+  quantity                numeric(18,4) not null check (quantity > 0),
+  unit_price              numeric(18,2) not null check (unit_price >= 0),
+  discount_percent        numeric(5,2),
+  discount_amount         numeric(18,2),
+  vat_rate                numeric(5,2) not null check (vat_rate >= 0 and vat_rate <= 100),
+  account_id              uuid references accounts(id),
+  line_total              numeric(18,2) not null default 0,
+  unique (bill_id, line_number),
+  constraint bill_lines_discount_xor check (
+    not (discount_percent is not null and discount_amount is not null)
+  )
+);
+
+create table three_way_match_results (
+  id                  uuid primary key default gen_random_uuid(),
+  bill_id             uuid not null references bills(id),
+  purchase_order_id   uuid references purchase_orders(id),
+  goods_receipt_id    uuid references goods_receipts(id),
+  match_status        bill_match_status not null,
+  details             jsonb,
+  checked_at          timestamptz not null default now()
+);
+
+create table supplier_payment_runs (
+  id                uuid primary key default gen_random_uuid(),
+  company_id        uuid not null references companies(id),
+  run_date          date not null,
+  payment_method    payment_method_type not null,
+  bank_account_id   uuid references accounts(id),
+  status            payment_run_status not null default 'draft',
+  created_by        uuid not null,
+  approved_by       uuid,
+  executed_at       timestamptz,
+  created_at        timestamptz not null default now(),
+  updated_at        timestamptz not null default now()
+);
+
+create table supplier_payment_run_items (
+  id            uuid primary key default gen_random_uuid(),
+  run_id        uuid not null references supplier_payment_runs(id) on delete cascade,
+  bill_id       uuid not null references bills(id),
+  supplier_id   uuid not null references suppliers(id),
+  amount_to_pay numeric(18,2) not null check (amount_to_pay > 0),
+  included      boolean not null default true,
+  unique (run_id, bill_id)
+);
+
+create table supplier_payments (
+  id                uuid primary key default gen_random_uuid(),
+  company_id        uuid not null references companies(id),
+  supplier_id       uuid not null references suppliers(id),
+  payment_date      date not null,
+  amount            numeric(18,2) not null check (amount > 0),
+  payment_method    payment_method_type,
+  reference_number  text,
+  bank_account_id   uuid references accounts(id),
+  unapplied_amount  numeric(18,2) not null,
+  journal_entry_id  uuid references journal_entries(id),
+  payment_run_id    uuid references supplier_payment_runs(id),
+  created_by        uuid not null,
+  created_at        timestamptz not null default now(),
+  updated_at        timestamptz not null default now(),
+  check (unapplied_amount >= 0 and unapplied_amount <= amount)
+);
+create index idx_supplier_payments_company on supplier_payments(company_id);
+
+create table supplier_payment_applications (
+  id                   uuid primary key default gen_random_uuid(),
+  supplier_payment_id  uuid not null references supplier_payments(id) on delete cascade,
+  bill_id              uuid not null references bills(id),
+  applied_amount       numeric(18,2) not null check (applied_amount > 0),
+  applied_at           timestamptz not null default now(),
+  applied_by           uuid not null,
+  journal_entry_id     uuid references journal_entries(id)
+);
+
+create table supplier_statement_lines (
+  id                    uuid primary key default gen_random_uuid(),
+  company_id            uuid not null references companies(id),
+  supplier_id           uuid not null references suppliers(id),
+  statement_date        date not null,
+  line_date             date not null,
+  line_type             text not null,
+  reference             text,
+  amount                numeric(18,2) not null,
+  source                text not null default 'manual',
+  matched_bill_id       uuid references bills(id),
+  matched_payment_id    uuid references supplier_payments(id),
+  match_status          text not null default 'unmatched',
+  created_at            timestamptz not null default now(),
+  check (
+    match_status <> 'matched'
+    or matched_bill_id is not null
+    or matched_payment_id is not null
+  )
+);
+
+create table grni_accrual_runs (
+  id                 uuid primary key default gen_random_uuid(),
+  company_id         uuid not null references companies(id),
+  period_end_date    date not null,
+  accrual_amount     numeric(18,2) not null,
+  journal_entry_id   uuid references journal_entries(id),
+  reversal_entry_id  uuid references journal_entries(id),
+  created_by         uuid not null,
+  created_at         timestamptz not null default now(),
+  unique (company_id, period_end_date)
+);
+
+-- Numbering [E-16]
+create or replace function allocate_next_bill_number(
+  p_company_id uuid,
+  p_bill_date date default current_date
+)
+returns text
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  v_year int;
+  v_seq int;
+begin
+  if p_company_id is null then
+    raise exception 'COMPANY_ID_REQUIRED';
+  end if;
+  perform pg_advisory_xact_lock(hashtext('bil:' || p_company_id::text));
+  v_year := extract(year from coalesce(p_bill_date, current_date))::int;
+  select coalesce(max(nullif(regexp_replace(bill_number, '^BILL-' || v_year::text || '-', ''), bill_number)::int), 0) + 1
+    into v_seq
+    from bills
+   where company_id = p_company_id
+     and bill_number ~ ('^BILL-' || v_year::text || '-[0-9]+$');
+  return format('BILL-%s-%s', v_year, lpad(v_seq::text, 4, '0'));
+end;
+$$;
+revoke all on function allocate_next_bill_number(uuid, date) from public;
+revoke all on function allocate_next_bill_number(uuid, date) from authenticated;
+revoke all on function allocate_next_bill_number(uuid, date) from anon;
+grant execute on function allocate_next_bill_number(uuid, date) to service_role;
+
+create or replace function allocate_next_po_number(
+  p_company_id uuid,
+  p_po_date date default current_date
+)
+returns text
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  v_year int;
+  v_seq int;
+begin
+  if p_company_id is null then
+    raise exception 'COMPANY_ID_REQUIRED';
+  end if;
+  perform pg_advisory_xact_lock(hashtext('po:' || p_company_id::text));
+  v_year := extract(year from coalesce(p_po_date, current_date))::int;
+  select coalesce(max(nullif(regexp_replace(po_number, '^PO-' || v_year::text || '-', ''), po_number)::int), 0) + 1
+    into v_seq
+    from purchase_orders
+   where company_id = p_company_id
+     and po_number ~ ('^PO-' || v_year::text || '-[0-9]+$');
+  return format('PO-%s-%s', v_year, lpad(v_seq::text, 4, '0'));
+end;
+$$;
+revoke all on function allocate_next_po_number(uuid, date) from public;
+revoke all on function allocate_next_po_number(uuid, date) from authenticated;
+revoke all on function allocate_next_po_number(uuid, date) from anon;
+grant execute on function allocate_next_po_number(uuid, date) to service_role;
+
+create or replace function allocate_next_grn_number(
+  p_company_id uuid,
+  p_receipt_date date default current_date
+)
+returns text
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  v_year int;
+  v_seq int;
+begin
+  if p_company_id is null then
+    raise exception 'COMPANY_ID_REQUIRED';
+  end if;
+  perform pg_advisory_xact_lock(hashtext('grn:' || p_company_id::text));
+  v_year := extract(year from coalesce(p_receipt_date, current_date))::int;
+  select coalesce(max(nullif(regexp_replace(receipt_number, '^GRN-' || v_year::text || '-', ''), receipt_number)::int), 0) + 1
+    into v_seq
+    from goods_receipts
+   where company_id = p_company_id
+     and receipt_number ~ ('^GRN-' || v_year::text || '-[0-9]+$');
+  return format('GRN-%s-%s', v_year, lpad(v_seq::text, 4, '0'));
+end;
+$$;
+revoke all on function allocate_next_grn_number(uuid, date) from public;
+revoke all on function allocate_next_grn_number(uuid, date) from authenticated;
+revoke all on function allocate_next_grn_number(uuid, date) from anon;
+grant execute on function allocate_next_grn_number(uuid, date) to service_role;
+
+create or replace function assign_po_number()
+returns trigger
+language plpgsql
+security invoker
+set search_path = public, pg_temp
+as $$
+begin
+  if new.po_number is null or btrim(new.po_number) = '' then
+    new.po_number := allocate_next_po_number(new.company_id, new.po_date);
+  end if;
+  return new;
+end;
+$$;
+create trigger trg_assign_po_number
+  before insert on purchase_orders
+  for each row execute function assign_po_number();
+
+create or replace function assign_grn_number()
+returns trigger
+language plpgsql
+security invoker
+set search_path = public, pg_temp
+as $$
+begin
+  if new.receipt_number is null or btrim(new.receipt_number) = '' then
+    new.receipt_number := allocate_next_grn_number(new.company_id, new.receipt_date);
+  end if;
+  return new;
+end;
+$$;
+create trigger trg_assign_grn_number
+  before insert on goods_receipts
+  for each row execute function assign_grn_number();
+
+create or replace function set_po_line_total()
+returns trigger
+language plpgsql
+security invoker
+set search_path = public, pg_temp
+as $$
+begin
+  new.line_total := round(new.quantity * new.unit_price, 2);
+  return new;
+end;
+$$;
+create trigger trg_set_po_line_total
+  before insert or update on purchase_order_lines
+  for each row execute function set_po_line_total();
+
+create or replace function refresh_po_receipt_status()
+returns trigger
+language plpgsql
+security invoker
+set search_path = public, pg_temp
+as $$
+declare
+  v_po_id uuid;
+  v_status po_status;
+  v_ordered numeric;
+  v_received numeric;
+begin
+  if tg_table_name = 'goods_receipts' then
+    v_po_id := coalesce(new.purchase_order_id, old.purchase_order_id);
+  else
+    select purchase_order_id into v_po_id
+      from goods_receipts
+     where id = coalesce(new.goods_receipt_id, old.goods_receipt_id);
+  end if;
+  if v_po_id is null then
+    return coalesce(new, old);
+  end if;
+  select status into v_status from purchase_orders where id = v_po_id;
+  if v_status in ('cancelled', 'closed') then
+    return coalesce(new, old);
+  end if;
+  select coalesce(sum(quantity), 0) into v_ordered from purchase_order_lines where po_id = v_po_id;
+  select coalesce(sum(grl.quantity_received), 0) into v_received
+    from goods_receipt_lines grl
+    join goods_receipts gr on gr.id = grl.goods_receipt_id
+   where gr.purchase_order_id = v_po_id;
+  update purchase_orders
+     set status = case
+           when v_received <= 0 then 'open'::po_status
+           when v_received < v_ordered then 'partially_received'::po_status
+           else 'received'::po_status
+         end,
+         updated_at = now()
+   where id = v_po_id
+     and status not in ('cancelled', 'closed');
+  return coalesce(new, old);
+end;
+$$;
+create trigger trg_refresh_po_status_on_gr
+  after insert or update or delete on goods_receipts
+  for each row execute function refresh_po_receipt_status();
+create trigger trg_refresh_po_status_on_gr_line
+  after insert or update or delete on goods_receipt_lines
+  for each row execute function refresh_po_receipt_status();
+
+create or replace function set_bill_line_computed_fields()
+returns trigger
+language plpgsql
+security invoker
+set search_path = public, pg_temp
+as $$
+declare
+  v_net numeric(18,2);
+  v_vat numeric(18,2);
+  v_total numeric(18,2);
+begin
+  select * into v_net, v_vat, v_total
+    from compute_quotation_line_amounts(
+      new.quantity, new.unit_price, new.discount_percent, new.discount_amount, new.vat_rate
+    );
+  new.line_total := v_total;
+  return new;
+end;
+$$;
+create trigger trg_set_bill_line_computed_fields
+  before insert or update on bill_lines
+  for each row execute function set_bill_line_computed_fields();
+
+create or replace function recalculate_bill_totals(p_bill_id uuid)
+returns void
+language plpgsql
+security invoker
+set search_path = public, pg_temp
+as $$
+declare
+  v_status bill_status;
+  v_subtotal numeric(18,2) := 0;
+  v_vat_total numeric(18,2) := 0;
+  v_line record;
+  v_net numeric(18,2);
+  v_vat numeric(18,2);
+  v_total numeric(18,2);
+begin
+  select status into v_status from bills where id = p_bill_id;
+  if not found or v_status not in ('draft', 'matched') then
+    return;
+  end if;
+  for v_line in
+    select quantity, unit_price, discount_percent, discount_amount, vat_rate
+      from bill_lines where bill_id = p_bill_id order by line_number
+  loop
+    select * into v_net, v_vat, v_total
+      from compute_quotation_line_amounts(
+        v_line.quantity, v_line.unit_price, v_line.discount_percent,
+        v_line.discount_amount, v_line.vat_rate
+      );
+    v_subtotal := v_subtotal + v_net;
+    v_vat_total := v_vat_total + v_vat;
+  end loop;
+  perform set_config('app.bill_recalc_in_progress', 'true', true);
+  update bills
+     set subtotal = v_subtotal,
+         vat_total = v_vat_total,
+         grand_total = v_subtotal + v_vat_total,
+         updated_at = now()
+   where id = p_bill_id;
+  perform set_config('app.bill_recalc_in_progress', 'false', true);
+end;
+$$;
+
+create or replace function trg_refresh_bill_totals_from_lines()
+returns trigger
+language plpgsql
+security invoker
+set search_path = public, pg_temp
+as $$
+begin
+  perform recalculate_bill_totals(coalesce(new.bill_id, old.bill_id));
+  return coalesce(new, old);
+end;
+$$;
+create trigger trg_refresh_bill_totals_from_lines
+  after insert or update or delete on bill_lines
+  for each row execute function trg_refresh_bill_totals_from_lines();
+
+create or replace function prevent_bill_computed_totals_mutation()
+returns trigger
+language plpgsql
+security invoker
+set search_path = public, pg_temp
+as $$
+begin
+  if current_setting('app.bill_recalc_in_progress', true) = 'true'
+     or current_setting('app.bill_payment_apply_in_progress', true) = 'true'
+     or current_setting('app.bill_issue_in_progress', true) = 'true' then
+    return new;
+  end if;
+  if new.subtotal is distinct from old.subtotal
+     or new.vat_total is distinct from old.vat_total
+     or new.grand_total is distinct from old.grand_total then
+    raise exception 'BILL_TOTALS_CLIENT_MUTATION_BLOCKED';
+  end if;
+  if new.amount_paid is distinct from old.amount_paid
+     or new.paid_at is distinct from old.paid_at then
+    raise exception 'BILL_AMOUNT_PAID_CLIENT_MUTATION_BLOCKED';
+  end if;
+  return new;
+end;
+$$;
+create trigger trg_prevent_bill_computed_totals_mutation
+  before update on bills
+  for each row execute function prevent_bill_computed_totals_mutation();
+
+create or replace function prevent_locked_bill_line_mutation()
+returns trigger
+language plpgsql
+security invoker
+set search_path = public, pg_temp
+as $$
+declare
+  v_status bill_status;
+begin
+  select status into v_status from bills where id = coalesce(new.bill_id, old.bill_id);
+  if v_status not in ('draft', 'matched') then
+    raise exception 'BILL_LINE_MUTATION_BLOCKED';
+  end if;
+  return coalesce(new, old);
+end;
+$$;
+create trigger trg_prevent_locked_bill_line_mutation
+  before insert or update or delete on bill_lines
+  for each row execute function prevent_locked_bill_line_mutation();
+
+create or replace function prevent_locked_bill_header_mutation()
+returns trigger
+language plpgsql
+security invoker
+set search_path = public, pg_temp
+as $$
+begin
+  if current_setting('app.bill_recalc_in_progress', true) = 'true'
+     or current_setting('app.bill_payment_apply_in_progress', true) = 'true'
+     or current_setting('app.bill_issue_in_progress', true) = 'true' then
+    return new;
+  end if;
+  if old.status not in ('draft', 'matched') then
+    if new.supplier_id is distinct from old.supplier_id
+       or new.bill_date is distinct from old.bill_date
+       or new.payment_terms is distinct from old.payment_terms
+       or new.custom_days is distinct from old.custom_days
+       or new.purchase_order_id is distinct from old.purchase_order_id
+       or new.bill_number is distinct from old.bill_number
+       or new.supplier_invoice_number is distinct from old.supplier_invoice_number
+       or new.due_date is distinct from old.due_date then
+      raise exception 'BILL_HEADER_MUTATION_BLOCKED';
+    end if;
+  end if;
+  return new;
+end;
+$$;
+create trigger trg_prevent_locked_bill_header_mutation
+  before update on bills
+  for each row execute function prevent_locked_bill_header_mutation();
+
+create or replace function flag_duplicate_bill(p_bill_id uuid)
+returns uuid
+language plpgsql
+security invoker
+set search_path = public, pg_temp
+as $$
+declare
+  v_bill bills%rowtype;
+  v_match uuid;
+begin
+  select * into v_bill from bills where id = p_bill_id;
+  if not found then
+    return null;
+  end if;
+  select b.id into v_match
+    from bills b
+   where b.company_id = v_bill.company_id
+     and b.supplier_id = v_bill.supplier_id
+     and b.id <> v_bill.id
+     and b.status <> 'void'
+     and (
+       (v_bill.supplier_invoice_number is not null
+        and btrim(v_bill.supplier_invoice_number) <> ''
+        and b.supplier_invoice_number = v_bill.supplier_invoice_number)
+       or (v_bill.grand_total > 0
+           and b.grand_total = v_bill.grand_total
+           and abs(b.bill_date - v_bill.bill_date) <= 30)
+     )
+   order by abs(b.bill_date - v_bill.bill_date), b.created_at
+   limit 1;
+  perform set_config('app.bill_issue_in_progress', 'true', true);
+  update bills set possible_duplicate_of = v_match, updated_at = now() where id = p_bill_id;
+  perform set_config('app.bill_issue_in_progress', 'false', true);
+  return v_match;
+end;
+$$;
+
+create or replace function trg_flag_duplicate_bill()
+returns trigger
+language plpgsql
+security invoker
+set search_path = public, pg_temp
+as $$
+begin
+  if current_setting('app.bill_issue_in_progress', true) = 'true'
+     or current_setting('app.bill_recalc_in_progress', true) = 'true' then
+    return new;
+  end if;
+  perform flag_duplicate_bill(new.id);
+  select possible_duplicate_of into new.possible_duplicate_of from bills where id = new.id;
+  return new;
+end;
+$$;
+-- AFTER so grand_total from line recalc is visible; skip when GUC set.
+create trigger trg_flag_duplicate_bill
+  after insert or update of supplier_id, grand_total, bill_date, supplier_invoice_number
+  on bills
+  for each row execute function trg_flag_duplicate_bill();
+
+
+create or replace function run_three_way_match(p_bill_id uuid)
+returns bill_match_status
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  v_bill bills%rowtype;
+  v_qty_pct numeric(5,2);
+  v_price_pct numeric(5,2);
+  v_qty_fail boolean := false;
+  v_price_fail boolean := false;
+  v_has_receipt boolean := false;
+  v_status bill_match_status;
+  v_line record;
+  v_ordered numeric;
+  v_received numeric;
+  v_po_price numeric(18,2);
+  v_details jsonb := '[]'::jsonb;
+  v_gr_id uuid;
+begin
+  select * into v_bill from bills where id = p_bill_id for update;
+  if not found then
+    raise exception 'BILL_NOT_FOUND';
+  end if;
+
+  if v_bill.purchase_order_id is null then
+    v_status := 'no_po';
+    insert into three_way_match_results (bill_id, match_status, details)
+    values (p_bill_id, v_status, '{"reason":"no_po"}'::jsonb);
+    perform set_config('app.bill_issue_in_progress', 'true', true);
+    update bills set match_status = v_status, status = case when status = 'draft' then 'matched' else status end, updated_at = now()
+     where id = p_bill_id;
+    perform set_config('app.bill_issue_in_progress', 'false', true);
+    return v_status;
+  end if;
+
+  select three_way_match_qty_tolerance_pct, three_way_match_price_tolerance_pct
+    into v_qty_pct, v_price_pct
+    from company_settings
+   where company_id = v_bill.company_id;
+  v_qty_pct := coalesce(v_qty_pct, 0);
+  v_price_pct := coalesce(v_price_pct, 2);
+
+  select exists(
+    select 1 from goods_receipts where purchase_order_id = v_bill.purchase_order_id
+  ) into v_has_receipt;
+
+  if not v_has_receipt then
+    v_status := 'awaiting_receipt';
+    insert into three_way_match_results (bill_id, purchase_order_id, match_status, details)
+    values (p_bill_id, v_bill.purchase_order_id, v_status, '{"reason":"awaiting_receipt"}'::jsonb);
+    perform set_config('app.bill_issue_in_progress', 'true', true);
+    update bills set match_status = v_status, status = case when status = 'draft' then 'matched' else status end, updated_at = now()
+     where id = p_bill_id;
+    perform set_config('app.bill_issue_in_progress', 'false', true);
+    return v_status;
+  end if;
+
+  select id into v_gr_id
+    from goods_receipts
+   where purchase_order_id = v_bill.purchase_order_id
+   order by receipt_date desc, created_at desc
+   limit 1;
+
+  for v_line in
+    select bl.*
+      from bill_lines bl
+     where bl.bill_id = p_bill_id
+       and bl.purchase_order_line_id is not null
+  loop
+    select quantity, unit_price into v_ordered, v_po_price
+      from purchase_order_lines
+     where id = v_line.purchase_order_line_id;
+    select coalesce(sum(grl.quantity_received), 0) into v_received
+      from goods_receipt_lines grl
+      join goods_receipts gr on gr.id = grl.goods_receipt_id
+     where grl.purchase_order_line_id = v_line.purchase_order_line_id
+       and gr.purchase_order_id = v_bill.purchase_order_id;
+
+    if v_line.quantity > v_ordered * (1 + v_qty_pct / 100)
+       or v_line.quantity > v_received * (1 + v_qty_pct / 100) then
+      v_qty_fail := true;
+    end if;
+    if v_po_price = 0 then
+      if v_line.unit_price <> 0 then
+        v_price_fail := true;
+      end if;
+    elsif abs(v_line.unit_price - v_po_price) / v_po_price > v_price_pct / 100 then
+      v_price_fail := true;
+    end if;
+
+    v_details := v_details || jsonb_build_array(jsonb_build_object(
+      'bill_line_id', v_line.id,
+      'ordered', v_ordered,
+      'received', v_received,
+      'billed', v_line.quantity,
+      'po_unit', v_po_price,
+      'bill_unit', v_line.unit_price
+    ));
+  end loop;
+
+  v_status := case
+    when v_qty_fail and v_price_fail then 'quantity_and_price_mismatch'
+    when v_qty_fail then 'quantity_mismatch'
+    when v_price_fail then 'price_mismatch'
+    else 'matched'
+  end;
+
+  insert into three_way_match_results (bill_id, purchase_order_id, goods_receipt_id, match_status, details)
+  values (p_bill_id, v_bill.purchase_order_id, v_gr_id, v_status, v_details);
+
+  perform set_config('app.bill_issue_in_progress', 'true', true);
+  update bills
+     set match_status = v_status,
+         status = case when status = 'draft' then 'matched' else status end,
+         updated_at = now()
+   where id = p_bill_id;
+  perform set_config('app.bill_issue_in_progress', 'false', true);
+  return v_status;
+end;
+$$;
+revoke all on function run_three_way_match(uuid) from public;
+revoke all on function run_three_way_match(uuid) from authenticated;
+revoke all on function run_three_way_match(uuid) from anon;
+grant execute on function run_three_way_match(uuid) to service_role;
+
+create or replace function create_bill_journal_entry(
+  p_bill_id uuid,
+  p_created_by uuid,
+  p_immediate_post boolean,
+  p_reference_number text default null
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  v_bill bills%rowtype;
+  v_period accounting_periods%rowtype;
+  v_entry_number bigint;
+  v_entry journal_entries%rowtype;
+  v_lines jsonb;
+  v_line record;
+  v_ap_id uuid;
+  v_discount_id uuid;
+  v_vat_id uuid;
+  v_line_number int := 0;
+  v_gross numeric(18,2);
+  v_discount numeric(18,2);
+  v_gross_sum numeric(18,2) := 0;
+  v_discount_sum numeric(18,2) := 0;
+  v_total_debits numeric(18,2);
+  v_total_credits numeric(18,2);
+  v_ref text;
+  v_target_status journal_entry_status;
+begin
+  if p_created_by is null then
+    raise exception 'CREATED_BY_REQUIRED';
+  end if;
+  select * into v_bill from bills where id = p_bill_id;
+  if not found then
+    raise exception 'BILL_NOT_FOUND';
+  end if;
+  if v_bill.journal_entry_id is not null then
+    raise exception 'BILL_JOURNAL_ALREADY_POSTED';
+  end if;
+  if not exists (select 1 from bill_lines where bill_id = p_bill_id) then
+    raise exception 'BILL_REQUIRES_LINES';
+  end if;
+
+  select id into v_ap_id from accounts
+   where company_id = v_bill.company_id and account_number = '2000';
+  select id into v_discount_id from accounts
+   where company_id = v_bill.company_id and account_number = '5060';
+  select id into v_vat_id from accounts
+   where company_id = v_bill.company_id and account_number = '1400';
+  if v_ap_id is null or v_discount_id is null or v_vat_id is null then
+    raise exception 'BILL_POSTING_ACCOUNT_NOT_FOUND';
+  end if;
+
+  select * into v_period
+    from accounting_periods
+   where company_id = v_bill.company_id
+     and status = 'open'
+     and period_start <= v_bill.bill_date
+     and period_end > v_bill.bill_date
+   order by period_start
+   limit 1;
+  if not found then
+    raise exception 'NO_OPEN_PERIOD_FOR_BILL_DATE';
+  end if;
+
+  for v_line in
+    select * from bill_lines where bill_id = p_bill_id order by line_number
+  loop
+    if v_line.account_id is null then
+      raise exception 'BILL_LINE_MISSING_ACCOUNT';
+    end if;
+    v_gross := round(v_line.quantity * v_line.unit_price, 2);
+    if v_line.discount_percent is not null then
+      v_discount := round(v_gross * v_line.discount_percent / 100, 2);
+    elsif v_line.discount_amount is not null then
+      v_discount := v_line.discount_amount;
+    else
+      v_discount := 0;
+    end if;
+    v_gross_sum := v_gross_sum + v_gross;
+    v_discount_sum := v_discount_sum + v_discount;
+  end loop;
+
+  v_total_debits := v_gross_sum + v_bill.vat_total;
+  v_total_credits := v_bill.grand_total + v_discount_sum;
+  if v_total_debits <> v_total_credits then
+    raise exception 'BILL_POSTING_UNBALANCED';
+  end if;
+
+  v_ref := coalesce(nullif(btrim(p_reference_number), ''), v_bill.bill_number);
+  v_entry_number := allocate_next_entry_number(v_bill.company_id);
+
+  insert into journal_entries (
+    company_id, entry_number, period_id, entry_date, entry_type, status,
+    narration, reference_number, created_by
+  ) values (
+    v_bill.company_id, v_entry_number, v_period.id, v_bill.bill_date, 'purchase_invoice', 'draft',
+    case when v_ref is not null then 'Purchase invoice ' || v_ref else 'Purchase invoice' end,
+    v_ref, p_created_by
+  )
+  returning * into v_entry;
+
+  for v_line in
+    select * from bill_lines where bill_id = p_bill_id order by line_number
+  loop
+    v_gross := round(v_line.quantity * v_line.unit_price, 2);
+    v_line_number := v_line_number + 1;
+    insert into journal_lines (journal_entry_id, line_number, account_id, debit, credit, description)
+    values (v_entry.id, v_line_number, v_line.account_id, v_gross, 0, v_line.description);
+  end loop;
+
+  if v_bill.vat_total > 0 then
+    v_line_number := v_line_number + 1;
+    insert into journal_lines (journal_entry_id, line_number, account_id, debit, credit, description)
+    values (v_entry.id, v_line_number, v_vat_id, v_bill.vat_total, 0, 'VAT Receivable (Input VAT)');
+  end if;
+
+  if v_discount_sum > 0 then
+    v_line_number := v_line_number + 1;
+    insert into journal_lines (journal_entry_id, line_number, account_id, debit, credit, description)
+    values (v_entry.id, v_line_number, v_discount_id, 0, v_discount_sum, 'Purchase Discounts & Returns');
+  end if;
+
+  v_line_number := v_line_number + 1;
+  insert into journal_lines (journal_entry_id, line_number, account_id, debit, credit, description)
+  values (v_entry.id, v_line_number, v_ap_id, 0, v_bill.grand_total, 'Accounts Payable - Trade');
+
+  v_target_status := case when p_immediate_post then 'posted' else 'pending_approval' end;
+  update journal_entries
+     set status = v_target_status
+   where id = v_entry.id
+     and status = 'draft'
+  returning * into v_entry;
+
+  if not found then
+    raise exception 'Failed to post purchase invoice entry %', v_entry_number;
+  end if;
+
+  select coalesce(jsonb_agg(to_jsonb(jl) order by jl.line_number), '[]'::jsonb)
+    into v_lines from journal_lines jl where jl.journal_entry_id = v_entry.id;
+
+  return jsonb_build_object(
+    'entry', to_jsonb(v_entry),
+    'lines', v_lines,
+    'journal_entry_id', v_entry.id
+  );
+end;
+$$;
+revoke all on function create_bill_journal_entry(uuid, uuid, boolean, text) from public;
+revoke all on function create_bill_journal_entry(uuid, uuid, boolean, text) from authenticated;
+revoke all on function create_bill_journal_entry(uuid, uuid, boolean, text) from anon;
+grant execute on function create_bill_journal_entry(uuid, uuid, boolean, text) to service_role;
+
+create or replace function issue_bill(
+  p_bill_id uuid,
+  p_created_by uuid,
+  p_immediate_post boolean
+)
+returns bills
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  v_bill bills%rowtype;
+  v_due_date date;
+  v_number text;
+  v_journal jsonb;
+  v_journal_entry_id uuid;
+begin
+  if p_created_by is null then
+    raise exception 'CREATED_BY_REQUIRED';
+  end if;
+  select * into v_bill from bills where id = p_bill_id for update;
+  if not found then
+    raise exception 'BILL_NOT_FOUND';
+  end if;
+  if v_bill.status not in ('draft', 'matched') then
+    raise exception 'BILL_NOT_OPEN_FOR_ISSUE';
+  end if;
+  if not exists (select 1 from bill_lines where bill_id = p_bill_id) then
+    raise exception 'BILL_REQUIRES_LINES';
+  end if;
+
+  perform run_three_way_match(p_bill_id);
+  perform flag_duplicate_bill(p_bill_id);
+
+  v_due_date := case v_bill.payment_terms
+    when 'net_7' then v_bill.bill_date + 7
+    when 'net_15' then v_bill.bill_date + 15
+    when 'net_30' then v_bill.bill_date + 30
+    when 'net_60' then v_bill.bill_date + 60
+    when 'custom' then v_bill.bill_date + v_bill.custom_days
+    when 'cod' then v_bill.bill_date
+  end;
+  v_number := allocate_next_bill_number(v_bill.company_id, v_bill.bill_date);
+
+  perform set_config('app.bill_issue_in_progress', 'true', true);
+  update bills
+     set bill_number = v_number, due_date = v_due_date, updated_at = now()
+   where id = p_bill_id;
+
+  v_journal := create_bill_journal_entry(p_bill_id, p_created_by, p_immediate_post, v_number);
+  v_journal_entry_id := (v_journal->>'journal_entry_id')::uuid;
+
+  update bills
+     set status = case when p_immediate_post then 'issued'::bill_status else 'pending_approval'::bill_status end,
+         journal_entry_id = v_journal_entry_id,
+         updated_at = now()
+   where id = p_bill_id
+  returning * into v_bill;
+  perform set_config('app.bill_issue_in_progress', 'false', true);
+  return v_bill;
+end;
+$$;
+revoke all on function issue_bill(uuid, uuid, boolean) from public;
+revoke all on function issue_bill(uuid, uuid, boolean) from authenticated;
+revoke all on function issue_bill(uuid, uuid, boolean) from anon;
+grant execute on function issue_bill(uuid, uuid, boolean) to service_role;
+
+create or replace function void_bill(
+  p_bill_id uuid,
+  p_void_reason text,
+  p_created_by uuid
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  v_bill bills%rowtype;
+  v_reversal jsonb;
+  v_ledger_status text;
+  v_je_status journal_entry_status;
+begin
+  if p_created_by is null then
+    raise exception 'CREATED_BY_REQUIRED';
+  end if;
+  if p_void_reason is null or btrim(p_void_reason) = '' then
+    raise exception 'VOID_REASON_REQUIRED';
+  end if;
+  select * into v_bill from bills where id = p_bill_id for update;
+  if not found then
+    raise exception 'BILL_NOT_FOUND';
+  end if;
+  if v_bill.status not in ('issued', 'partially_paid', 'pending_approval', 'disputed') then
+    raise exception 'BILL_VOID_NOT_PERMITTED';
+  end if;
+
+  -- [feature-spec-1_1_E.md §4.1 / E-13] reverse only when the JE is posted.
+  -- pending_approval JEs are unposted; reject them so approve cannot post after void.
+  if v_bill.journal_entry_id is not null then
+    select status into v_je_status from journal_entries where id = v_bill.journal_entry_id;
+    if v_je_status = 'posted' then
+      v_reversal := reverse_journal_entry(v_bill.journal_entry_id, p_created_by);
+      v_ledger_status := 'reversed';
+    elsif v_je_status = 'pending_approval' then
+      update journal_entries
+         set status = 'rejected',
+             rejected_by = p_created_by,
+             rejected_at = now(),
+             rejection_reason = btrim(p_void_reason),
+             updated_at = now()
+       where id = v_bill.journal_entry_id
+         and status = 'pending_approval';
+      v_ledger_status := 'skipped_no_posting';
+    else
+      v_ledger_status := 'skipped_no_posting';
+    end if;
+  else
+    v_ledger_status := 'skipped_no_posting';
+  end if;
+
+  perform set_config('app.bill_issue_in_progress', 'true', true);
+  update bills
+     set status = 'void', void_reason = btrim(p_void_reason), updated_at = now()
+   where id = p_bill_id
+  returning * into v_bill;
+  perform set_config('app.bill_issue_in_progress', 'false', true);
+
+  return jsonb_build_object('bill', to_jsonb(v_bill), 'ledger_reversal_status', v_ledger_status, 'reversal', v_reversal);
+end;
+$$;
+revoke all on function void_bill(uuid, text, uuid) from public;
+revoke all on function void_bill(uuid, text, uuid) from authenticated;
+revoke all on function void_bill(uuid, text, uuid) from anon;
+grant execute on function void_bill(uuid, text, uuid) to service_role;
+
+create or replace function sync_bill_issued_on_je_post()
+returns trigger
+language plpgsql
+security invoker
+set search_path = public, pg_temp
+as $$
+begin
+  if new.entry_type = 'purchase_invoice'
+     and new.status = 'posted'
+     and old.status = 'pending_approval' then
+    perform set_config('app.bill_issue_in_progress', 'true', true);
+    update bills
+       set status = 'issued', updated_at = now()
+     where journal_entry_id = new.id
+       and status = 'pending_approval';
+    perform set_config('app.bill_issue_in_progress', 'false', true);
+  end if;
+  return new;
+end;
+$$;
+create trigger trg_sync_bill_issued_on_je_post
+  after update on journal_entries
+  for each row execute function sync_bill_issued_on_je_post();
+
+create or replace function set_supplier_payment_unapplied_on_insert()
+returns trigger
+language plpgsql
+security invoker
+set search_path = public, pg_temp
+as $$
+begin
+  new.unapplied_amount := new.amount;
+  return new;
+end;
+$$;
+create trigger trg_set_supplier_payment_unapplied_on_insert
+  before insert on supplier_payments
+  for each row execute function set_supplier_payment_unapplied_on_insert();
+
+create or replace function refresh_supplier_payment_unapplied_amount()
+returns trigger
+language plpgsql
+security invoker
+set search_path = public, pg_temp
+as $$
+declare
+  v_payment_id uuid;
+  v_applied numeric(18,2);
+  v_amount numeric(18,2);
+begin
+  v_payment_id := coalesce(new.supplier_payment_id, old.supplier_payment_id);
+  perform pg_advisory_xact_lock(hashtext('spay:' || v_payment_id::text));
+  select amount into v_amount from supplier_payments where id = v_payment_id;
+  select coalesce(sum(applied_amount), 0) into v_applied
+    from supplier_payment_applications where supplier_payment_id = v_payment_id;
+  if v_applied > v_amount then
+    raise exception 'SUPPLIER_PAYMENT_OVER_APPLIED';
+  end if;
+  update supplier_payments
+     set unapplied_amount = v_amount - v_applied, updated_at = now()
+   where id = v_payment_id;
+  return coalesce(new, old);
+end;
+$$;
+create trigger trg_refresh_supplier_payment_unapplied
+  after insert or update or delete on supplier_payment_applications
+  for each row execute function refresh_supplier_payment_unapplied_amount();
+
+create or replace function bill_is_payable(p_bill bills)
+returns void
+language plpgsql
+stable
+security invoker
+set search_path = public, pg_temp
+as $$
+begin
+  -- [feature-spec-1_1_E.md E-20] disputed is checked first so the token is BILL_DISPUTED, not BILL_NOT_OPEN_FOR_PAYMENT.
+  if p_bill.status = 'disputed' then
+    raise exception 'BILL_DISPUTED';
+  end if;
+  if p_bill.status not in ('issued', 'partially_paid') then
+    raise exception 'BILL_NOT_OPEN_FOR_PAYMENT';
+  end if;
+  if p_bill.match_status is distinct from 'matched'
+     and p_bill.match_status is distinct from 'no_po'
+     and p_bill.payment_match_override_reason is null then
+    raise exception 'BILL_MATCH_BLOCKS_PAYMENT';
+  end if;
+end;
+$$;
+
+create or replace function refresh_bill_amount_paid_from_applications()
+returns trigger
+language plpgsql
+security invoker
+set search_path = public, pg_temp
+as $$
+declare
+  v_bill bills%rowtype;
+  v_paid numeric(18,2);
+  v_bill_id uuid;
+begin
+  v_bill_id := coalesce(new.bill_id, old.bill_id);
+  perform pg_advisory_xact_lock(hashtext('bilpay:' || v_bill_id::text));
+  select * into v_bill from bills where id = v_bill_id for update;
+  -- [feature-spec-1_1_E.md E-20] payable is an insert-time check. Stamping
+  -- journal_entry_id on an existing application (advance reclass) must not
+  -- re-run it after the bill has already moved to paid.
+  if tg_op = 'INSERT'
+     or (tg_op = 'UPDATE'
+         and (new.bill_id is distinct from old.bill_id
+              or new.applied_amount is distinct from old.applied_amount)) then
+    perform bill_is_payable(v_bill);
+  end if;
+  select coalesce(sum(applied_amount), 0) into v_paid
+    from supplier_payment_applications where bill_id = v_bill_id;
+  if v_paid > v_bill.grand_total then
+    raise exception 'BILL_APPLICATION_EXCEEDS_BALANCE';
+  end if;
+  perform set_config('app.bill_payment_apply_in_progress', 'true', true);
+  update bills
+     set amount_paid = v_paid,
+         status = case
+           when status in ('void', 'disputed', 'pending_approval', 'draft', 'matched') then status
+           when v_paid = 0 then 'issued'
+           when v_paid < grand_total then 'partially_paid'
+           else 'paid'
+         end,
+         paid_at = case
+           when v_paid = grand_total and paid_at is null then now()
+           when v_paid < grand_total then null
+           else paid_at
+         end,
+         updated_at = now()
+   where id = v_bill_id;
+  perform set_config('app.bill_payment_apply_in_progress', 'false', true);
+  return coalesce(new, old);
+end;
+$$;
+create trigger trg_refresh_bill_amount_paid
+  after insert or update or delete on supplier_payment_applications
+  for each row execute function refresh_bill_amount_paid_from_applications();
+
+create or replace function create_supplier_payment_journal_entry(
+  p_payment_id uuid,
+  p_created_by uuid
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  v_payment supplier_payments%rowtype;
+  v_period accounting_periods%rowtype;
+  v_entry_number bigint;
+  v_entry journal_entries%rowtype;
+  v_lines jsonb;
+  v_credit_id uuid;
+  v_debit_id uuid;
+  v_debit_number text;
+  v_entry_type journal_entry_type;
+  v_has_applications boolean;
+  v_ref text;
+begin
+  if p_created_by is null then
+    raise exception 'CREATED_BY_REQUIRED';
+  end if;
+  select * into v_payment from supplier_payments where id = p_payment_id for update;
+  if not found then
+    raise exception 'SUPPLIER_PAYMENT_NOT_FOUND';
+  end if;
+  if v_payment.journal_entry_id is not null then
+    raise exception 'SUPPLIER_PAYMENT_ALREADY_POSTED';
+  end if;
+
+  select exists(
+    select 1 from supplier_payment_applications where supplier_payment_id = p_payment_id
+  ) into v_has_applications;
+
+  if v_has_applications then
+    v_entry_type := 'supplier_payment';
+    v_debit_number := '2000';
+  else
+    v_entry_type := 'supplier_advance';
+    v_debit_number := '1350';
+  end if;
+
+  select id into v_debit_id from accounts
+   where company_id = v_payment.company_id and account_number = v_debit_number and is_active = true;
+  if v_debit_id is null then
+    raise exception 'SUPPLIER_PAYMENT_ACCOUNT_NOT_FOUND';
+  end if;
+
+  v_credit_id := resolve_payment_debit_account_id(
+    v_payment.company_id, v_payment.bank_account_id, v_payment.payment_method
+  );
+
+  select * into v_period
+    from accounting_periods
+   where company_id = v_payment.company_id
+     and status = 'open'
+     and period_start <= v_payment.payment_date
+     and period_end > v_payment.payment_date
+   order by period_start limit 1;
+  if not found then
+    raise exception 'NO_OPEN_PERIOD_FOR_PAYMENT_DATE';
+  end if;
+
+  v_ref := coalesce(nullif(btrim(v_payment.reference_number), ''), 'spay:' || v_payment.id::text);
+  v_entry_number := allocate_next_entry_number(v_payment.company_id);
+
+  insert into journal_entries (
+    company_id, entry_number, period_id, entry_date, entry_type, status, narration, reference_number, created_by
+  ) values (
+    v_payment.company_id, v_entry_number, v_period.id, v_payment.payment_date, v_entry_type, 'draft',
+    case when v_entry_type = 'supplier_advance' then 'Supplier advance' else 'Supplier payment' end,
+    v_ref, p_created_by
+  )
+  returning * into v_entry;
+
+  insert into journal_lines (journal_entry_id, line_number, account_id, debit, credit, description)
+  values
+    (v_entry.id, 1, v_debit_id, v_payment.amount, 0,
+     case when v_entry_type = 'supplier_advance' then 'Supplier Advances' else 'Accounts Payable - Trade' end),
+    (v_entry.id, 2, v_credit_id, 0, v_payment.amount, 'Bank/Cash');
+
+  update journal_entries set status = 'posted' where id = v_entry.id and status = 'draft' returning * into v_entry;
+  if not found then
+    raise exception 'Failed to post supplier payment entry %', v_entry_number;
+  end if;
+
+  update supplier_payments set journal_entry_id = v_entry.id, updated_at = now() where id = p_payment_id;
+
+  select coalesce(jsonb_agg(to_jsonb(jl) order by jl.line_number), '[]'::jsonb)
+    into v_lines from journal_lines jl where jl.journal_entry_id = v_entry.id;
+  return jsonb_build_object('entry', to_jsonb(v_entry), 'lines', v_lines, 'journal_entry_id', v_entry.id);
+end;
+$$;
+revoke all on function create_supplier_payment_journal_entry(uuid, uuid) from public;
+revoke all on function create_supplier_payment_journal_entry(uuid, uuid) from authenticated;
+revoke all on function create_supplier_payment_journal_entry(uuid, uuid) from anon;
+grant execute on function create_supplier_payment_journal_entry(uuid, uuid) to service_role;
+
+create or replace function create_supplier_advance_application_journal_entry(
+  p_application_id uuid,
+  p_created_by uuid
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  v_app supplier_payment_applications%rowtype;
+  v_payment supplier_payments%rowtype;
+  v_period accounting_periods%rowtype;
+  v_entry journal_entries%rowtype;
+  v_entry_number bigint;
+  v_ap_id uuid;
+  v_adv_id uuid;
+  v_lines jsonb;
+begin
+  if p_created_by is null then
+    raise exception 'CREATED_BY_REQUIRED';
+  end if;
+  select * into v_app from supplier_payment_applications where id = p_application_id for update;
+  if not found then
+    raise exception 'SUPPLIER_PAYMENT_APPLICATION_NOT_FOUND';
+  end if;
+  if v_app.journal_entry_id is not null then
+    raise exception 'SUPPLIER_ADVANCE_APPLICATION_ALREADY_POSTED';
+  end if;
+  select * into v_payment from supplier_payments where id = v_app.supplier_payment_id;
+  -- Payable was enforced when the application row was inserted. The bill may
+  -- already be `paid` here (full application) — do not re-run bill_is_payable.
+  -- [feature-spec-1_1_E.md §4.5 / E-20] mirrors D create_advance_application_journal_entry.
+
+  if v_payment.journal_entry_id is null then
+    raise exception 'SUPPLIER_PAYMENT_NOT_POSTED';
+  end if;
+
+  select entry_type into v_entry.entry_type from journal_entries where id = v_payment.journal_entry_id;
+  if (select entry_type from journal_entries where id = v_payment.journal_entry_id) <> 'supplier_advance' then
+    raise exception 'SUPPLIER_PAYMENT_NOT_ADVANCE';
+  end if;
+
+  select id into v_ap_id from accounts where company_id = v_payment.company_id and account_number = '2000';
+  select id into v_adv_id from accounts where company_id = v_payment.company_id and account_number = '1350';
+  if v_ap_id is null or v_adv_id is null then
+    raise exception 'SUPPLIER_PAYMENT_ACCOUNT_NOT_FOUND';
+  end if;
+
+  select * into v_period
+    from accounting_periods
+   where company_id = v_payment.company_id
+     and status = 'open'
+     and period_start <= v_app.applied_at::date
+     and period_end > v_app.applied_at::date
+   order by period_start limit 1;
+  if not found then
+    raise exception 'NO_OPEN_PERIOD_FOR_PAYMENT_DATE';
+  end if;
+
+  v_entry_number := allocate_next_entry_number(v_payment.company_id);
+  insert into journal_entries (
+    company_id, entry_number, period_id, entry_date, entry_type, status, narration, reference_number, created_by
+  ) values (
+    v_payment.company_id, v_entry_number, v_period.id, v_app.applied_at::date,
+    'supplier_advance_application', 'draft',
+    'Supplier advance application', 'spa:' || v_app.id::text, p_created_by
+  )
+  returning * into v_entry;
+
+  insert into journal_lines (journal_entry_id, line_number, account_id, debit, credit, description) values
+    (v_entry.id, 1, v_ap_id, v_app.applied_amount, 0, 'Accounts Payable - Trade'),
+    (v_entry.id, 2, v_adv_id, 0, v_app.applied_amount, 'Supplier Advances');
+
+  update journal_entries set status = 'posted' where id = v_entry.id and status = 'draft' returning * into v_entry;
+  update supplier_payment_applications set journal_entry_id = v_entry.id where id = p_application_id;
+
+  select coalesce(jsonb_agg(to_jsonb(jl) order by jl.line_number), '[]'::jsonb)
+    into v_lines from journal_lines jl where jl.journal_entry_id = v_entry.id;
+  return jsonb_build_object('entry', to_jsonb(v_entry), 'lines', v_lines, 'journal_entry_id', v_entry.id);
+end;
+$$;
+revoke all on function create_supplier_advance_application_journal_entry(uuid, uuid) from public;
+revoke all on function create_supplier_advance_application_journal_entry(uuid, uuid) from authenticated;
+revoke all on function create_supplier_advance_application_journal_entry(uuid, uuid) from anon;
+grant execute on function create_supplier_advance_application_journal_entry(uuid, uuid) to service_role;
+
+create or replace function execute_supplier_payment_run(
+  p_run_id uuid,
+  p_created_by uuid
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  v_run supplier_payment_runs%rowtype;
+  v_item record;
+  v_bill bills%rowtype;
+  v_payment_id uuid;
+  v_supplier uuid;
+  v_amount numeric(18,2);
+  v_payments jsonb := '[]'::jsonb;
+  v_skipped jsonb := '[]'::jsonb;
+  v_journal jsonb;
+begin
+  if p_created_by is null then
+    raise exception 'CREATED_BY_REQUIRED';
+  end if;
+  perform pg_advisory_xact_lock(hashtext('payrun:' || p_run_id::text));
+  select * into v_run from supplier_payment_runs where id = p_run_id for update;
+  if not found then
+    raise exception 'PAYMENT_RUN_NOT_FOUND';
+  end if;
+  if v_run.status <> 'approved' then
+    raise exception 'PAYMENT_RUN_NOT_APPROVED';
+  end if;
+
+  for v_supplier, v_amount in
+    select supplier_id, sum(amount_to_pay)
+      from supplier_payment_run_items
+     where run_id = p_run_id and included = true
+     group by supplier_id
+  loop
+    insert into supplier_payments (
+      company_id, supplier_id, payment_date, amount, payment_method,
+      bank_account_id, payment_run_id, created_by
+    ) values (
+      v_run.company_id, v_supplier, v_run.run_date, v_amount, v_run.payment_method,
+      v_run.bank_account_id, p_run_id, p_created_by
+    )
+    returning id into v_payment_id;
+
+    for v_item in
+      select * from supplier_payment_run_items
+       where run_id = p_run_id and supplier_id = v_supplier and included = true
+    loop
+      select * into v_bill from bills where id = v_item.bill_id;
+      begin
+        perform bill_is_payable(v_bill);
+        insert into supplier_payment_applications (
+          supplier_payment_id, bill_id, applied_amount, applied_by
+        ) values (
+          v_payment_id, v_item.bill_id, v_item.amount_to_pay, p_created_by
+        );
+      exception when others then
+        v_skipped := v_skipped || jsonb_build_array(jsonb_build_object(
+          'bill_id', v_item.bill_id, 'token', sqlerrm
+        ));
+      end;
+    end loop;
+
+    if exists (select 1 from supplier_payment_applications where supplier_payment_id = v_payment_id) then
+      v_journal := create_supplier_payment_journal_entry(v_payment_id, p_created_by);
+      v_payments := v_payments || jsonb_build_array(jsonb_build_object(
+        'payment_id', v_payment_id, 'journal', v_journal
+      ));
+    else
+      delete from supplier_payments where id = v_payment_id;
+    end if;
+  end loop;
+
+  update supplier_payment_runs
+     set status = 'executed', executed_at = now(), updated_at = now()
+   where id = p_run_id;
+
+  return jsonb_build_object('payments', v_payments, 'skipped', v_skipped);
+end;
+$$;
+revoke all on function execute_supplier_payment_run(uuid, uuid) from public;
+revoke all on function execute_supplier_payment_run(uuid, uuid) from authenticated;
+revoke all on function execute_supplier_payment_run(uuid, uuid) from anon;
+grant execute on function execute_supplier_payment_run(uuid, uuid) to service_role;
+
+create or replace function accrue_unbilled_receipts(
+  p_company_id uuid,
+  p_period_end_date date,
+  p_created_by uuid
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  v_period accounting_periods%rowtype;
+  v_prev grni_accrual_runs%rowtype;
+  v_reversal jsonb;
+  v_entry journal_entries%rowtype;
+  v_entry_number bigint;
+  v_grni_id uuid;
+  v_line record;
+  v_line_number int := 0;
+  v_unmatched numeric;
+  v_amount numeric(18,2);
+  v_total numeric(18,2) := 0;
+  v_lines jsonb;
+begin
+  if p_company_id is null then
+    raise exception 'COMPANY_ID_REQUIRED';
+  end if;
+  if p_created_by is null then
+    raise exception 'CREATED_BY_REQUIRED';
+  end if;
+  perform pg_advisory_xact_lock(hashtext('grni:' || p_company_id::text));
+
+  if exists (select 1 from grni_accrual_runs where company_id = p_company_id and period_end_date = p_period_end_date) then
+    raise exception 'GRNI_ALREADY_RUN';
+  end if;
+
+  select * into v_period
+    from accounting_periods
+   where company_id = p_company_id
+     and period_start <= p_period_end_date
+     and period_end > p_period_end_date
+   limit 1;
+  if not found then
+    raise exception 'NO_PERIOD_FOR_GRNI_DATE';
+  end if;
+  if v_period.status = 'closed' then
+    raise exception 'PERIOD_CLOSED';
+  end if;
+
+  select * into v_prev
+    from grni_accrual_runs
+   where company_id = p_company_id
+     and reversal_entry_id is null
+     and journal_entry_id is not null
+   order by period_end_date desc
+   limit 1;
+  if found then
+    v_reversal := reverse_journal_entry(v_prev.journal_entry_id, p_created_by);
+    update grni_accrual_runs
+       set reversal_entry_id = (v_reversal->'reversal'->>'id')::uuid
+     where id = v_prev.id;
+  end if;
+
+  select id into v_grni_id from accounts
+   where company_id = p_company_id and account_number = '2020' and is_active = true;
+  if v_grni_id is null then
+    raise exception 'GRNI_ACCOUNT_NOT_FOUND';
+  end if;
+
+  v_entry_number := allocate_next_entry_number(p_company_id);
+  insert into journal_entries (
+    company_id, entry_number, period_id, entry_date, entry_type, status, narration, created_by
+  ) values (
+    p_company_id, v_entry_number, v_period.id, p_period_end_date, 'grni_accrual', 'draft',
+    'GRNI accrual ' || p_period_end_date::text, p_created_by
+  )
+  returning * into v_entry;
+
+  for v_line in
+    select
+      pol.id as po_line_id,
+      pol.account_id,
+      pol.unit_price,
+      pol.quantity as ordered,
+      coalesce((
+        select sum(grl.quantity_received)
+          from goods_receipt_lines grl
+          join goods_receipts gr on gr.id = grl.goods_receipt_id
+         where grl.purchase_order_line_id = pol.id
+           and gr.receipt_date <= p_period_end_date
+      ), 0) as received,
+      coalesce((
+        select sum(bl.quantity)
+          from bill_lines bl
+          join bills b on b.id = bl.bill_id
+         where bl.purchase_order_line_id = pol.id
+           and b.status in ('issued', 'partially_paid', 'paid')
+           and b.bill_date <= p_period_end_date
+      ), 0) as billed
+    from purchase_order_lines pol
+    join purchase_orders po on po.id = pol.po_id
+   where po.company_id = p_company_id
+     and po.status <> 'cancelled'
+  loop
+    v_unmatched := v_line.received - v_line.billed;
+    if v_unmatched > 0 then
+      v_amount := round(v_unmatched * v_line.unit_price, 2);
+      if v_amount > 0 then
+        v_line_number := v_line_number + 1;
+        insert into journal_lines (journal_entry_id, line_number, account_id, debit, credit, description)
+        values (v_entry.id, v_line_number, v_line.account_id, v_amount, 0, 'Unbilled receipt');
+        v_total := v_total + v_amount;
+      end if;
+    end if;
+  end loop;
+
+  if v_total = 0 then
+    delete from journal_entries where id = v_entry.id;
+    insert into grni_accrual_runs (company_id, period_end_date, accrual_amount, created_by)
+    values (p_company_id, p_period_end_date, 0, p_created_by);
+    return jsonb_build_object('accrual_amount', 0, 'journal_entry_id', null);
+  end if;
+
+  v_line_number := v_line_number + 1;
+  insert into journal_lines (journal_entry_id, line_number, account_id, debit, credit, description)
+  values (v_entry.id, v_line_number, v_grni_id, 0, v_total, 'Accrued Purchases (GRNI)');
+
+  update journal_entries set status = 'posted' where id = v_entry.id and status = 'draft' returning * into v_entry;
+
+  insert into grni_accrual_runs (
+    company_id, period_end_date, accrual_amount, journal_entry_id, created_by
+  ) values (
+    p_company_id, p_period_end_date, v_total, v_entry.id, p_created_by
+  );
+
+  select coalesce(jsonb_agg(to_jsonb(jl) order by jl.line_number), '[]'::jsonb)
+    into v_lines from journal_lines jl where jl.journal_entry_id = v_entry.id;
+  return jsonb_build_object(
+    'accrual_amount', v_total,
+    'journal_entry_id', v_entry.id,
+    'entry', to_jsonb(v_entry),
+    'lines', v_lines,
+    'prior_reversal', v_reversal
+  );
+end;
+$$;
+revoke all on function accrue_unbilled_receipts(uuid, date, uuid) from public;
+revoke all on function accrue_unbilled_receipts(uuid, date, uuid) from authenticated;
+revoke all on function accrue_unbilled_receipts(uuid, date, uuid) from anon;
+grant execute on function accrue_unbilled_receipts(uuid, date, uuid) to service_role;
+
+create or replace function get_supplier_ledger(
+  p_company_id uuid,
+  p_supplier_id uuid,
+  p_date_from date default null,
+  p_date_to date default null
+)
+returns table (
+  entry_date date,
+  source_type text,
+  source_id uuid,
+  document_number text,
+  description text,
+  debit numeric(18,2),
+  credit numeric(18,2),
+  affects_ap boolean,
+  running_balance numeric(18,2),
+  journal_entry_id uuid
+)
+language plpgsql
+security invoker
+stable
+set search_path = public, pg_temp
+as $$
+begin
+  if p_company_id is null then raise exception 'COMPANY_ID_REQUIRED'; end if;
+  if p_supplier_id is null then raise exception 'SUPPLIER_ID_REQUIRED'; end if;
+  if p_date_from is not null and p_date_to is not null and p_date_to < p_date_from then
+    raise exception 'INVALID_DATE_RANGE';
+  end if;
+  if not exists (select 1 from suppliers s where s.id = p_supplier_id and s.company_id = p_company_id) then
+    raise exception 'SUPPLIER_COMPANY_MISMATCH';
+  end if;
+
+  return query
+  with raw as (
+    select
+      b.bill_date as entry_date,
+      'bill'::text as source_type,
+      b.id as source_id,
+      b.bill_number as document_number,
+      ('Bill ' || coalesce(b.bill_number, b.id::text))::text as description,
+      0::numeric(18,2) as debit,
+      b.grand_total as credit,
+      true as affects_ap,
+      b.journal_entry_id
+    from bills b
+    join journal_entries je on je.id = b.journal_entry_id
+    where b.company_id = p_company_id
+      and b.supplier_id = p_supplier_id
+      and b.journal_entry_id is not null
+      and b.status <> 'void'
+      and is_ledger_truth_status(je.status)
+
+    union all
+
+    select
+      spa.applied_at::date,
+      'payment_application',
+      spa.id,
+      sp.reference_number,
+      ('Payment application ' || spa.id::text),
+      spa.applied_amount,
+      0::numeric(18,2),
+      true,
+      sp.journal_entry_id
+    from supplier_payment_applications spa
+    join supplier_payments sp on sp.id = spa.supplier_payment_id
+    join journal_entries je on je.id = sp.journal_entry_id
+    where sp.company_id = p_company_id
+      and sp.supplier_id = p_supplier_id
+      and sp.journal_entry_id is not null
+      and je.entry_type = 'supplier_payment'
+      and is_ledger_truth_status(je.status)
+
+    union all
+
+    select
+      spa.applied_at::date,
+      'payment_application',
+      spa.id,
+      sp.reference_number,
+      ('Advance application ' || spa.id::text),
+      spa.applied_amount,
+      0::numeric(18,2),
+      true,
+      je.id
+    from supplier_payment_applications spa
+    join supplier_payments sp on sp.id = spa.supplier_payment_id
+    join journal_entries je
+      on je.company_id = sp.company_id
+     and je.entry_type = 'supplier_advance_application'
+     and je.reference_number = 'spa:' || spa.id::text
+    where sp.company_id = p_company_id
+      and sp.supplier_id = p_supplier_id
+      and is_ledger_truth_status(je.status)
+
+    union all
+
+    select
+      sp.payment_date,
+      'supplier_advance',
+      sp.id,
+      sp.reference_number,
+      ('Supplier advance ' || coalesce(sp.reference_number, sp.id::text)),
+      sp.amount,
+      0::numeric(18,2),
+      false,
+      sp.journal_entry_id
+    from supplier_payments sp
+    join journal_entries je on je.id = sp.journal_entry_id
+    where sp.company_id = p_company_id
+      and sp.supplier_id = p_supplier_id
+      and sp.journal_entry_id is not null
+      and je.entry_type = 'supplier_advance'
+      and is_ledger_truth_status(je.status)
+  ),
+  filtered as (
+    select * from raw r
+     where (p_date_from is null or r.entry_date >= p_date_from)
+       and (p_date_to is null or r.entry_date <= p_date_to)
+  ),
+  ordered as (
+    select
+      f.*,
+      row_number() over (order by f.entry_date, f.source_type, f.source_id) as sort_key,
+      sum(case when f.affects_ap then f.credit - f.debit else 0 end) over (
+        order by f.entry_date, f.source_type, f.source_id
+        rows between unbounded preceding and current row
+      )::numeric(18,2) as bal
+    from filtered f
+  )
+  select
+    o.entry_date, o.source_type, o.source_id, o.document_number, o.description,
+    o.debit, o.credit, o.affects_ap,
+    case when o.affects_ap then o.bal else null end,
+    o.journal_entry_id
+  from ordered o
+  order by o.sort_key;
+end;
+$$;
+revoke all on function get_supplier_ledger(uuid, uuid, date, date) from public;
+revoke all on function get_supplier_ledger(uuid, uuid, date, date) from authenticated;
+revoke all on function get_supplier_ledger(uuid, uuid, date, date) from anon;
+grant execute on function get_supplier_ledger(uuid, uuid, date, date) to service_role;
+
+create or replace function get_aged_payables(
+  p_company_id uuid,
+  p_as_of_date date
+)
+returns table (
+  supplier_id uuid,
+  supplier_name text,
+  is_totals boolean,
+  bucket_current numeric(18,2),
+  bucket_0_30 numeric(18,2),
+  bucket_31_60 numeric(18,2),
+  bucket_61_90 numeric(18,2),
+  bucket_90_plus numeric(18,2),
+  total numeric(18,2)
+)
+language plpgsql
+security invoker
+stable
+set search_path = public, pg_temp
+as $$
+declare
+  v_as_of date;
+begin
+  if p_company_id is null then raise exception 'COMPANY_ID_REQUIRED'; end if;
+  if p_as_of_date is null then raise exception 'AS_OF_DATE_REQUIRED'; end if;
+  v_as_of := p_as_of_date;
+  return query
+  with open_bills as (
+    select
+      b.supplier_id,
+      s.supplier_name,
+      (b.grand_total - b.amount_paid)::numeric(18,2) as outstanding,
+      case
+        when b.due_date is null or (v_as_of - b.due_date) <= 0 then 'current'
+        when (v_as_of - b.due_date) between 1 and 30 then '0_30'
+        when (v_as_of - b.due_date) between 31 and 60 then '31_60'
+        when (v_as_of - b.due_date) between 61 and 90 then '61_90'
+        else '90_plus'
+      end as bucket
+    from bills b
+    join suppliers s on s.id = b.supplier_id
+    where b.company_id = p_company_id
+      and b.status in ('issued', 'partially_paid')
+      and b.amount_paid < b.grand_total
+      and b.journal_entry_id is not null
+  ),
+  per_supplier as (
+    select
+      ob.supplier_id,
+      ob.supplier_name,
+      false as is_totals,
+      coalesce(sum(ob.outstanding) filter (where ob.bucket = 'current'), 0)::numeric(18,2) as bucket_current,
+      coalesce(sum(ob.outstanding) filter (where ob.bucket = '0_30'), 0)::numeric(18,2) as bucket_0_30,
+      coalesce(sum(ob.outstanding) filter (where ob.bucket = '31_60'), 0)::numeric(18,2) as bucket_31_60,
+      coalesce(sum(ob.outstanding) filter (where ob.bucket = '61_90'), 0)::numeric(18,2) as bucket_61_90,
+      coalesce(sum(ob.outstanding) filter (where ob.bucket = '90_plus'), 0)::numeric(18,2) as bucket_90_plus,
+      coalesce(sum(ob.outstanding), 0)::numeric(18,2) as total
+    from open_bills ob
+    group by ob.supplier_id, ob.supplier_name
+  ),
+  totals as (
+    select
+      null::uuid, 'TOTALS'::text, true,
+      coalesce(sum(ps.bucket_current), 0)::numeric(18,2),
+      coalesce(sum(ps.bucket_0_30), 0)::numeric(18,2),
+      coalesce(sum(ps.bucket_31_60), 0)::numeric(18,2),
+      coalesce(sum(ps.bucket_61_90), 0)::numeric(18,2),
+      coalesce(sum(ps.bucket_90_plus), 0)::numeric(18,2),
+      coalesce(sum(ps.total), 0)::numeric(18,2)
+    from per_supplier ps
+  )
+  select * from per_supplier
+  union all
+  select * from totals;
+end;
+$$;
+revoke all on function get_aged_payables(uuid, date) from public;
+revoke all on function get_aged_payables(uuid, date) from authenticated;
+revoke all on function get_aged_payables(uuid, date) from anon;
+grant execute on function get_aged_payables(uuid, date) to service_role;
+
+create or replace function get_bills_due(
+  p_company_id uuid,
+  p_as_of_date date
+)
+returns table (
+  bill_id uuid,
+  supplier_id uuid,
+  supplier_name text,
+  bill_number text,
+  due_date date,
+  scheduled_payment_date date,
+  match_status bill_match_status,
+  outstanding numeric(18,2)
+)
+language plpgsql
+security invoker
+stable
+set search_path = public, pg_temp
+as $$
+begin
+  if p_company_id is null then raise exception 'COMPANY_ID_REQUIRED'; end if;
+  if p_as_of_date is null then raise exception 'AS_OF_DATE_REQUIRED'; end if;
+  return query
+  select
+    b.id, b.supplier_id, s.supplier_name, b.bill_number, b.due_date,
+    b.scheduled_payment_date, b.match_status,
+    (b.grand_total - b.amount_paid)::numeric(18,2)
+  from bills b
+  join suppliers s on s.id = b.supplier_id
+  where b.company_id = p_company_id
+    and b.status in ('issued', 'partially_paid')
+    and b.amount_paid < b.grand_total
+    and b.journal_entry_id is not null
+  order by b.due_date nulls last, b.bill_number;
+end;
+$$;
+revoke all on function get_bills_due(uuid, date) from public;
+revoke all on function get_bills_due(uuid, date) from authenticated;
+revoke all on function get_bills_due(uuid, date) from anon;
+grant execute on function get_bills_due(uuid, date) to service_role;
+
+create or replace function reconcile_supplier_statement(
+  p_company_id uuid,
+  p_supplier_id uuid,
+  p_statement_date date
+)
+returns jsonb
+language plpgsql
+security invoker
+stable
+set search_path = public, pg_temp
+as $$
+declare
+  v_matched jsonb;
+  v_ours jsonb;
+  v_theirs jsonb;
+begin
+  if p_company_id is null then raise exception 'COMPANY_ID_REQUIRED'; end if;
+  if p_supplier_id is null then raise exception 'SUPPLIER_ID_REQUIRED'; end if;
+  if p_statement_date is null then raise exception 'STATEMENT_DATE_REQUIRED'; end if;
+
+  select coalesce(jsonb_agg(to_jsonb(ssl) order by ssl.line_date), '[]'::jsonb)
+    into v_matched
+    from supplier_statement_lines ssl
+   where ssl.company_id = p_company_id
+     and ssl.supplier_id = p_supplier_id
+     and ssl.statement_date = p_statement_date
+     and ssl.match_status = 'matched';
+
+  select coalesce(jsonb_agg(x order by x->>'date'), '[]'::jsonb)
+    into v_ours
+    from (
+      select jsonb_build_object(
+        'kind', 'bill', 'id', b.id, 'date', b.bill_date,
+        'reference', b.supplier_invoice_number, 'amount', b.grand_total
+      ) as x
+      from bills b
+      where b.company_id = p_company_id
+        and b.supplier_id = p_supplier_id
+        and b.journal_entry_id is not null
+        and b.status <> 'void'
+        and not exists (
+          select 1 from supplier_statement_lines ssl
+           where ssl.matched_bill_id = b.id
+             and ssl.statement_date = p_statement_date
+        )
+      union all
+      select jsonb_build_object(
+        'kind', 'payment', 'id', sp.id, 'date', sp.payment_date,
+        'reference', sp.reference_number, 'amount', sp.amount
+      )
+      from supplier_payments sp
+      where sp.company_id = p_company_id
+        and sp.supplier_id = p_supplier_id
+        and sp.journal_entry_id is not null
+        and not exists (
+          select 1 from supplier_statement_lines ssl
+           where ssl.matched_payment_id = sp.id
+             and ssl.statement_date = p_statement_date
+        )
+    ) q;
+
+  select coalesce(jsonb_agg(to_jsonb(ssl) || jsonb_build_object(
+    'suggested_bill_id', (
+      select b.id from bills b
+       where b.company_id = ssl.company_id
+         and b.supplier_id = ssl.supplier_id
+         and b.journal_entry_id is not null
+         and b.status <> 'void'
+         and b.grand_total = ssl.amount
+         and (
+           (ssl.reference is not null and btrim(ssl.reference) <> '' and b.supplier_invoice_number = ssl.reference)
+           or abs(b.bill_date - ssl.line_date) <= 7
+         )
+       order by case when b.supplier_invoice_number = ssl.reference then 0 else 1 end,
+                abs(b.bill_date - ssl.line_date)
+       limit 1
+    ),
+    'suggested_payment_id', (
+      select sp.id from supplier_payments sp
+       where sp.company_id = ssl.company_id
+         and sp.supplier_id = ssl.supplier_id
+         and sp.journal_entry_id is not null
+         and sp.amount = ssl.amount
+         and (
+           (ssl.reference is not null and btrim(ssl.reference) <> '' and sp.reference_number = ssl.reference)
+           or abs(sp.payment_date - ssl.line_date) <= 7
+         )
+       order by case when sp.reference_number = ssl.reference then 0 else 1 end,
+                abs(sp.payment_date - ssl.line_date)
+       limit 1
+    )
+  ) order by ssl.line_date), '[]'::jsonb)
+    into v_theirs
+    from supplier_statement_lines ssl
+   where ssl.company_id = p_company_id
+     and ssl.supplier_id = p_supplier_id
+     and ssl.statement_date = p_statement_date
+     and ssl.match_status <> 'matched';
+
+  return jsonb_build_object(
+    'matched', coalesce(v_matched, '[]'::jsonb),
+    'unmatched_ours', coalesce(v_ours, '[]'::jsonb),
+    'unmatched_theirs', coalesce(v_theirs, '[]'::jsonb)
+  );
+end;
+$$;
+revoke all on function reconcile_supplier_statement(uuid, uuid, date) from public;
+revoke all on function reconcile_supplier_statement(uuid, uuid, date) from authenticated;
+revoke all on function reconcile_supplier_statement(uuid, uuid, date) from anon;
+grant execute on function reconcile_supplier_statement(uuid, uuid, date) to service_role;
+
+
+-- ============================================================================
 -- 8. ROW-LEVEL SECURITY (multi-tenant isolation)
 -- ============================================================================
 -- Assumes the app sets `request.jwt.claims.company_id` (Supabase convention)
@@ -4635,6 +6677,22 @@ alter table payment_applications enable row level security;
 alter table write_offs enable row level security;
 alter table ecl_loss_rate_policies enable row level security;
 alter table ecl_provision_runs enable row level security;
+
+alter table suppliers enable row level security;
+alter table purchase_orders enable row level security;
+alter table purchase_order_lines enable row level security;
+alter table goods_receipts enable row level security;
+alter table goods_receipt_lines enable row level security;
+alter table bills enable row level security;
+alter table bill_lines enable row level security;
+alter table three_way_match_results enable row level security;
+alter table supplier_payments enable row level security;
+alter table supplier_payment_applications enable row level security;
+alter table supplier_payment_runs enable row level security;
+alter table supplier_payment_run_items enable row level security;
+alter table supplier_statement_lines enable row level security;
+alter table grni_accrual_runs enable row level security;
+
 
 create policy company_isolation_accounts on accounts
   using (company_id = (select current_setting('app.current_company_id', true))::uuid);
@@ -4720,6 +6778,35 @@ create policy company_isolation_ecl_loss_rate_policies on ecl_loss_rate_policies
   using (company_id = (select current_setting('app.current_company_id', true))::uuid);
 
 create policy company_isolation_ecl_provision_runs on ecl_provision_runs
+  using (company_id = (select current_setting('app.current_company_id', true))::uuid);
+
+create policy company_isolation_suppliers on suppliers
+  using (company_id = (select current_setting('app.current_company_id', true))::uuid);
+create policy company_isolation_purchase_orders on purchase_orders
+  using (company_id = (select current_setting('app.current_company_id', true))::uuid);
+create policy company_isolation_purchase_order_lines on purchase_order_lines
+  using (po_id in (select id from purchase_orders where company_id = (select current_setting('app.current_company_id', true))::uuid));
+create policy company_isolation_goods_receipts on goods_receipts
+  using (company_id = (select current_setting('app.current_company_id', true))::uuid);
+create policy company_isolation_goods_receipt_lines on goods_receipt_lines
+  using (goods_receipt_id in (select id from goods_receipts where company_id = (select current_setting('app.current_company_id', true))::uuid));
+create policy company_isolation_bills on bills
+  using (company_id = (select current_setting('app.current_company_id', true))::uuid);
+create policy company_isolation_bill_lines on bill_lines
+  using (bill_id in (select id from bills where company_id = (select current_setting('app.current_company_id', true))::uuid));
+create policy company_isolation_three_way_match_results on three_way_match_results
+  using (bill_id in (select id from bills where company_id = (select current_setting('app.current_company_id', true))::uuid));
+create policy company_isolation_supplier_payments on supplier_payments
+  using (company_id = (select current_setting('app.current_company_id', true))::uuid);
+create policy company_isolation_supplier_payment_applications on supplier_payment_applications
+  using (supplier_payment_id in (select id from supplier_payments where company_id = (select current_setting('app.current_company_id', true))::uuid));
+create policy company_isolation_supplier_payment_runs on supplier_payment_runs
+  using (company_id = (select current_setting('app.current_company_id', true))::uuid);
+create policy company_isolation_supplier_payment_run_items on supplier_payment_run_items
+  using (run_id in (select id from supplier_payment_runs where company_id = (select current_setting('app.current_company_id', true))::uuid));
+create policy company_isolation_supplier_statement_lines on supplier_statement_lines
+  using (company_id = (select current_setting('app.current_company_id', true))::uuid);
+create policy company_isolation_grni_accrual_runs on grni_accrual_runs
   using (company_id = (select current_setting('app.current_company_id', true))::uuid);
 
 -- journal_lines and template_lines inherit isolation via their parent entry/template

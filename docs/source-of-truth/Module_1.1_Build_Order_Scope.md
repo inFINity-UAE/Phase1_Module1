@@ -189,18 +189,23 @@ aged payables) rather than being designed independently and drifting.
 The Build Order's original open question (Bill as its own table vs a
 `journal_entries` row) is closed in `feature-spec-1_1_E.md` E-1:
 **Option A.** A bill has its own pre-posting lifecycle
-(`draft → matched → issued → partially_paid/paid`, plus `disputed`/`void`)
+(`draft → matched → [pending_approval] → issued → partially_paid/paid`,
+plus `disputed`/`void`)
 and posts one `purchase_invoice` journal at Issue, the same shape C used
-for invoices and D used for payments.
+for invoices and D used for payments. `pending_approval` is only used
+when Issue is at/above `journal_approval_threshold` (E-28).
 
 That entity is also the landing target for Module 5 (B — OCR). Do not
 reopen the question when scoping B.
 
 **Also locked in the spec, not deferred to mid-build:** AP control
-`2000`, input VAT `1400`, advances `1320`, purchase discounts `5060`,
-GRNI `2020`; payment blocked on a failed three-way match (Rules §1.5);
-period-end GRNI accrual (Rules §1.5) as an explicit RPC, not a silent
-cron. Full decision log: E-1…E-22.
+`2000`, input VAT `1400`, advances `1350` (E-23; not `1320`), purchase
+discounts `5060`, GRNI `2020`; payment blocked on a failed three-way
+match unless Owner override with reason (E-25); quantity tolerance 0% /
+price tolerance 2% (E-26); AED 50,000 bill-Issue gate via existing
+`journal_approval_threshold` (E-28); period-end GRNI accrual (Rules
+§1.5 / §1.22) as an explicit RPC, not a silent cron (E-24). Full
+decision log: E-1…E-28.
 
 ---
 
@@ -310,20 +315,16 @@ layer rather than be built speculatively early.
 - ✅ **Module 1.1.D** — `feature-spec-1_1_D.md` written and built
   (D-1…D-17, 2026-09-10); fresh-DB + Jest **573** verified per §8 of
   that spec. Carry-forward deferrals listed in §3 above / feature-spec §7.
-- 🟡 **Module 1.1.E spec** — `feature-spec-1_1_E.md` written and
-  grounded (E-1…E-22, 2026-09-10); Bill entity Option A; not yet built.
+- ✅ **Module 1.1.E** — `feature-spec-1_1_E.md` (E-1…E-28); built 2026-09-13
+  (Option A `bills` table). §7 deferrals remain. Full D-P13 suite not re-run
+  on landing (see feature-spec §8).
 
 **Next:**
 
-1. **Build Module 1.1.E** against `feature-spec-1_1_E.md` (E-1…E-22).
-   Bill entity is closed (Option A). Do not invent a divergent subledger
-   shape; do not reopen GL account numbers already resolved in E-2.
-2. **Post-C1 / post-D / post-E-spec carry-forward** (not blocking E
-   build): FTA gap-detection register, C §9 presentation features, D §7
-   items (1070→1020 settlement, VAT-201 filing in F, PDF/export,
-   dunning, multi-currency, company-settings admin API), E §7 items
-   (vendor credits, recurring bills, inventory/landed costs,
-   unattended GRNI cron) — track in the owning module's feature-spec
-   until explicitly scoped.
-3. Optional hygiene: close the D-P13 `journal-entries.service.spec.ts`
-   mock gap so the suite is fully green.
+1. **Post-E carry-forward** (not blocking): FTA gap-detection register, C §9
+   presentation features, D §7 items (1070→1020 settlement, VAT-201 filing in F,
+   PDF/export, dunning, multi-currency, company-settings admin API), E §7 items
+   (vendor credits, recurring bills, inventory/landed costs, unattended GRNI
+   cron) — track in the owning module's feature-spec until explicitly scoped.
+2. Optional: re-run D-P13 full Jest + fresh-DB apply of `schema.sql` to sign
+   E off at the same bar as D.

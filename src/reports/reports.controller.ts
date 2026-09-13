@@ -1,4 +1,4 @@
-import { Controller, Get, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Query, Body, UseGuards } from '@nestjs/common';
 import { RequireCompanyMembership } from '../auth/decorators/require-company-membership.decorator';
 import { CompanyMembershipGuard } from '../auth/guards/company-membership.guard';
 import { SupabaseAuthGuard } from '../auth/guards/supabase-auth.guard';
@@ -10,10 +10,14 @@ import { CustomerPaymentHistoryQueryDto } from './dto/customer-payment-history-q
 import { GeneralLedgerQueryDto } from './dto/general-ledger-query.dto';
 import { ProfitAndLossQueryDto } from './dto/profit-and-loss-query.dto';
 import { TrialBalanceQueryDto } from './dto/trial-balance-query.dto';
+import { AgedPayablesQueryDto } from './dto/aged-payables-query.dto';
+import { BillsDueQueryDto } from './dto/bills-due-query.dto';
+import { ReconcileSupplierStatementDto } from './dto/reconcile-supplier-statement.dto';
+import { SupplierLedgerQueryDto } from './dto/supplier-ledger-query.dto';
 import { ReportsService } from './reports.service';
 
 /**
- * [feature-spec-1.1.H1.md] + [feature-spec-1_1_D.md §5]
+ * [feature-spec-1.1.H1.md] + [feature-spec-1_1_D.md §5] + [feature-spec-1_1_E.md §5]
  * Thin read routes over Postgres report RPCs — no Nest-side aggregation.
  */
 @Controller('reports')
@@ -112,6 +116,43 @@ export class ReportsController {
     return this.reportsService.getCustomerPaymentHistory(
       query.company_id,
       query.customer_id,
+    );
+  }
+
+  /** [feature-spec-1_1_E.md §5.1] */
+  @Get('supplier-ledger')
+  @RequireCompanyMembership({ type: 'query' })
+  getSupplierLedger(@Query() query: SupplierLedgerQueryDto) {
+    return this.reportsService.getSupplierLedger(
+      query.company_id,
+      query.supplier_id,
+      query.date_from,
+      query.date_to,
+    );
+  }
+
+  /** [feature-spec-1_1_E.md §5.2] */
+  @Get('aged-payables')
+  @RequireCompanyMembership({ type: 'query' })
+  getAgedPayables(@Query() query: AgedPayablesQueryDto) {
+    return this.reportsService.getAgedPayables(query.company_id, query.as_of_date);
+  }
+
+  /** [feature-spec-1_1_E.md §5.2 / §5.4] */
+  @Get('bills-due')
+  @RequireCompanyMembership({ type: 'query' })
+  getBillsDue(@Query() query: BillsDueQueryDto) {
+    return this.reportsService.getBillsDue(query.company_id, query.as_of_date);
+  }
+
+  /** [feature-spec-1_1_E.md §5.3 / E-22] */
+  @Post('reconcile-supplier-statement')
+  @RequireCompanyMembership({ type: 'body' })
+  reconcileSupplierStatement(@Body() dto: ReconcileSupplierStatementDto) {
+    return this.reportsService.reconcileSupplierStatement(
+      dto.company_id,
+      dto.supplier_id,
+      dto.statement_date,
     );
   }
 }
