@@ -1,18 +1,19 @@
 # Module 1.1.E — Accounts Payable Management
-## Feature Specification (Source of Truth Once Ratified)
+## Feature Specification (Source of Truth)
 
 Part of Module 1.1 · AI-Based Accounting Foundation, inFINity Phase 1 (MVP).
 This is the scope document for Module 1.1.E only — do not infer scope
 from Module 1.1.A/C/D/H1 or other 1.1.B/F/G modules.
 
-**Status: 🟡 Drafted and grounded, not yet built (2026-09-13).** This spec
-follows the same discipline `feature-spec.md` (A), `feature-spec-1.1.C.md`
-(C), and `feature-spec-1_1_D.md` (D) used: decisions are numbered (E-1…);
-once written, nothing is silently edited — append E-29+. Every GL
-account number below is resolved against the real, finalized
-`Chart of Accounts - inFINity.xlsx` (via `seed_finalized_coa_demo_company_0002.sql`)
-and `schema.sql`. Open flags from the first draft are closed in E-2 and
-E-14…E-22. Six policy calls on 2026-09-13 are E-23…E-28.
+**Status: ✅ built (2026-09-13).** Schema (§3), posting RPCs (§4), Nest AP
+surface (§5.5), and AP reports (§5) are live. §7 deferrals remain. §2 is
+the ratified decision log (E-1…E-28); §9 is the chronological index.
+Grounded against `schema.sql`, the finalized
+`Chart of Accounts - inFINity.xlsx` (via
+`seed_finalized_coa_demo_company_0002.sql`), and Accounting Rules
+§1.5 / §4.2 / §1.24. Open flags from the first draft are closed in E-2
+and E-14…E-22. Six policy calls on 2026-09-13 are E-23…E-28; append
+E-29+. Full D-P13 Jest suite was **not** re-run on landing — see §8.
 
 **Build Order context:** per `Module_1.1_Build_Order_Scope.md` §4, E is
 sequenced fourth — after A (Module 0) and D (Module 3), not strictly
@@ -30,8 +31,12 @@ convention. Module 2 (C) — `customers`, `invoices` / `invoice_status`,
 `payment_terms_type`, per-line `vat_rate`, Issue-time numbering + posting.
 Module 3 (D) — `payments` / `payment_applications`, `payment_method_type`,
 D-6 `company_settings.default_bank_account_id` (`1020`), D-12 routing
-(`1010` / `1020` / `1070`), D-5 aging buckets. No `suppliers`, `bills`,
-or AP tables exist yet — E is fully greenfield on schema.
+(`1010` / `1020` / `1070`), D-5 aging buckets.
+
+*(Pre-build evidence, written before E landed — the status line above
+is current. `suppliers` / `bills` / AP tables exist in `schema.sql`. Do
+not re-litigate this paragraph as live schema.)* No `suppliers`,
+`bills`, or AP tables exist yet — E is fully greenfield on schema.
 
 **Confirmed directly against the finalized COA** (same file D-2 used):
 

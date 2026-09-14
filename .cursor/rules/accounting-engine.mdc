@@ -15,6 +15,7 @@ SOURCE OF TRUTH — when they disagree, STOP and report the conflict (do not pic
    - C — `feature-spec-1.1.C.md`
    - D — `feature-spec-1_1_D.md`
    - E — `feature-spec-1_1_E.md` (built; §7 deferrals remain)
+   - F — `feature-spec-1_1_F.md` (grounded, not built; §0 owner items)
 4. `Module_1.1_Build_Order_Scope.md` — sequencing only, never a substitute for a feature spec
 
 Stale counts, intros, or manuals (`README.md`, `INFINITY_ACCOUNTING_DOCUMENTATION.md`, older §7.2 snapshots) are **not** authoritative over (1)–(3).

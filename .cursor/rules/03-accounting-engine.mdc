@@ -33,7 +33,7 @@ Hard SoT/never-guess rules live in `accounting-engine.mdc`. This file is operati
 
 4-digit, 5 bands: 1xxx asset, 2xxx liability, 3xxx equity, 4xxx income, 5xxx expense. `normal_balance` is `debit`/`credit` only. Resolve numbers from the Excel COA / seed / existing RPCs.
 
-Hardcoded in schema/posting today (do not casually change): `1100` AR, `2200` output VAT, `4060` sales discounts, `3100` RE, `1020` default bank, `2060` advances, `5640`/`1110` ECL, `1010`/`1070` payment routing. E (unbuilt) locks `2000`/`1400`/`1350`/`5060`/`2020` in `feature-spec-1_1_E.md` — do not reopen.
+Hardcoded in schema/posting today (do not casually change): `1100` AR, `2200` output VAT, `4060` sales discounts, `3100` RE, `1020` default bank, `2060` advances, `5640`/`1110` ECL, `1010`/`1070` payment routing, `2000` AP, `1400` input VAT, `1350` supplier advances, `5060` purchase discounts, `2020` GRNI. Do not reopen. F (unbuilt) additionally locks `1410`/`2210`/`1420`/`5800`/`5580` in `feature-spec-1_1_F.md`.
 
 ## Unclear requirement
 

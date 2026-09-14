@@ -1,8 +1,8 @@
 # inFINity — Module 1.1 Build Order & Scope Document
 
 Companion to `feature-spec.md` (Module 1.1.A), `feature-spec-1.1.H1.md`,
-`feature-spec-1.1.C.md`, `feature-spec-1_1_D.md`, and
-`feature-spec-1_1_E.md`. Module 1.1.A
+`feature-spec-1.1.C.md`, `feature-spec-1_1_D.md`,
+`feature-spec-1_1_E.md`, and `feature-spec-1_1_F.md`. Module 1.1.A
 (Double-Entry Accounting Engine) is complete and signed off as of
 decision #63. Module 1.1.H1 (Core Financial Reports) is complete and
 signed off as of H1 decision #6 (2026-08-30). Module 1.1.C **C1 core**
@@ -11,8 +11,9 @@ scheduled transitions) is complete as of C Batch 2 (2026-09-01).
 Module 1.1.D (Accounts Receivable) is complete and signed off as of
 D-1…D-17 (2026-09-10) — see §2 for C gaps D closed, §3 for D's
 intentional deferrals to F / H-remainder / later admin work. Module
-1.1.E (Accounts Payable) is **specified, not built** (E-1…E-22,
-2026-09-10) — Bill entity is Option A (`bills` table); see §4.
+1.1.E (Accounts Payable) is complete as of E-1…E-28 (2026-09-13) —
+Bill entity is Option A (`bills` table); §7 deferrals remain; see §4.
+Module 1.1.F is spec-grounded, not built (F-1…F-37, 2026-09-14); see §6.
 This document scopes what comes next, in what order, and why.
 
 **Source:** `inFINity Complete Phase-Wise Feature List — All Modules &
@@ -35,9 +36,9 @@ and so open questions get resolved before they're discovered mid-build.
 | 1 | Core Financial Reports | H (partial — see §1) | 0 | ✅ Done (H1 #1–#6, 2026-08-30) — `feature-spec-1.1.H1.md` |
 | 2 | Quotations & Tax Invoicing | C | 0 | ✅ **C1 core done** (Batch 1–2, 2026-09-01) — `feature-spec-1.1.C.md`; §9 presentation + FTA gap register still deferred (→ post-C1/F); payment/`written_off` ledger closed by D (2026-09-10) |
 | 3 | Accounts Receivable | D | 0, 2 | ✅ **Done** (D-1…D-17, 2026-09-10) — `feature-spec-1_1_D.md`; §7 deferrals → F / H-remainder / later admin |
-| 4 | Accounts Payable | E | 0, (3's mirror — pattern only) | 🟡 Spec drafted (E-1…E-22, 2026-09-10) — `feature-spec-1_1_E.md`; not yet built |
+| 4 | Accounts Payable | E | 0, (3's mirror — pattern only) | ✅ **Done** (E-1…E-28, 2026-09-13) — `feature-spec-1_1_E.md`; §7 deferrals remain; full D-P13 suite not re-run on landing |
 | 5 | AI Document Processing & OCR | B | 0, 4 | Queued |
-| 6 | UAE VAT Compliance Engine | F | 0, 2, 4, 1 | Queued |
+| 6 | UAE VAT Compliance Engine | F | 0, 2, 4, 1 | 🟡 Spec grounded (F-1…F-37, 2026-09-14) — `feature-spec-1_1_F.md`; not yet built; three user-owned items in spec §8 |
 | 7 | UAE Corporate Tax Add-On | G | 0, 1, 6 | Queued |
 | 8 | Extended Financial Reports | H (remainder — see §8) | 2, 3, 4, 6, 7 | Last |
 
@@ -170,10 +171,12 @@ Authoritative detail: `feature-spec-1_1_D.md` §7. Carry-forward:
 
 ## 4. Accounts Payable (E)
 
-**Status: 🟡 Spec drafted, not yet built (2026-09-10).** Spec:
-`feature-spec-1_1_E.md` (decisions E-1…E-22). Grounded against
-`schema.sql`, the finalized COA, and Accounting Rules §1.5 / §4.2.
-Not yet in `schema.sql` / Nest.
+**Status: ✅ Complete (2026-09-13).** Spec: `feature-spec-1_1_E.md`
+(decisions E-1…E-28). Delivered: suppliers, POs, GRNs, bills (Option A
+`bills` table), three-way match, supplier payments / runs / advances
+(`1350`), statement reconciliation, AP reports, period-end GRNI RPC.
+§7 deferrals remain. Full D-P13 Jest suite was not re-run on landing
+(see feature-spec §8).
 
 **Why fourth:** structurally mirrors D on the purchase side, and should
 follow the same "get the ledger-facing transaction module built, then
@@ -242,6 +245,13 @@ matching how Module 1.1.A itself was scoped as "1.1.A" specifically, with
 ---
 
 ## 6. UAE VAT Compliance Engine (F)
+
+**Status: 🟡 Spec grounded, not yet built (2026-09-14).** Spec:
+`feature-spec-1_1_F.md` (F-1…F-37). Grounded against `schema.sql`, the
+finalized COA seed, Modules C/D/E, and Accounting Rules PDF Part 2.2 /
+2.3 / 2.5 / 3.14 / 5. Three user-owned items remain in that spec's §8
+(F-33 period-lock, F-36 CGS gate, F-37 bad-debt relief credit). Do not
+start schema/RPC/Nest until those are answered.
 
 **Why sixth:** VAT 201 auto-calculation needs output tax data (from C's
 invoices), input tax data (from E's bills), and reconciles to the general
@@ -318,13 +328,16 @@ layer rather than be built speculatively early.
 - ✅ **Module 1.1.E** — `feature-spec-1_1_E.md` (E-1…E-28); built 2026-09-13
   (Option A `bills` table). §7 deferrals remain. Full D-P13 suite not re-run
   on landing (see feature-spec §8).
+- 🟡 **Module 1.1.F** — `feature-spec-1_1_F.md` grounded 2026-09-14
+  (F-1…F-37); not built. Three user-owned items in that spec §8.
 
 **Next:**
 
-1. **Post-E carry-forward** (not blocking): FTA gap-detection register, C §9
-   presentation features, D §7 items (1070→1020 settlement, VAT-201 filing in F,
-   PDF/export, dunning, multi-currency, company-settings admin API), E §7 items
+1. Close F-33 / F-36 / F-37 on `feature-spec-1_1_F.md`, then build F.
+2. **Post-E carry-forward** (not blocking): FTA gap-detection register (now F-16),
+   C §9 presentation features, D §7 items (1070→1020 settlement, PDF/export,
+   dunning, multi-currency, company-settings admin API), E §7 items
    (vendor credits, recurring bills, inventory/landed costs, unattended GRNI
    cron) — track in the owning module's feature-spec until explicitly scoped.
-2. Optional: re-run D-P13 full Jest + fresh-DB apply of `schema.sql` to sign
+3. Optional: re-run D-P13 full Jest + fresh-DB apply of `schema.sql` to sign
    E off at the same bar as D.
