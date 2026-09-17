@@ -480,4 +480,30 @@ export class SupabaseReportsRepository implements ReportsRepository {
 
     return data;
   }
+
+  async getInvoiceRegister(companyId: string, year: number): Promise<unknown> {
+    const { data, error } = await this.supabase.client.rpc('get_invoice_register', {
+      p_company_id: companyId,
+      p_year: year,
+    });
+    if (error) throw error;
+    return data;
+  }
+
+  async assembleVatAuditPack(periodId: string): Promise<unknown> {
+    const { data, error } = await this.supabase.client.rpc('assemble_vat_audit_pack', {
+      p_period_id: periodId,
+    });
+    if (error) throw error;
+    return data;
+  }
+
+  async getVatRegistrationThreshold(companyId: string, asOf: string): Promise<unknown> {
+    const { data, error } = await this.supabase.client.rpc('get_vat_registration_threshold', {
+      p_company_id: companyId,
+      p_as_of: asOf,
+    });
+    if (error) throw error;
+    return data;
+  }
 }

@@ -1,5 +1,8 @@
 import { IsNumber, IsOptional, IsString, Max, Min, MinLength } from 'class-validator';
+import { IsEnum } from 'class-validator';
 import { IsPostgresUuid } from '../../common/validators/is-postgres-uuid';
+import { VatCategory } from '../../common/enums/vat-category.enum';
+import { VatInputTreatment } from '../../common/enums/vat-input-treatment.enum';
 
 export class CreateBillLineDto {
   @IsNumber()
@@ -36,6 +39,18 @@ export class CreateBillLineDto {
   @Min(0)
   @Max(100)
   vat_rate!: number;
+
+  @IsOptional()
+  @IsEnum(VatCategory)
+  vat_category?: VatCategory | null;
+
+  @IsOptional()
+  @IsEnum(VatInputTreatment)
+  vat_input_treatment?: VatInputTreatment | null;
+
+  @IsOptional()
+  @IsPostgresUuid()
+  capital_goods_project_id?: string | null;
 
   @IsOptional()
   @IsPostgresUuid()

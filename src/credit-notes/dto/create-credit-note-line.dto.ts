@@ -1,5 +1,6 @@
 import { Type } from 'class-transformer';
 import {
+  IsEnum,
   IsInt,
   IsNotEmpty,
   IsNumber,
@@ -10,6 +11,8 @@ import {
   Min,
   ValidateIf,
 } from 'class-validator';
+import { UaeEmirate } from '../../common/enums/uae-emirate.enum';
+import { VatCategory } from '../../common/enums/vat-category.enum';
 
 export class CreateCreditNoteLineDto {
   @IsInt()
@@ -48,6 +51,14 @@ export class CreateCreditNoteLineDto {
   @IsNumber()
   @Type(() => Number)
   vat_rate?: number;
+
+  @IsOptional()
+  @IsEnum(VatCategory)
+  vat_category?: VatCategory | null;
+
+  @IsOptional()
+  @IsEnum(UaeEmirate)
+  emirate?: UaeEmirate | null;
 
   @IsOptional()
   @IsUUID()

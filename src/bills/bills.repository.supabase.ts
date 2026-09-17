@@ -126,6 +126,9 @@ export class SupabaseBillsRepository implements BillsRepository {
         discount_amount: dto.discount_amount ?? null,
         vat_rate: dto.vat_rate,
         account_id: dto.account_id ?? null,
+        vat_category: dto.vat_category ?? null,
+        vat_input_treatment: dto.vat_input_treatment ?? null,
+        capital_goods_project_id: dto.capital_goods_project_id ?? null,
       })
       .select()
       .single();

@@ -14,6 +14,7 @@ __pycache__/
 # One-off MCP / migration scratch (never commit)
 scripts/_*
 scripts/_*/
+tmp/
 tmp_*/
 tmp_*
 jest-summary.json

@@ -91,6 +91,34 @@ HIERARCHY_DEMOS = [
     ),
 ]
 
+# [feature-spec-1_1_F.md F-41] Additive COA at F build (slots empty in Excel).
+F41_ACCOUNTS = [
+    (
+        "1415",
+        "VAT Receivable, Bad Debt Relief",
+        "asset",
+        "Tax Recoverable",
+        "debit",
+        None,
+        1,
+        False,
+        True,
+        "[Detail][feature-spec-1_1_F.md F-41] recoverable VAT slice of written-off invoices",
+    ),
+    (
+        "5641",
+        "Bad Debt Recovery",
+        "expense",
+        "Depreciation & Amortization",
+        "credit",
+        None,
+        1,
+        False,
+        True,
+        "[Contra-Expense][feature-spec-1_1_F.md F-41] credit side of VAT bad-debt relief",
+    ),
+]
+
 
 def esc(s: str) -> str:
     return s.replace("'", "''")
@@ -191,6 +219,10 @@ def merge_with_hierarchy(excel_accounts: list[tuple]) -> list[tuple]:
         if parent not in by_num:
             raise ValueError(f"Hierarchy demo parent {parent} missing from Excel COA")
         by_num[demo[0]] = demo
+    for extra in F41_ACCOUNTS:
+        if extra[0] in by_num:
+            raise ValueError(f"F-41 account {extra[0]} already exists in Excel COA")
+        by_num[extra[0]] = extra
     return list(by_num.values())
 
 
@@ -199,10 +231,12 @@ def verify(accounts: list[tuple]) -> None:
     nums = [a[0] for a in accounts]
     if len(nums) != len(set(nums)):
         errors.append("duplicate account_numbers")
-    if len(accounts) != 184:
-        errors.append(f"expected 184 accounts (180 Excel + 4 hierarchy), got {len(accounts)}")
+    if len(accounts) != 186:
+        errors.append(f"expected 186 accounts (180 Excel + 4 hierarchy + F-41 1415/5641), got {len(accounts)}")
     if "1350" not in {a[0] for a in accounts}:
         errors.append("missing 1350 Supplier Advances [feature-spec-1_1_E.md E-23]")
+    if "1415" not in {a[0] for a in accounts} or "5641" not in {a[0] for a in accounts}:
+        errors.append("missing 1415/5641 VAT bad-debt relief accounts [feature-spec-1_1_F.md F-41]")
 
     by_num = {a[0]: a for a in accounts}
     for a in accounts:
@@ -278,8 +312,9 @@ def write_seed(accounts: list[tuple]) -> None:
         "-- [feature-spec.md decision #17] Apply this file in Supabase to mint the demo company.",
         "-- INSERT-ONLY — does not touch 00000000-0000-0000-0000-000000000001.",
         "--",
-        "-- Module 1.1.A UAE Chart of Accounts seed (finalized 180-account COA + 4 hierarchy demos = 184)",
+        "-- Module 1.1.A UAE Chart of Accounts seed (finalized 180-account COA + 4 hierarchy demos + F-41 1415/5641 = 186)",
         "-- [feature-spec-1_1_E.md E-23] adds 1350 Supplier Advances (not 1320)",
+        "-- [feature-spec-1_1_F.md F-41] adds 1415 / 5641 VAT bad-debt relief",
         "-- Source: Chart of Accounts - inFINity.xlsx → \"Chart of Accounts\" sheet",
         "-- [feature-spec.md decision #5] normal_balance lowercase debit/credit only",
         "-- [feature-spec.md decision #6] Demo company fixed UUID for seed only",
@@ -337,12 +372,12 @@ def write_seed(accounts: list[tuple]) -> None:
 
 def write_verify_sql() -> None:
     sql = f"""-- verify_chart_of_accounts.sql
--- Stage 1 verification against finalized UAE COA seed (184 rows)
+-- Stage 1 verification against finalized UAE COA seed (186 rows)
 WITH seed AS (
   SELECT * FROM public.accounts WHERE company_id = '{COMPANY_ID}'
 ),
 checks AS (
-  SELECT 'total_count' AS check_name, count(*)::text AS value, (count(*) = 184) AS pass FROM seed
+  SELECT 'total_count' AS check_name, count(*)::text AS value, (count(*) = 186) AS pass FROM seed
   UNION ALL
   SELECT 'no_duplicate_account_numbers', count(*)::text, count(*) = 0
   FROM (SELECT account_number FROM seed GROUP BY account_number HAVING count(*) > 1) d

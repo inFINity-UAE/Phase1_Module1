@@ -149,6 +149,8 @@ export class SupabaseCreditNotesRepository implements CreditNotesRepository {
       row.vat_rate = dto.vat_rate;
       row.is_service = dto.is_service ?? false;
       row.income_account_id = dto.income_account_id ?? null;
+      row.vat_category = dto.vat_category ?? null;
+      row.emirate = dto.emirate ?? null;
     } else {
       row.vat_rate = 0;
     }

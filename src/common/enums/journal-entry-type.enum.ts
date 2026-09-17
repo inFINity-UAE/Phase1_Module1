@@ -20,4 +20,13 @@ export enum JournalEntryType {
   SupplierAdvance = 'supplier_advance',
   SupplierAdvanceApplication = 'supplier_advance_application',
   GrniAccrual = 'grni_accrual',
+  // [feature-spec-1_1_F.md F-24]
+  VatApportionment = 'vat_apportionment',
+  VatCapitalGoodsAdjustment = 'vat_capital_goods_adjustment',
+  VatReturnSettlement = 'vat_return_settlement',
+  VatPayment = 'vat_payment',
+  VatRefundClaim = 'vat_refund_claim',
+  VatBadDebtRelief = 'vat_bad_debt_relief',
+  VatPenalty = 'vat_penalty',
+  VatPeriodCorrection = 'vat_period_correction',
 }

@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Query, Body, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Query, Body, Param, ParseUUIDPipe, UseGuards } from '@nestjs/common';
 import { RequireCompanyMembership } from '../auth/decorators/require-company-membership.decorator';
 import { CompanyMembershipGuard } from '../auth/guards/company-membership.guard';
 import { SupabaseAuthGuard } from '../auth/guards/supabase-auth.guard';
@@ -14,6 +14,7 @@ import { AgedPayablesQueryDto } from './dto/aged-payables-query.dto';
 import { BillsDueQueryDto } from './dto/bills-due-query.dto';
 import { ReconcileSupplierStatementDto } from './dto/reconcile-supplier-statement.dto';
 import { SupplierLedgerQueryDto } from './dto/supplier-ledger-query.dto';
+import { InvoiceRegisterQueryDto, VatRegistrationThresholdQueryDto } from './dto/vat-reports-query.dto';
 import { ReportsService } from './reports.service';
 
 /**
@@ -154,5 +155,26 @@ export class ReportsController {
       dto.supplier_id,
       dto.statement_date,
     );
+  }
+
+  /** [feature-spec-1_1_F.md F-16] */
+  @Get('invoice-register')
+  @RequireCompanyMembership({ type: 'query' })
+  getInvoiceRegister(@Query() query: InvoiceRegisterQueryDto) {
+    return this.reportsService.getInvoiceRegister(query.company_id, query.year);
+  }
+
+  /** [feature-spec-1_1_F.md F-32] */
+  @Get('vat-registration-threshold')
+  @RequireCompanyMembership({ type: 'query' })
+  getVatRegistrationThreshold(@Query() query: VatRegistrationThresholdQueryDto) {
+    return this.reportsService.getVatRegistrationThreshold(query.company_id, query.as_of);
+  }
+
+  /** [feature-spec-1_1_F.md F-15] */
+  @Get('vat-audit-pack/:id')
+  @RequireCompanyMembership({ type: 'param', resource: 'vat_return_period' })
+  getVatAuditPack(@Param('id', ParseUUIDPipe) id: string) {
+    return this.reportsService.assembleVatAuditPack(id);
   }
 }

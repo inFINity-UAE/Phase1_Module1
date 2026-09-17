@@ -13,7 +13,7 @@ D-1…D-17 (2026-09-10) — see §2 for C gaps D closed, §3 for D's
 intentional deferrals to F / H-remainder / later admin work. Module
 1.1.E (Accounts Payable) is complete as of E-1…E-28 (2026-09-13) —
 Bill entity is Option A (`bills` table); §7 deferrals remain; see §4.
-Module 1.1.F is spec-grounded, not built (F-1…F-37, 2026-09-14); see §6.
+Module 1.1.F is built 2026-09-16 (F-1…F-44); §0 residuals remain; see §6.
 This document scopes what comes next, in what order, and why.
 
 **Source:** `inFINity Complete Phase-Wise Feature List — All Modules &
@@ -38,7 +38,7 @@ and so open questions get resolved before they're discovered mid-build.
 | 3 | Accounts Receivable | D | 0, 2 | ✅ **Done** (D-1…D-17, 2026-09-10) — `feature-spec-1_1_D.md`; §7 deferrals → F / H-remainder / later admin |
 | 4 | Accounts Payable | E | 0, (3's mirror — pattern only) | ✅ **Done** (E-1…E-28, 2026-09-13) — `feature-spec-1_1_E.md`; §7 deferrals remain; full D-P13 suite not re-run on landing |
 | 5 | AI Document Processing & OCR | B | 0, 4 | Queued |
-| 6 | UAE VAT Compliance Engine | F | 0, 2, 4, 1 | 🟡 Spec grounded (F-1…F-37, 2026-09-14) — `feature-spec-1_1_F.md`; not yet built; three user-owned items in spec §8 |
+| 6 | UAE VAT Compliance Engine | F | 0, 2, 4, 1 | ✅ **Done** (2026-09-16) — `feature-spec-1_1_F.md`; §0 residuals: 10k VD confirm, Box 2/CAS screenshot |
 | 7 | UAE Corporate Tax Add-On | G | 0, 1, 6 | Queued |
 | 8 | Extended Financial Reports | H (remainder — see §8) | 2, 3, 4, 6, 7 | Last |
 
@@ -246,12 +246,13 @@ matching how Module 1.1.A itself was scoped as "1.1.A" specifically, with
 
 ## 6. UAE VAT Compliance Engine (F)
 
-**Status: 🟡 Spec grounded, not yet built (2026-09-14).** Spec:
-`feature-spec-1_1_F.md` (F-1…F-37). Grounded against `schema.sql`, the
-finalized COA seed, Modules C/D/E, and Accounting Rules PDF Part 2.2 /
-2.3 / 2.5 / 3.14 / 5. Three user-owned items remain in that spec's §8
-(F-33 period-lock, F-36 CGS gate, F-37 bad-debt relief credit). Do not
-start schema/RPC/Nest until those are answered.
+**Status: ✅ Built 2026-09-16.** Spec: `feature-spec-1_1_F.md` (F-1…F-44).
+Grounded against `schema.sql`, the finalized COA seed (186 accounts including
+F-41 `1415`/`5641`), Modules C/D/E, Accounting Rules PDF Part 2.2 / 2.3 /
+2.5 / 3.14 / 5, and owner answers of 2026-09-15 (F-38…F-44). §0 residuals:
+tax-advisor confirm of AED 10,000 VD threshold; EmaraTax screenshot for
+Box 2 + CAS box before export mapping. Calculate/review/file ship; those
+two boxes stay unmapped until the screenshot.
 
 **Why sixth:** VAT 201 auto-calculation needs output tax data (from C's
 invoices), input tax data (from E's bills), and reconciles to the general
@@ -328,12 +329,14 @@ layer rather than be built speculatively early.
 - ✅ **Module 1.1.E** — `feature-spec-1_1_E.md` (E-1…E-28); built 2026-09-13
   (Option A `bills` table). §7 deferrals remain. Full D-P13 suite not re-run
   on landing (see feature-spec §8).
-- 🟡 **Module 1.1.F** — `feature-spec-1_1_F.md` grounded 2026-09-14
-  (F-1…F-37); not built. Three user-owned items in that spec §8.
+- ✅ **Module 1.1.F** — `feature-spec-1_1_F.md` built 2026-09-16
+  (F-1…F-44). Residuals: 10k VD threshold advisor-confirm;
+  EmaraTax screenshot for Box 2 + CAS box.
 
 **Next:**
 
-1. Close F-33 / F-36 / F-37 on `feature-spec-1_1_F.md`, then build F.
+1. Confirm `vd_amount_threshold` with the tax advisor
+   before go-live; screenshot Box 2 / CAS box before export mapping.
 2. **Post-E carry-forward** (not blocking): FTA gap-detection register (now F-16),
    C §9 presentation features, D §7 items (1070→1020 settlement, PDF/export,
    dunning, multi-currency, company-settings admin API), E §7 items

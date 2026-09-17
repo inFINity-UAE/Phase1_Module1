@@ -162,6 +162,38 @@ export class CompanyMembersService {
             resourceId,
           );
         break;
+      case 'vat_return_period':
+        companyId =
+          await this.companyMembersRepository.findCompanyIdByVatReturnPeriodId(resourceId);
+        break;
+      case 'capital_goods_item':
+        companyId =
+          await this.companyMembersRepository.findCompanyIdByCapitalGoodsItemId(resourceId);
+        break;
+      case 'capital_goods_project':
+        companyId =
+          await this.companyMembersRepository.findCompanyIdByCapitalGoodsProjectId(
+            resourceId,
+          );
+        break;
+      case 'vat_bad_debt_relief_claim':
+        companyId =
+          await this.companyMembersRepository.findCompanyIdByVatBadDebtReliefClaimId(
+            resourceId,
+          );
+        break;
+      case 'vat_voluntary_disclosure':
+        companyId =
+          await this.companyMembersRepository.findCompanyIdByVatVoluntaryDisclosureId(
+            resourceId,
+          );
+        break;
+      case 'vat_period_correction':
+        companyId =
+          await this.companyMembersRepository.findCompanyIdByVatPeriodCorrectionId(
+            resourceId,
+          );
+        break;
       default: {
         const _exhaustive: never = resource;
         throw new NotFoundException(`Unknown resource kind ${_exhaustive}`);

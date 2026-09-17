@@ -36,7 +36,13 @@ export type CompanyMembershipSource =
         | 'supplier_payment'
         | 'supplier_payment_application'
         | 'supplier_payment_run'
-        | 'supplier_statement_line';
+        | 'supplier_statement_line'
+        | 'vat_return_period'
+        | 'capital_goods_item'
+        | 'capital_goods_project'
+        | 'vat_bad_debt_relief_claim'
+        | 'vat_voluntary_disclosure'
+        | 'vat_period_correction';
       param?: string;
     }
   | {

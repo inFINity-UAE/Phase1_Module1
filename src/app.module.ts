@@ -18,6 +18,7 @@ import { PurchaseOrdersModule } from './purchase-orders/purchase-orders.module';
 import { GoodsReceiptsModule } from './goods-receipts/goods-receipts.module';
 import { BillsModule } from './bills/bills.module';
 import { SupplierPaymentsModule } from './supplier-payments/supplier-payments.module';
+import { VatModule } from './vat/vat.module';
 
 @Module({
   imports: [
@@ -40,6 +41,7 @@ import { SupplierPaymentsModule } from './supplier-payments/supplier-payments.mo
     GoodsReceiptsModule,
     BillsModule,
     SupplierPaymentsModule,
+    VatModule,
   ],
 })
 export class AppModule {}

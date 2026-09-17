@@ -41,6 +41,16 @@ import { BillsController } from '../bills/bills.controller';
 import { SupplierPaymentsController } from '../supplier-payments/supplier-payments.controller';
 import { SupplierPaymentRunsController } from '../supplier-payments/supplier-payment-runs.controller';
 import { SupplierStatementLinesController } from '../supplier-payments/supplier-statement-lines.controller';
+import { VatReturnsController } from '../vat/vat-returns.controller';
+import { VatApportionmentController } from '../vat/vat-apportionment.controller';
+import {
+  CapitalGoodsItemsController,
+  CapitalGoodsProjectsController,
+} from '../vat/capital-goods.controller';
+import {
+  BadDebtReliefClaimsController,
+  VatVoluntaryDisclosuresController,
+} from '../vat/vat-claims.controller';
 import { REQUIRE_COMPANY_MEMBERSHIP_KEY } from '../auth/decorators/require-company-membership.decorator';
 import { SupabaseService } from '../database/supabase.service';
 import { CompanyRole } from '../common/enums/company-role.enum';
@@ -84,6 +94,12 @@ const HTTP_CONTROLLERS: Type[] = [
   SupplierPaymentsController,
   SupplierPaymentRunsController,
   SupplierStatementLinesController,
+  VatReturnsController,
+  VatApportionmentController,
+  CapitalGoodsProjectsController,
+  CapitalGoodsItemsController,
+  BadDebtReliefClaimsController,
+  VatVoluntaryDisclosuresController,
 ];
 
 /**
@@ -120,6 +136,10 @@ const HTTP_CONTROLLERS: Type[] = [
     let foreignSupplierPaymentId = '';
     let foreignPaymentRunId = '';
     let foreignStatementLineId = '';
+    let foreignVatReturnId = '';
+    let foreignCapitalGoodsProjectId = '';
+    let foreignCapitalGoodsItemId = '';
+    let foreignVatVdId = '';
     let memberAccountId = '';
 
     beforeAll(async () => {
@@ -497,6 +517,74 @@ const HTTP_CONTROLLERS: Type[] = [
         throw stmtErr ?? new Error('foreign statement line insert failed');
       }
       foreignStatementLineId = foreignStmt.id as string;
+
+      const { data: foreignVat, error: vatErr } = await supabase.client
+        .from('vat_return_periods')
+        .insert({
+          company_id: foreignCompanyId,
+          period_start: '2026-01-01',
+          period_end: '2026-04-01',
+        })
+        .select('id')
+        .single();
+      if (vatErr || !foreignVat) {
+        throw vatErr ?? new Error('foreign VAT return insert failed');
+      }
+      foreignVatReturnId = foreignVat.id as string;
+
+      const { data: foreignCgProj, error: cgProjErr } = await supabase.client
+        .from('capital_goods_projects')
+        .insert({
+          company_id: foreignCompanyId,
+          description: 'Foreign CAS project',
+          asset_category: 'other',
+          created_by: INTEGRATION_USER_ID,
+        })
+        .select('id')
+        .single();
+      if (cgProjErr || !foreignCgProj) {
+        throw cgProjErr ?? new Error('foreign capital goods project insert failed');
+      }
+      foreignCapitalGoodsProjectId = foreignCgProj.id as string;
+
+      const { data: foreignCgItem, error: cgItemErr } = await supabase.client
+        .from('capital_goods_items')
+        .insert({
+          company_id: foreignCompanyId,
+          project_id: foreignCapitalGoodsProjectId,
+          description: 'Foreign CAS item',
+          acquisition_date: '2026-01-15',
+          capital_value: 5000000,
+          initial_vat: 250000,
+          initial_recovery_pct: 100,
+          adjustment_period_years: 5,
+          created_by: INTEGRATION_USER_ID,
+        })
+        .select('id')
+        .single();
+      if (cgItemErr || !foreignCgItem) {
+        throw cgItemErr ?? new Error('foreign capital goods item insert failed');
+      }
+      foreignCapitalGoodsItemId = foreignCgItem.id as string;
+
+      const { data: foreignVd, error: vdErr } = await supabase.client
+        .from('vat_voluntary_disclosures')
+        .insert({
+          company_id: foreignCompanyId,
+          original_period_id: foreignVatReturnId,
+          error_description: 'Foreign VD',
+          corrected_figures: {},
+          delta_net_vat: 100,
+          discovered_at: '2026-05-01',
+          due_by: '2026-05-21',
+          created_by: INTEGRATION_USER_ID,
+        })
+        .select('id')
+        .single();
+      if (vdErr || !foreignVd) {
+        throw vdErr ?? new Error('foreign VAT voluntary disclosure insert failed');
+      }
+      foreignVatVdId = foreignVd.id as string;
 
       const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
       const publishableKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!;
@@ -975,6 +1063,35 @@ const HTTP_CONTROLLERS: Type[] = [
         { method: 'GET', path: `/supplier-payment-runs/${foreignPaymentRunId}` },
         { method: 'GET', path: `/supplier-statement-lines?company_id=${foreignCompanyId}` },
         { method: 'GET', path: `/supplier-statement-lines/${foreignStatementLineId}` },
+        { method: 'GET', path: `/vat-returns?company_id=${foreignCompanyId}` },
+        {
+          method: 'POST',
+          path: '/vat-returns/calculate',
+          body: { company_id: foreignCompanyId, period_start: '2026-01-01' },
+        },
+        { method: 'GET', path: `/vat-returns/${foreignVatReturnId}` },
+        { method: 'POST', path: `/vat-apportionment/${foreignVatReturnId}/calculate` },
+        { method: 'GET', path: `/reports/invoice-register?company_id=${foreignCompanyId}&year=2026` },
+        {
+          method: 'GET',
+          path: `/reports/vat-registration-threshold?company_id=${foreignCompanyId}&as_of=2026-12-31`,
+        },
+        { method: 'GET', path: `/reports/vat-audit-pack/${foreignVatReturnId}` },
+        { method: 'GET', path: `/capital-goods-projects?company_id=${foreignCompanyId}` },
+        { method: 'GET', path: `/capital-goods-projects/${foreignCapitalGoodsProjectId}` },
+        { method: 'GET', path: `/capital-goods-items?company_id=${foreignCompanyId}` },
+        { method: 'GET', path: `/capital-goods-items/${foreignCapitalGoodsItemId}` },
+        { method: 'GET', path: `/bad-debt-relief-claims?company_id=${foreignCompanyId}` },
+        {
+          method: 'POST',
+          path: '/bad-debt-relief-claims',
+          body: {
+            company_id: foreignCompanyId,
+            write_off_id: '00000000-0000-0000-0000-000000000001',
+          },
+        },
+        { method: 'GET', path: `/vat-voluntary-disclosures?company_id=${foreignCompanyId}` },
+        { method: 'GET', path: `/vat-voluntary-disclosures/${foreignVatVdId}` },
       ];
 
       const failures: string[] = [];
@@ -1061,6 +1178,9 @@ const HTTP_CONTROLLERS: Type[] = [
       });
       expect(runDue.status).not.toBe(403);
       expect(runDue.status).not.toBe(401);
+
+      const vatList = await http('GET', `/vat-returns?company_id=${memberCompanyId}`);
+      expect(vatList.status).toBe(200);
     });
   },
 );

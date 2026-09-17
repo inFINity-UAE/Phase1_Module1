@@ -68,7 +68,7 @@ Optional: `PORT=3000` in `.env` (default is 3000).
 Open **Supabase → SQL Editor** and run **in order**:
 
 1. **`docs/source-of-truth/schema.sql`** — full schema, RPCs, RLS, triggers, grants
-2. **`docs/source-of-truth/seed_finalized_coa_demo_company_0002.sql`** — demo company `…0002` + 184-account COA
+2. **`docs/source-of-truth/seed_finalized_coa_demo_company_0002.sql`** — demo company `…0002` + 186-account COA
 3. *(Optional)* **`docs/source-of-truth/verify_chart_of_accounts.sql`** — sanity checks on the seed
 
 No other SQL files are required on a fresh apply (decisions #45–#48 are already in `schema.sql`).
@@ -79,7 +79,7 @@ No other SQL files are required on a fresh apply (decisions #45–#48 are alread
 node scripts/verify-reset-health.mjs
 ```
 
-Expect 7/7 COA checks pass and demo company `00000000-0000-0000-0000-000000000002` with 184 accounts.
+Expect 7/7 COA checks pass and demo company `00000000-0000-0000-0000-000000000002` with 186 accounts.
 
 ---
 
@@ -137,7 +137,7 @@ by `CompanyMembershipGuard` + explicit `company_id` filters (see `feature-spec.m
 
 1. `docs/source-of-truth/Accounting Rules - inFINity.pdf`
 2. `docs/source-of-truth/schema.sql`
-3. The owning module feature spec (`feature-spec.md` for A; also `feature-spec-1.1.H1.md`, `feature-spec-1.1.C.md`, `feature-spec-1_1_D.md`, `feature-spec-1_1_E.md`)
+3. The owning module feature spec (`feature-spec.md` for A; also `feature-spec-1.1.H1.md`, `feature-spec-1.1.C.md`, `feature-spec-1_1_D.md`, `feature-spec-1_1_E.md`, `feature-spec-1_1_F.md`)
 
 Accounting rules, schema, and feature spec **must agree** — do not invent business
 logic not stated there (see `.cursor/rules/accounting-engine.mdc`).
@@ -157,6 +157,7 @@ src/
   audit-log/
   auth/                  SupabaseAuthGuard, CompanyMembershipGuard
   database/              Supabase client (service_role / secret key)
+  vat/                   F VAT 201, apportionment, CAS, claims, VD
 docs/source-of-truth/    schema.sql, seed, feature-spec, PDF rules
 scripts/
   verify-reset-health.mjs       Post-reset DB + COA probe

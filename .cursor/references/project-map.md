@@ -46,20 +46,21 @@ Fresh DB: `schema.sql` → `seed_finalized_coa_demo_company_0002.sql` → option
 | `goods-receipts/` | E GRNs + nested lines |
 | `bills/` | E bills + match/issue/approve/void |
 | `supplier-payments/` | E payments, runs, statement lines |
-| `reports/` | H1 reads + D AR + E AP report RPCs |
+| `reports/` | H1 reads + D AR + E AP + F VAT report RPCs |
+| `vat/` | F VAT 201, apportionment, CAS, claims, VD |
 | `test/`, `e2e/` | Shared mint + packs |
 
 Pattern: `*.module.ts` provides `SYMBOL` → `Supabase*Repository`. `AppModule` imports feature modules + `ScheduleModule`. `AuthModule` is imported by each guarded feature module (not listed separately on `AppModule`).
 
 ## Tables (`schema.sql`)
 
-`companies`, `company_settings`, `company_members`, `accounts`, `public_holidays`, `accounting_periods`, `journal_entries`, `journal_lines`, `journal_attachments`, `recurring_journal_templates`, `recurring_journal_template_lines`, `audit_log`, `customers`, `quotations`, `quotation_lines`, `invoices`, `invoice_lines`, `credit_notes`, `credit_note_lines`, `payments`, `payment_applications`, `write_offs`, `ecl_loss_rate_policies`, `ecl_provision_runs`, `suppliers`, `purchase_orders`, `purchase_order_lines`, `goods_receipts`, `goods_receipt_lines`, `bills`, `bill_lines`, `three_way_match_results`, `supplier_payments`, `supplier_payment_applications`, `supplier_payment_runs`, `supplier_payment_run_items`, `supplier_statement_lines`, `grni_accrual_runs`.
+`companies`, `company_settings`, `company_members`, `accounts`, `public_holidays`, `accounting_periods`, `journal_entries`, `journal_lines`, `journal_attachments`, `recurring_journal_templates`, `recurring_journal_template_lines`, `audit_log`, `customers`, `quotations`, `quotation_lines`, `invoices`, `invoice_lines`, `credit_notes`, `credit_note_lines`, `payments`, `payment_applications`, `write_offs`, `ecl_loss_rate_policies`, `ecl_provision_runs`, `suppliers`, `purchase_orders`, `purchase_order_lines`, `goods_receipts`, `goods_receipt_lines`, `bills`, `bill_lines`, `three_way_match_results`, `supplier_payments`, `supplier_payment_applications`, `supplier_payment_runs`, `supplier_payment_run_items`, `supplier_statement_lines`, `grni_accrual_runs`, `vat_tax_rule_versions`, `vat_return_box_definitions`, `vat_return_periods`, `vat_return_line_items`, `vat_return_line_item_sources`, `vat_apportionment_calculations`, `capital_goods_projects`, `capital_goods_items`, `capital_goods_adjustments`, `vat_bad_debt_relief_claims`, `vat_voluntary_disclosures`, `vat_period_corrections`, `fta_filing_log`. View: `vat_invoice_register`.
 
 ## Isolation
 
 RLS `company_isolation_*` on tenant tables via `current_setting('app.current_company_id')`. `companies` + `company_members` use membership (`private.is_company_member`). Nest `service_role` bypasses RLS → **always** filter `company_id` in repositories and resolve membership first.
 
-`CompanyResourceKind` (extend when adding `:id` routes): journal_entry, journal_line, account, accounting_period, recurring_template, recurring_template_line, customer, quotation, quotation_line, invoice, invoice_line, credit_note, credit_note_line, payment, payment_application, public_holiday, supplier, purchase_order, purchase_order_line, goods_receipt, goods_receipt_line, bill, bill_line, supplier_payment, supplier_payment_application, supplier_payment_run, supplier_statement_line.
+`CompanyResourceKind` (extend when adding `:id` routes): journal_entry, journal_line, account, accounting_period, recurring_template, recurring_template_line, customer, quotation, quotation_line, invoice, invoice_line, credit_note, credit_note_line, payment, payment_application, public_holiday, supplier, purchase_order, purchase_order_line, goods_receipt, goods_receipt_line, bill, bill_line, supplier_payment, supplier_payment_application, supplier_payment_run, supplier_statement_line, vat_return_period, capital_goods_item, capital_goods_project, vat_bad_debt_relief_claim, vat_voluntary_disclosure, vat_period_correction.
 
 ## Key RPCs (not exhaustive)
 
@@ -71,13 +72,15 @@ D: `create_payment_journal_entry`, `create_advance_application_journal_entry`, `
 
 E: `run_three_way_match`, `create_bill_journal_entry`, `issue_bill`, `void_bill`, `create_supplier_payment_journal_entry`, `create_supplier_advance_application_journal_entry`, `execute_supplier_payment_run`, `accrue_unbilled_receipts`, `get_supplier_ledger`, `get_aged_payables`, `get_bills_due`, `reconcile_supplier_statement`. Helper: `bill_is_payable`.
 
+F: `calculate_vat_return`, `submit_vat_return_for_review`, `approve_vat_return`, `file_vat_return`, `export_vat_return`, `reconcile_vat_return`, `claim_vat_refund`, `record_vat_payment`, `accrue_vat_penalty`, `calculate_partial_exemption`, `assert_cas_threshold`, `run_capital_goods_adjustment`, `claim_bad_debt_relief`, `create_vat_period_correction`, `approve_vat_voluntary_disclosure`, `get_invoice_register`, `assemble_vat_audit_pack`, `get_vat_registration_threshold`, `assert_not_filed_vat_period`. Posting still via `post_journal_entry` / `post_vat_journal_entry`.
+
 Reports: `get_trial_balance_for_period`, `get_balance_sheet`, `get_profit_and_loss`, `get_general_ledger`, `get_customer_ledger`, `get_aged_receivables`, `check_customer_credit_limit`, `get_customer_payment_history`. Helper: `is_ledger_truth_status`, `account_signed_balance`.
 
 ## HTTP surface (prefix)
 
-`/accounts`, `/accounting-periods`, `/journal-entries`, `/journal-lines`, `/recurring-journal-templates`, `/audit-log`, `/customers`, `/quotations`, `/quotation-lines`, `/invoices`, `/invoice-lines`, `/credit-notes`, `/credit-note-lines`, `/payments`, `/payment-applications`, `/public-holidays`, `/suppliers`, `/purchase-orders`, `/goods-receipts`, `/bills`, `/supplier-payments`, `/supplier-payment-runs`, `/supplier-statement-lines`, `/reports/*`.
+`/accounts`, `/accounting-periods`, `/journal-entries`, `/journal-lines`, `/recurring-journal-templates`, `/audit-log`, `/customers`, `/quotations`, `/quotation-lines`, `/invoices`, `/invoice-lines`, `/credit-notes`, `/credit-note-lines`, `/payments`, `/payment-applications`, `/public-holidays`, `/suppliers`, `/purchase-orders`, `/goods-receipts`, `/bills`, `/supplier-payments`, `/supplier-payment-runs`, `/supplier-statement-lines`, `/vat-returns`, `/vat-apportionment`, `/capital-goods-projects`, `/capital-goods-items`, `/bad-debt-relief-claims`, `/vat-voluntary-disclosures`, `/reports/*`.
 
-Reports: trial-balance, balance-sheet, profit-and-loss, general-ledger, customer-ledger, customer-statement (data), aged-receivables, credit-limit-check, customer-payment-history, supplier-ledger, aged-payables, bills-due, reconcile-supplier-statement.
+Reports: trial-balance, balance-sheet, profit-and-loss, general-ledger, customer-ledger, customer-statement (data), aged-receivables, credit-limit-check, customer-payment-history, supplier-ledger, aged-payables, bills-due, reconcile-supplier-statement, invoice-register, vat-registration-threshold, vat-audit-pack/:id.
 
 Journal extras: `POST /journal-entries/accrue-unbilled-receipts` (E-21, static path before `:id`).
 
@@ -94,16 +97,19 @@ Journal extras: `POST /journal-entries/accrue-unbilled-receipts` (E-21, static p
 | 4060 | Sales discounts |
 | 2000 | AP control (bill Issue) |
 | 1400 | Input VAT |
+| 1410 / 2210 | Reverse-charge input / output (F-25, inside bill JE) |
+| 1415 / 5641 | Recoverable VAT relief / VAT relief expense (F-41) |
 | 1350 | Supplier advances (E-23) |
 | 5060 | Purchase discounts |
 | 2020 | GRNI accrual (E-21) |
+| 5800 / 5580 | Blocked input VAT / entertainment (F-25) |
 
 ## Tests
 
-Live DB; skip without keys. Shared setup: `src/test/integration-company.setup.ts`, `src/e2e/e2e-company.setup.ts`. Unit (no live DB): **544 passed / 19 suites** (2026-09-13), including `controller-auth-coverage` **166** guarded routes. D-P13 full integration suite was **not** re-run this pass. E AP: `src/bills/bills.integration.spec.ts` **8 passed**. Membership 403: **3 passed**. D regression (invoices + payments): **24 passed**. D-P13 `journal-entries.service.spec.ts` ECL mock gap closed.
+Live DB; skip without keys. Shared setup: `src/test/integration-company.setup.ts`, `src/e2e/e2e-company.setup.ts`. `controller-auth-coverage` **200** guarded routes. F: `src/vat/vat.service.spec.ts` (F-8/F-10 roles) + `src/vat/vat-returns.integration.spec.ts` (calculate/file/lock). Invoice Issue and membership isolation cover F Issue guards.
 
 ## Scripts
 
 `verify-reset-health.mjs`, `verify-auth-module-imports.mjs`, `generate_coa_seed.py`, `hijri_holiday_projection.py`, `trigger-execute-empirical-test.mjs`.
 
-`tmp_*` is gitignored MCP scratch — not SoT.
+`tmp/` is gitignored MCP / live-apply scratch — not SoT.

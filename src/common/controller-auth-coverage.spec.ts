@@ -50,12 +50,23 @@ import { SupplierPaymentsController } from '../supplier-payments/supplier-paymen
 import { SupplierPaymentRunsController } from '../supplier-payments/supplier-payment-runs.controller';
 import { SupplierStatementLinesController } from '../supplier-payments/supplier-statement-lines.controller';
 import { SupplierPaymentsService } from '../supplier-payments/supplier-payments.service';
+import { VatReturnsController } from '../vat/vat-returns.controller';
+import { VatApportionmentController } from '../vat/vat-apportionment.controller';
+import {
+  CapitalGoodsItemsController,
+  CapitalGoodsProjectsController,
+} from '../vat/capital-goods.controller';
+import {
+  BadDebtReliefClaimsController,
+  VatVoluntaryDisclosuresController,
+} from '../vat/vat-claims.controller';
+import { VatService } from '../vat/vat.service';
 
 /**
  * [feature-spec.md decisions #24/#27/#41; feature-spec-1.1.H1.md #1]
  * Controllers reject unauthenticated requests (401) and succeed for a
  * verified Bearer session with membership. Regression list covers all
- * 166 guarded HTTP routes across controllers.
+ * 200 guarded HTTP routes across controllers.
  *
  * Blind spot (C1-3): this spec registers controllers in isolation and mocks
  * CompanyMembershipGuard + CompanyMembersService — it does NOT import real
@@ -100,6 +111,11 @@ describe('Controller auth coverage (decision #24)', () => {
   const supplierPaymentAppId = '23232323-2323-2323-2323-232323232323';
   const paymentRunId = '24242424-2424-2424-2424-242424242424';
   const statementLineId = '25252525-2525-2525-2525-252525252525';
+  const vatReturnId = '26262626-2626-2626-2626-262626262626';
+  const capitalGoodsProjectId = '27272727-2727-2727-2727-272727272721';
+  const capitalGoodsItemId = '28282828-2828-2828-2828-282828282828';
+  const vatClaimId = '29292929-2929-2929-2929-292929292929';
+  const vatVdId = '2a2a2a2a-2a2a-2a2a-2a2a-2a2a2a2a2a2a';
 
   const journalEntryDetails = {
     entry: { id: entryId, company_id: companyId },
@@ -166,6 +182,78 @@ describe('Controller auth coverage (decision #24)', () => {
         statement_date: '2026-01-31',
       },
     },
+    { method: 'GET', path: `/reports/invoice-register?company_id=${companyId}&year=2026` },
+    {
+      method: 'GET',
+      path: `/reports/vat-registration-threshold?company_id=${companyId}&as_of=2026-12-31`,
+    },
+    { method: 'GET', path: `/reports/vat-audit-pack/${vatReturnId}` },
+    {
+      method: 'POST',
+      path: '/vat-returns/calculate',
+      body: { company_id: companyId, period_start: '2026-01-01' },
+    },
+    { method: 'GET', path: `/vat-returns?company_id=${companyId}` },
+    { method: 'GET', path: `/vat-returns/${vatReturnId}` },
+    { method: 'GET', path: `/vat-returns/${vatReturnId}/groups/out_standard_rated/transactions` },
+    { method: 'POST', path: `/vat-returns/${vatReturnId}/submit-for-review` },
+    { method: 'POST', path: `/vat-returns/${vatReturnId}/approve` },
+    { method: 'POST', path: `/vat-returns/${vatReturnId}/file` },
+    { method: 'GET', path: `/vat-returns/${vatReturnId}/export` },
+    { method: 'POST', path: `/vat-returns/${vatReturnId}/reconcile` },
+    { method: 'POST', path: `/vat-returns/${vatReturnId}/claim-refund` },
+    {
+      method: 'POST',
+      path: `/vat-returns/${vatReturnId}/record-payment`,
+      body: { amount: 50, payment_date: '2026-04-28', method: 'bank_transfer' },
+    },
+    { method: 'POST', path: `/vat-returns/${vatReturnId}/accrue-penalty`, body: { amount: 1000 } },
+    {
+      method: 'POST',
+      path: `/vat-returns/${vatReturnId}/corrections`,
+      body: { delta_net_vat: 100, discovered_at: '2026-05-01' },
+    },
+    { method: 'POST', path: `/vat-apportionment/${vatReturnId}/calculate` },
+    {
+      method: 'POST',
+      path: '/capital-goods-projects',
+      body: { company_id: companyId, description: 'Tower', asset_category: 'building_real_estate' },
+    },
+    { method: 'GET', path: `/capital-goods-projects?company_id=${companyId}` },
+    { method: 'GET', path: `/capital-goods-projects/${capitalGoodsProjectId}` },
+    { method: 'PATCH', path: `/capital-goods-projects/${capitalGoodsProjectId}`, body: { description: 'Renamed' } },
+    { method: 'DELETE', path: `/capital-goods-projects/${capitalGoodsProjectId}` },
+    {
+      method: 'POST',
+      path: '/capital-goods-items',
+      body: {
+        company_id: companyId,
+        description: 'Asset',
+        acquisition_date: '2026-01-01',
+        capital_value: 5000000,
+        initial_vat: 250000,
+        initial_recovery_pct: 100,
+      },
+    },
+    { method: 'GET', path: `/capital-goods-items?company_id=${companyId}` },
+    { method: 'GET', path: `/capital-goods-items/${capitalGoodsItemId}` },
+    { method: 'PATCH', path: `/capital-goods-items/${capitalGoodsItemId}`, body: { description: 'Renamed' } },
+    { method: 'DELETE', path: `/capital-goods-items/${capitalGoodsItemId}` },
+    {
+      method: 'POST',
+      path: `/capital-goods-items/${capitalGoodsItemId}/adjust`,
+      body: { fiscal_year: 2026, actual_use_pct: 80 },
+    },
+    {
+      method: 'POST',
+      path: '/bad-debt-relief-claims',
+      body: { company_id: companyId, write_off_id: '27272727-2727-2727-2727-272727272727' },
+    },
+    { method: 'GET', path: `/bad-debt-relief-claims?company_id=${companyId}` },
+    { method: 'POST', path: `/bad-debt-relief-claims/${vatClaimId}/claim` },
+    { method: 'GET', path: `/vat-voluntary-disclosures?company_id=${companyId}` },
+    { method: 'GET', path: `/vat-voluntary-disclosures/${vatVdId}` },
+    { method: 'POST', path: `/vat-voluntary-disclosures/${vatVdId}/approve` },
     { method: 'GET', path: `/accounts?company_id=${companyId}` },
     { method: 'GET', path: `/accounts/${accountId}` },
     {
@@ -835,6 +923,9 @@ describe('Controller auth coverage (decision #24)', () => {
       getAgedPayables: jest.fn().mockResolvedValue([]),
       getBillsDue: jest.fn().mockResolvedValue([]),
       reconcileSupplierStatement: jest.fn().mockResolvedValue({}),
+      getInvoiceRegister: jest.fn().mockResolvedValue([]),
+      getVatRegistrationThreshold: jest.fn().mockResolvedValue({}),
+      assembleVatAuditPack: jest.fn().mockResolvedValue({}),
     };
 
     const apStub = {
@@ -886,6 +977,40 @@ describe('Controller auth coverage (decision #24)', () => {
       removeStatementLine: jest.fn().mockResolvedValue(undefined),
     };
 
+    const vatService = {
+      calculate: jest.fn().mockResolvedValue({ id: vatReturnId }),
+      findAll: jest.fn().mockResolvedValue([]),
+      findOne: jest.fn().mockResolvedValue({ id: vatReturnId }),
+      groupTransactions: jest.fn().mockResolvedValue([]),
+      submitForReview: jest.fn().mockResolvedValue({ id: vatReturnId }),
+      approve: jest.fn().mockResolvedValue({ id: vatReturnId }),
+      file: jest.fn().mockResolvedValue({ id: vatReturnId }),
+      export: jest.fn().mockResolvedValue({}),
+      reconcile: jest.fn().mockResolvedValue({}),
+      claimRefund: jest.fn().mockResolvedValue({}),
+      recordPayment: jest.fn().mockResolvedValue({}),
+      accruePenalty: jest.fn().mockResolvedValue({}),
+      createCorrection: jest.fn().mockResolvedValue({}),
+      calculateApportionment: jest.fn().mockResolvedValue({}),
+      createProject: jest.fn().mockResolvedValue({ id: capitalGoodsProjectId }),
+      listProjects: jest.fn().mockResolvedValue([]),
+      findProject: jest.fn().mockResolvedValue({ id: capitalGoodsProjectId }),
+      updateProject: jest.fn().mockResolvedValue({ id: capitalGoodsProjectId }),
+      deleteProject: jest.fn().mockResolvedValue(undefined),
+      createItem: jest.fn().mockResolvedValue({ id: capitalGoodsItemId }),
+      listItems: jest.fn().mockResolvedValue([]),
+      findItem: jest.fn().mockResolvedValue({ id: capitalGoodsItemId }),
+      updateItem: jest.fn().mockResolvedValue({ id: capitalGoodsItemId }),
+      deleteItem: jest.fn().mockResolvedValue(undefined),
+      adjustItem: jest.fn().mockResolvedValue({}),
+      createClaim: jest.fn().mockResolvedValue({ id: vatClaimId }),
+      listClaims: jest.fn().mockResolvedValue([]),
+      claimRelief: jest.fn().mockResolvedValue({}),
+      listDisclosures: jest.fn().mockResolvedValue([]),
+      findDisclosure: jest.fn().mockResolvedValue({ id: vatVdId }),
+      approveDisclosure: jest.fn().mockResolvedValue({}),
+    };
+
     const suppliersService = apStub;
     const purchaseOrdersService = apStub;
     const goodsReceiptsService = apStub;
@@ -919,6 +1044,12 @@ describe('Controller auth coverage (decision #24)', () => {
         SupplierPaymentsController,
         SupplierPaymentRunsController,
         SupplierStatementLinesController,
+        VatReturnsController,
+        VatApportionmentController,
+        CapitalGoodsProjectsController,
+        CapitalGoodsItemsController,
+        BadDebtReliefClaimsController,
+        VatVoluntaryDisclosuresController,
       ],
       providers: [
         SupabaseAuthGuard,
@@ -935,6 +1066,7 @@ describe('Controller auth coverage (decision #24)', () => {
         { provide: RecurringJournalTemplatesService, useValue: recurringService },
         { provide: AuditLogService, useValue: auditLogService },
         { provide: ReportsService, useValue: reportsService },
+        { provide: VatService, useValue: vatService },
         { provide: SuppliersService, useValue: suppliersService },
         { provide: PurchaseOrdersService, useValue: purchaseOrdersService },
         { provide: GoodsReceiptsService, useValue: goodsReceiptsService },
@@ -996,7 +1128,7 @@ describe('Controller auth coverage (decision #24)', () => {
   }
 
   it('covers all guarded HTTP routes', () => {
-    expect(ALL_GUARDED_ROUTES).toHaveLength(166);
+    expect(ALL_GUARDED_ROUTES).toHaveLength(200);
   });
 
   it.each(ALL_GUARDED_ROUTES)(

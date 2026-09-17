@@ -398,6 +398,33 @@ export class ReportsService {
         statementDate,
       );
     } catch (error) {
+      handleDatabaseError(error      );
+    }
+  }
+
+  async getInvoiceRegister(companyId: string, year: number): Promise<unknown> {
+    try {
+      return await this.reportsRepository.getInvoiceRegister(companyId, year);
+    } catch (error) {
+      handleDatabaseError(error);
+    }
+  }
+
+  async assembleVatAuditPack(periodId: string): Promise<unknown> {
+    try {
+      return await this.reportsRepository.assembleVatAuditPack(periodId);
+    } catch (error) {
+      handleDatabaseError(error);
+    }
+  }
+
+  async getVatRegistrationThreshold(companyId: string, asOf?: string): Promise<unknown> {
+    try {
+      return await this.reportsRepository.getVatRegistrationThreshold(
+        companyId,
+        asOf ?? serverAsOfDateToday(),
+      );
+    } catch (error) {
       handleDatabaseError(error);
     }
   }

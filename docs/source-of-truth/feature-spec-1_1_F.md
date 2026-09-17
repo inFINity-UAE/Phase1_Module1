@@ -5,19 +5,20 @@ Part of Module 1.1 · AI-Based Accounting Foundation, inFINity Phase 1 (MVP).
 This is the scope document for Module 1.1.F only — do not infer scope from
 Module 1.1.A/C/D/E/H1 or Module G.
 
-**Status: 🟡 Grounded against schema/COA/Rules, not yet built (2026-09-14).**
-This spec follows the same numbered-decision discipline `feature-spec.md`
-(A), `feature-spec-1.1.C.md` (C), `feature-spec-1_1_D.md` (D), and
-`feature-spec-1_1_E.md` (E) used: decisions are numbered (F-1…); once
-written, nothing is silently edited — append F-38+. Schema/RPC/Nest
-implementation must not start until the remaining user-owned items in
-**§0 / §8** are answered (F-33, F-36, F-37). Every GL account number below is
+**Status: ✅ Built 2026-09-16.** This spec follows the same numbered-decision
+discipline `feature-spec.md` (A), `feature-spec-1.1.C.md` (C),
+`feature-spec-1_1_D.md` (D), and `feature-spec-1_1_E.md` (E) used:
+decisions are numbered (F-1…); once written, nothing is silently edited —
+append F-45+. F-33 / F-36 / F-37 are closed by F-38…F-41. Residual before
+export-mapping: tax-advisor confirm of the AED 10,000 VD amount threshold
+(F-39) and an EmaraTax screenshot for Box 2 + the CAS box (F-42). Every
+GL account number below is
 resolved against `Chart of Accounts - inFINity.xlsx` (via
 `seed_finalized_coa_demo_company_0002.sql`) and `schema.sql`. Every FTA
 rate, due date, and retention figure is resolved against
 `Accounting Rules - inFINity.pdf` Part 2.2 / 2.3 / 2.5 / 3.14 / 5.
 Open flags from the first draft are closed in F-18…F-32, F-34, F-35;
-three items remain user-owned.
+owner answers of 2026-09-15 are F-38…F-44.
 
 **Build Order context:** per `Module_1.1_Build_Order_Scope.md` §6, F is
 sequenced sixth — after A (Module 0), C (Module 2), E (Module 4), and
@@ -53,6 +54,7 @@ reconciliation (§4.17).
 |---|---|---|
 | Input VAT (recoverable) | `1400` VAT Receivable (Input VAT) | `[Control][Recoverable Input VAT]`; E-2; pair of `2200` |
 | Reverse-charge input VAT | `1410` VAT Receivable - Reverse Charge (Input Leg) | `[Detail][RCM Input]`; E-2 reserved for F |
+| VAT receivable — bad debt relief | `1415` VAT Receivable, Bad Debt Relief | F-41 — additive COA at F build (slot free between `1410` and `1420`); not `1400` |
 | VAT refund receivable | `1420` VAT Refund Receivable from FTA | `[Detail] Approved refund claim pending disbursement` — F-20 |
 | Output VAT / net payable | `2200` VAT Payable (Output VAT) | `[Control][Output VAT 5%] FTA VAT Law - net payable per return` — F-20; no separate FTA-payable account exists |
 | Reverse-charge output VAT | `2210` VAT Payable - Reverse Charge (Output Leg) | `[Detail][RCM Output]`; E-2 reserved for F |
@@ -64,6 +66,8 @@ reconciliation (§4.17).
 | Exempt sales | `4020` Sales Revenue - VAT Exempt | `[Detail][Exempt]`; C #4 non-5 non-0 |
 | Designated-zone sales | `4030` Sales Revenue - Designated Zone | `[Detail][Designated Zone]`; seed `is_active = false`; Rules §2.2 — F-19 |
 | Bank/Cash default | `1020` | D-6; VAT payment to FTA (F-30) |
+| Bad debt expense (ECL) | `5640` | D-8 — write-off / provision; not the relief credit |
+| Bad debt recovery (VAT relief) | `5641` Bad Debt Recovery | F-41 — additive contra-expense at F build (slot free after `5640`); credit side of relief JE |
 
 **Accounting Rules sourced here** (PDF, source of truth #1):
 
@@ -82,66 +86,44 @@ reconciliation (§4.17).
   postings unless a prior-period adjustment workflow.
 - Part 5.1 / 5.2 — versioned tax config; never auto-submit a VAT return.
 
-**Not in the PDF, not invented here:** Capital Assets Scheme AED
-threshold and 5-year vs 10-year class split; FTA VAT 201 printed box
-numbers; de-minimis for partial exemption; the credit-side GL account
-for a bad-debt-relief journal. Those stay user-owned (§0 / §8).
+**Not in the PDF, closed by owner 2026-09-15 rather than invented:**
+Capital Assets Scheme AED 5,000,000 / 5-yr vs 10-yr (F-40); VAT 201
+boxes 1 and 3–14 from filing guides (F-42 — Box 2 and CAS box still
+screenshot-gated); bad-debt relief GL `Dr 1415 Cr 5641` (F-41). Partial
+exemption de-minimis stays deferred (F-35). AED 10,000 VD amount
+threshold is versioned and **awaiting tax-advisor confirmation** (F-39)
+because sources conflict on whether it still exists.
 
 ---
 
-## 0. Decisions required from the owner before build
+## 0. Owner decisions (2026-09-15) — closed except two residuals
 
-Do not pick a silent default. Answer here (or in chat); the next
-append-only entries are F-38+. Full reasoning for each item is in §2.
+F-33 / F-36 / F-37 are answered below. Full text is F-38…F-44. Do not
+silently edit those entries.
 
-### F-33 — Posted documents inside a filed VAT period
+| # | Answer | Closes |
+|---|---|---|
+| Post-filing lock | One `VAT_PERIOD_FILED` rule: VAT-relevant accounts **or** invoice/CN/bill Issue. Not a per-type whitelist. Two correction paths (next-period vs Form 211). Emirate-mismatch always needs VD. | F-33 → F-38, F-39, F-43 |
+| Capital Assets Scheme | AED 5,000,000 excl. VAT; 10 years buildings/RE; 5 years other; hide below threshold; cumulative per project for staged payments. | F-36 → F-40 |
+| Bad-debt relief JE | Reject no-JE and `Cr 1400`. `Dr 1415 Cr 5641`. | F-37 → F-41 |
+| VAT 201 boxes | Seed 1, 3–14 from the owner table; Box 1 by Emirate; Box 2 and CAS box wait for an EmaraTax screenshot before export. | F-27 → F-42 |
 
-Rules §1.3: once a VAT return is filed, prevent backdated postings
-unless an explicit prior-period adjustment. A's hard-close HTTP is still
-a stub.
+### Residual — do not hard-code as immutable law
 
-| Option | Meaning |
-|---|---|
-| **A** | Filing only locks `vat_return_periods` (F-14). Invoice / bill / payment Issue still follows open `accounting_periods` only. |
-| **B** | Filing also rejects new ledger-truth postings dated in that VAT window (`VAT_PERIOD_FILED`) on invoice Issue, credit-note Issue, bill Issue, payments, write-off, ECL, GRNI, and manual JE post — except the F-12 disclosure / F-24 adjustment path. Does **not** implement A's hard-close HTTP. |
-
-**Status:** unanswered (2026-09-14).
-
-### F-36 — Capital Assets Scheme AED gate and 5-yr / 10-yr class split
-
-The Accounting Rules PDF does not state the FTA monetary threshold or
-which asset class takes 5 vs 10 years. F-5 today: accountant enters
-`adjustment_period_years` (5 or 10) per item; no system eligibility
-CHECK. Record-keeping retention for capital-asset files is 10 years
-(Rules §2.5) — that is not the VAT adjustment window.
-
-| Option | Meaning |
-|---|---|
-| **Keep F-5** | Accountant judgment only for this pass. |
-| **Enforce a gate** | Owner supplies the FTA AED threshold and the 5-yr / 10-yr class split; append F-38+ as a CHECK. |
-
-**Status:** unanswered (2026-09-14).
-
-### F-37 — Bad-debt VAT relief journal credit account
-
-Debit is `2200` (reduce output VAT). D already took the AR/P&L hit via
-`1110`. No named VAT-relief credit account exists in the COA or PDF.
-
-| Option | Meaning |
-|---|---|
-| **A** | No dedicated relief JE. Claim feeds the VAT 201 group only; GL impact is the F-31 settlement. |
-| **B** | `Dr 2200 Cr 1110` (return the VAT portion to the ECL allowance). |
-| **C** | `Dr 2200 Cr 1400` (wash through input VAT — usually wrong). |
-
-**Status:** unanswered (2026-09-14).
-
-### F-27 (can wait until export) — FTA VAT 201 printed box codes
-
-Calculate / review / drill-down use internal group keys. Export and stub
-file stay blocked (`VAT_BOX_MAP_INCOMPLETE`) until `fta_box_code` is
-seeded against the current FTA VAT 201. Not a schema blocker.
-
-**Status:** unanswered (2026-09-14).
+1. **AED 10,000 VD amount threshold (F-39).** Majority of sources citing
+   Tax Procedures Law Art. 10 / Cabinet Decision 74/2023 still describe
+   it; some 2023-era commentary says it was removed. Seed
+   `vd_amount_threshold = 10000` on `vat_tax_rule_versions`. Tax advisor
+   must confirm before go-live. Changing the seed must not require a
+   code change (Part 5.1).
+2. **Box 2 label and the Capital Assets Scheme box (F-42).** Not
+   independently confirmed against the FTA form. Calculate/review ship
+   on internal groups; export/file stay blocked for those groups until
+   an EmaraTax screenshot fills `fta_box_code`.
+3. **Emirate-mismatch VD (F-39 / F-43)** is a non-obvious trigger
+   (FTA Decision No. 8 of 2024): a standard-rated supply in the wrong
+   Emirate box needs Form 211 even when net tax payable is unchanged.
+   Built; flag to the company's tax advisor that this is in scope.
 
 ---
 
@@ -182,6 +164,10 @@ silently dropped:
 | VAT payment to FTA | §4.19 / F-30 | F-11 stores the due date; settling `2200`/`1420` vs `1020` is the cash event |
 | Return settlement JE | §4.6 / F-31 | COA `2200` is "net payable per return"; `1420` is claimed refunds only |
 | Registration-threshold readout | §5.2 / F-32 | Rules Part 5.4 — rolling 12-month taxable supplies vs AED 375,000 / 187,500 |
+| Post-filing VAT lock + two-tier correction | §4.14 / §4.20 / F-38 / F-39 | Rules §1.3; owner 2026-09-15 |
+| Emirate on standard-rated supplies | §4.1 / F-43 | VAT 201 Box 1 is by Emirate |
+| CAS AED 5m gate + project cumulative | §4.4 / F-40 | Owner 2026-09-15 |
+| `1415` / `5641` COA extension | §4.5 / F-41 | Same discipline as E-23 `1350` |
 
 **Explicitly out of scope for this pass** (see §7 for detail): actual
 submission to the FTA portal or FTA API (export/architecture only);
@@ -191,7 +177,7 @@ Corporate Tax and free-zone qualifying-income classification (Module G);
 PDF/XLSX rendering mechanics generally (Build Order §8, H-remainder);
 a live payment-reminder/notification engine; multi-currency VAT;
 company-settings admin API/UI (D-13/E-26); sales-side reverse charge;
-partial-exemption de-minimis; hardcoded Capital Assets Scheme AED gate.
+partial-exemption de-minimis.
 
 **Depends on:** Module 0 (A), Module 2 (C), Module 4 (E), Module 1
 (H-core) — per Build Order §6, all four. Module 3 (D) for bad-debt
@@ -335,8 +321,10 @@ silently assumed either way.
 
 ### F-5 — Capital goods scheme: per-asset adjustment period, not a single hardcoded rule
 
-**Threshold gate remains user-owned (F-36).** No dedicated CGS GL
-account exists (F-20); annual adjustment posts `1400` vs `5800`.
+**Closed by F-40 (2026-09-15):** AED 5,000,000 excl. VAT; 10 years
+buildings/real estate; 5 years other qualifying; hide below threshold;
+cumulative spend per project. `adjustment_period_years` is
+system-defaulted from category, not free-text.
 
 **Decision:** `capital_goods_items` (one row per qualifying capital
 asset — a large fixed asset or a piece of real estate) stores the
@@ -372,8 +360,8 @@ judgment call, not a system-enforced eligibility check.
 `mark_vat_relief_eligible` clocks 6 months from
 `invoices.invoice_date` (date of supply), **and** requires
 `write_offs.debtor_notified_at is not null`. Not the write-off date.
-F still does not re-derive that clock. Relief **GL credit account**
-remains user-owned (F-37).
+F still does not re-derive that clock. Relief JE is F-41
+(`Dr 1415 Cr 5641`), not F-37 A/B/C.
 
 **Decision:** `vat_bad_debt_relief_claims` — one row per `write_offs`
 row where `vat_relief_eligible = true` (D's flag, per Build Order §2/§3)
@@ -398,10 +386,9 @@ two sources of truth for the same 6-month clock.
 
 ### F-7 — VAT 201 return: one row per tax period, calculated by an explicit RPC, boxes keep transaction-level detail
 
-**Amended by F-27:** calculator keys off **internal groups** (grounded
-in `vat_category` + direction). Printed FTA box IDs live on a versioned
-map and are required only for export/file. Exact FTA box numbers are
-not in the Accounting Rules PDF.
+**Amended by F-42 (2026-09-15):** owner supplied boxes 1 and 3–14 from
+filing guides. Box 2 and the CAS adjustment box stay `fta_box_code`
+null until an EmaraTax screenshot. Box 1 is by Emirate (F-43).
 
 **Decision:** `vat_return_periods` (period start/end, status,
 computed totals) plus `vat_return_line_items` (one row per FTA box —
@@ -501,6 +488,12 @@ D's aging report reads `bills.due_date` rather than D building the
 reminder itself.
 
 ### F-12 — Voluntary disclosure (VAT 211): template preparation, not submission
+
+**Amended by F-39 (2026-09-15):** two-tier path. Amount ≤ versioned
+`vd_amount_threshold` (seeded AED 10,000, advisor-confirm) → next-period
+correction, no Form 211. Amount above, **or** Emirate-mismatch even at
+zero net-tax delta → this VD workflow, due 20 business days from
+discovery (`add_business_days`, D-10). Still prepare-don't-submit.
 
 **Decision:** `vat_voluntary_disclosures` — linked to the originally
 filed `vat_return_periods` row being corrected, storing the error
@@ -719,19 +712,22 @@ UAE VAT is national), per Rules §2.1 / Part 5.1:
 ```
 id              uuid pk
 standard_rate   numeric(5,2) not null
+cas_threshold   numeric(18,2) not null default 5000000  -- F-40, excl. VAT
+vd_amount_threshold numeric(18,2) not null default 10000 -- F-39, advisor-confirm
 effective_from  date not null unique
 notes           text
 created_at      timestamptz not null default now()
 ```
 
-Seed one row: `standard_rate = 5.00`, `effective_from = 2018-01-01`
+Global. Seed `standard_rate = 5.00`, `cas_threshold = 5000000`,
+`vd_amount_threshold = 10000`, `effective_from = 2018-01-01`
 (Federal Decree-Law No. 8 of 2017 as cited on COA `1400`). F's RCM,
 apportionment, CGS, and return calculator resolve the rate by document
 date. C/E line math already uses the stored `vat_rate`; F does not
 recompute historical line VAT from this table.
 
 No company-settings write API to edit versions — seed/SQL, same as
-E-26.
+E-26. `vd_amount_threshold` is **not** treated as immutable law (F-39).
 
 ### F-24 — New `journal_entry_type` values for F-owned postings; RCM stays `purchase_invoice`
 
@@ -747,12 +743,13 @@ vat_payment
 vat_refund_claim
 vat_bad_debt_relief
 vat_penalty
+vat_period_correction
 ```
 
 Advisory-lock namespaces (hashtext, namespace first): `vat:` (return
 calculate/approve/file), `vap:` (apportionment), `cgs:` (capital
-goods), `vbd:` (bad-debt claim), `vpy:` (VAT payment). Then the
-existing entry-number lock.
+goods), `vbd:` (bad-debt claim), `vpy:` (VAT payment), `vpc:`
+(next-period correction). Then the existing entry-number lock.
 
 ### F-25 — Purchase-side `vat_input_treatment` consolidates F-3 / F-4 / blocked input
 
@@ -791,6 +788,9 @@ later CT. All other blocked / apportionment-irrecoverable VAT posts to
 
 ### F-27 — Internal VAT groups plus a versioned FTA box map; do not invent box numbers
 
+**Amended by F-42 (2026-09-15):** seed `fta_box_code` for groups that
+map to boxes 1 and 3–14. Leave Box 2 and CAS box null until screenshot.
+
 **Decision:** the Accounting Rules PDF does not list VAT 201 box
 numbers. F calculates **internal groups** (stable, grounded in
 `vat_category` + direction):
@@ -814,8 +814,7 @@ numbers. F calculates **internal groups** (stable, grounded in
 text), `fta_box_label`, `effective_from`, unique `(group_key,
 effective_from)`. Export and stub-file require every non-zero group to
 have a non-null `fta_box_code`. Calculate/review/drill-down work on
-`group_key` without that seed. Filling `fta_box_code` is the
-user-owned item F-27 leaves for the accountant (listed in §8).
+`group_key` without that seed. Filling `fta_box_code` for Box 2 and the CAS box waits on F-42.
 
 Drill-down rows (`vat_return_line_item_sources`) reference exactly one
 of `invoice_line_id` / `credit_note_line_id` / `bill_line_id` /
@@ -858,8 +857,9 @@ balance). Unattended payment is out of scope (same as E-7).
 `settle_vat_return` posts `entry_type = 'vat_return_settlement'`:
 
 - Let `O` = period output movement on `2200`+`2210` (credit-positive).
-- Let `I` = period recoverable input movement on `1400`+`1410`
-  (debit-positive), after blocked/apportionment/CGS reclasses.
+- Let `I` = period recoverable input / FTA-receivable movement on
+  `1400`+`1410`+`1415` (debit-positive), after blocked/apportionment/CGS
+  reclasses (F-44).
 - Transfer `T = min(O, I)`: `Dr 2200 Cr 1400` (and matching RCM wash
   `Dr 2210 Cr 1410` for the RCM portion).
 - Remainder credit on `2200` = net payable (F-30 pays it).
@@ -880,6 +880,9 @@ only — F does not auto-register with the FTA. `companies.trn` already
 exists; a populated TRN means already registered.
 
 ### F-33 — [OPEN — USER] posted documents inside a filed VAT period
+
+**Closed by F-38 / F-39 (2026-09-15):** account-keyed `VAT_PERIOD_FILED`
+plus two-tier correction. Original options A/B below are historical.
 
 **Rules §1.3:** once a period is closed/filed (e.g. after a VAT return
 submission), prevent backdated postings unless an explicit prior-period
@@ -914,6 +917,9 @@ silent full-recovery shortcut.
 
 ### F-36 — [OPEN — USER] Capital Assets Scheme AED gate and 5-yr / 10-yr class split
 
+**Closed by F-40 (2026-09-15).** Original "no gate" text below is
+historical.
+
 **Rules PDF does not state** the FTA Capital Assets Scheme monetary
 threshold or which asset class takes 5 vs 10 years. F-5 stands:
 accountant enters `adjustment_period_years` per item; no system
@@ -923,6 +929,9 @@ eligibility CHECK. Retention for capital-asset **records** is 10 years
 User may later supply the FTA figures to append F-38+ as a gate.
 
 ### F-37 — [OPEN — USER] Bad-debt relief journal credit account
+
+**Closed by F-41 (2026-09-15):** reject A and C; not B as worded.
+`Dr 1415 Cr 5641`. Original A/B/C below are historical.
 
 **Decision needed before build of the relief JE.** F-6 still creates
 the claim row from D's flag and feeds `out_bad_debt_relief`. The debit
@@ -936,6 +945,178 @@ as a named VAT-relief account. Options:
 - **C.** `Dr 2200 Cr 1400` (wash through input VAT — usually wrong).
 
 Do not pick A/B/C silently.
+
+### F-38 — Filed VAT period lock is one account-keyed rule (closes F-33)
+
+**Decision:** once `vat_return_periods.status = filed`, reject any new
+ledger-truth posting whose **document tax point or journal `entry_date`**
+falls in `[period_start, period_end)` with token `VAT_PERIOD_FILED`,
+when **either**:
+
+1. Any journal line's `account_number` is in the VAT-relevant set:
+   `1400`, `1410`, `1415`, `1420`, `2200`, `2210`, `2230`, `5580`,
+   `5800`, `5641`; or
+2. The posting **Issues or voids** an invoice, credit note, or bill
+   (those documents feed VAT 201 groups even when `vat_total = 0` —
+   zero-rated/exempt/out-of-scope would otherwise slip the account
+   check).
+
+One shared `assert_not_filed_vat_period(...)` helper in `schema.sql`,
+called from every posting RPC — **not** a Nest whitelist of types.
+A manual JE that credits `2200` is blocked the same way as an invoice
+Issue. A's hard-close HTTP stays a stub.
+
+**Not blocked** (do not restate VAT): customer/supplier trade payments
+that only hit `1100`/`2000`/`1010`/`1020`/`1070`; ECL (`5640`/`1110`);
+GRNI (`2020`); write-off (`1110`/`1100`/`5640`) unless a line also hits
+the VAT-relevant set. Write-off does not change the filed VAT 201; the
+relief JE (F-41) posts in an **open** period.
+
+**Allowed in a filed window:** nothing operational. Corrections date
+into the **next open** VAT period (F-39), not back into the filed one.
+
+Does not implement accounting-period hard-close.
+
+### F-39 — Two-tier correction: next-period vs Form 211 (closes F-33 path)
+
+**Decision:** a discovered error against a filed return never posts
+into the filed window (F-38). Route:
+
+| Trigger | Path |
+|---|---|
+| Absolute tax difference ≤ `vd_amount_threshold` (seeded AED 10,000) **and** no Emirate-mismatch | Inline **next-period correction**: JE dated in the current/next **unfiled** VAT period, `entry_type = vat_period_correction`, linked `original_vat_return_period_id`. Amounts flow into that next return's groups. No Form 211. |
+| Tax difference > threshold, **or** Emirate-mismatch on a standard-rated supply (FTA Decision No. 8 of 2024 — even when net tax payable is unchanged) | **Voluntary Disclosure** (F-12): Form 211 template, Owner approval, `due_by = add_business_days(discovered_at, 20)` using D-10 holidays/weekends. Warn if overdue; do not auto-submit. |
+
+`vd_amount_threshold` lives on `vat_tax_rule_versions` (F-23), not a
+hardcoded constant. **Tax advisor must confirm AED 10,000 is still
+current** before go-live (§0 residual): some commentary claims the
+threshold was removed in 2023; sources citing Art. 10 / Cabinet
+Decision 74/2023 still describe it. Both workflows are built; flipping
+the seed to 0 forces everything through VD.
+
+Emirate-mismatch: a correction that changes `invoice_lines.emirate` (or
+the CN copy) on a `standard_rated` line, without a net-tax delta, still
+takes the VD path. Flag this trigger to the company's tax advisor — it
+is easy to miss.
+
+### F-40 — Capital Assets Scheme gate (closes F-36)
+
+**Decision:** owner-confirmed rule of thumb, stored as
+`cas_threshold` (seeded AED 5,000,000, **excluding VAT**) on
+`vat_tax_rule_versions`.
+
+| Condition | System behaviour |
+|---|---|
+| Cumulative qualifying spend on the **project** < threshold | CAS does not apply. Hide `capital_goods_items` / adjustment fields. |
+| Cumulative ≥ threshold and `asset_category = building_real_estate` | Auto-create/flag CAS item; `adjustment_period_years = 10`. |
+| Cumulative ≥ threshold and `asset_category = other` | Same; `adjustment_period_years = 5`. |
+
+Years are defaulted from category, not free-text. Owner may override
+5↔10 only with a stored `period_override_reason` (rare).
+
+**Staged payments:** CAS eligibility is **not** a per-bill-line check.
+`capital_goods_projects` accumulates `bill_lines` net (excl. VAT)
+tagged to the project. Individually small progress bills that together
+cross AED 5,000,000 still become one CAS item. A bill line without a
+project_id is evaluated on that line's own net only.
+
+No dedicated CGS GL account (F-20 stands): annual adjustment remains
+`Dr 5800 Cr 1400` / `Dr 1400 Cr 5800`.
+
+### F-41 — Bad-debt VAT relief JE is `Dr 1415 Cr 5641` (closes F-37)
+
+**Decision:** every VAT 201 figure needs a ledger entry (reject F-37 A).
+Do not credit `1400` (reject F-37 C) — that mixes FTA-reclaim-from-bad-debt
+with ordinary purchase input VAT and makes either population
+unauditable. F-37 B (`Dr 2200 Cr 1110`) is the wrong debit **and**
+credits the allowance rather than reversing the expense that is no
+longer an economic loss.
+
+Claim (when D's `vat_relief_eligible` is true and Owner claims):
+
+- **Debit `1415`** VAT Receivable, Bad Debt Relief — dedicated
+  recoverable sub-account. The customer still owes AR; only the VAT
+  slice is reclaimed from the FTA.
+- **Credit `5641`** Bad Debt Recovery — dedicated contra-expense,
+  not `5640`. Gross write-off expense and recoveries stay visible
+  separately.
+
+`entry_type = vat_bad_debt_relief`. F-31 settlement later washes
+`1415` against `2200` (`Dr 2200 Cr 1415`) so net payable on the return
+ties to the GL. Same "distinct concept → distinct account" discipline
+as E-23 `1350` and D-7 leaving `2050` off `2060`.
+
+**COA extension at F build** (slots confirmed empty in the 2026-09-13
+seed): add `1415` (asset, Tax Recoverable, debit) and `5641` (expense,
+Depreciation & Amortization, **credit** normal_balance as
+contra-expense — pair of `4060`/`5060` shape). Update
+`seed_finalized_coa_demo_company_0002.sql` + Excel +
+`verify_chart_of_accounts.sql` count (184 → 186), same as E-23.
+
+If a written-off invoice is later recovered, reverse this JE
+(`reverse_journal_entry`) and set claim `reversed`.
+
+### F-42 — VAT 201 box map (closes F-27 for boxes we can seed)
+
+**Decision:** seed `vat_return_box_definitions` from the owner table
+(cross-referenced UAE filing guides, **not** the official FTA PDF —
+tax.gov.ae blocked automated fetch). Internal groups still drive
+calculate/review.
+
+| Box | Label | Internal group(s) |
+|---|---|---|
+| 1 | Standard-rated supplies (**by Emirate**) | `out_standard_rated` + `emirate` |
+| 3 | Supplies subject to reverse charge | `out_reverse_charge` |
+| 4 | Zero-rated supplies | `out_zero_rated` |
+| 5 | Exempt supplies | `out_exempt` |
+| 6 | Goods imported into UAE (FTA auto-fills from customs/TRN) | `in_imports_customs` (reconciling only; do not pretend we replace customs) |
+| 7 | Adjustments to imported goods | `in_import_adjustments` |
+| 8 | Total output tax | derived (1+3+… as the form specifies) |
+| 9 | Standard-rated expenses (recoverable input tax) | `in_standard_rated` |
+| 10 | Imports subject to reverse charge (input side) | RCM input (`1410`) |
+| 11 | Total input tax | derived |
+| 12 | Total payable tax | derived |
+| 13 | Total recoverable tax | derived |
+| 14 | Net VAT payable / refundable | `net_payable` |
+
+**Not confirmed — `fta_box_code` stays null until EmaraTax screenshot:**
+Box 2 (label unknown); the box "designated for capital asset scheme
+adjustments" (`in_capital_goods`). Export/file remain blocked
+(`VAT_BOX_MAP_INCOMPLETE`) for any **non-zero** group whose box is
+still null. `out_out_of_scope` / `out_designated_zone` stay disclosure
+groups until the screenshot says otherwise.
+
+Box 1 storage: one `vat_return_line_items` row per emirate per period
+for `out_standard_rated`, not a single UAE total.
+
+### F-43 — `uae_emirate` on sales lines (Box 1 + F-39 mismatch)
+
+**Decision:** additive enum and column, required at Issue for
+`vat_category = standard_rated`:
+
+```
+create type uae_emirate as enum (
+  'abu_dhabi', 'dubai', 'sharjah', 'ajman',
+  'umm_al_quwain', 'ras_al_khaimah', 'fujairah'
+);
+```
+
+On `quotation_lines`, `invoice_lines`, `credit_note_lines`:
+`emirate uae_emirate` nullable until Issue. Convert/CN copy from the
+source line. Missing on a standard-rated invoice/CN line at Issue →
+`INVOICE_LINE_MISSING_EMIRATE`. Optional on other `vat_category`
+values. Optional `company_settings.default_emirate` (seed/SQL only,
+D-13) copied onto new lines.
+
+No emirate on `bill_lines` in this pass (Box 1 is output supplies).
+
+### F-44 — F-31 settlement includes `1415`
+
+**Decision:** F-31 `I` (recoverable input / FTA receivable to wash)
+includes period debit movement on `1415` as well as `1400`+`1410`.
+Relief claimed in the period reduces net payable via
+`Dr 2200 Cr 1415` in the settlement JE, not by leaving `1415` hanging
+off the trial balance.
 
 ---
 
@@ -963,17 +1144,32 @@ create type vat_refund_claim_status as enum ('none', 'eligible', 'claimed');
 create type vat_relief_claim_status as enum (
   'pending_eligible', 'claimed', 'reversed'
 );
+create type uae_emirate as enum (
+  'abu_dhabi', 'dubai', 'sharjah', 'ajman',
+  'umm_al_quwain', 'ras_al_khaimah', 'fujairah'
+);
+create type capital_asset_category as enum (
+  'building_real_estate', 'other'
+);
+create type vat_correction_path as enum (
+  'next_period', 'voluntary_disclosure'
+);
 ```
 
-`journal_entry_type` gains the seven values in F-24.
+`journal_entry_type` gains the values in F-24 (including
+`vat_period_correction`).
 
 ### 3.2 Additive columns on existing tables
 
 `quotation_lines`, `invoice_lines`, `credit_note_lines`, `bill_lines`:
 `vat_category vat_category` (nullable until Issue).
 
+`quotation_lines`, `invoice_lines`, `credit_note_lines`:
+`emirate uae_emirate` (nullable until Issue; required for
+`standard_rated` — F-43).
+
 `bill_lines`: `vat_input_treatment vat_input_treatment` (nullable until
-Issue).
+Issue); `capital_goods_project_id uuid` (F-40, optional).
 
 `company_settings`:
 
@@ -981,13 +1177,15 @@ Issue).
 fta_api_enabled        boolean not null default false
 vat_return_frequency   text not null default 'quarterly'
   check (vat_return_frequency in ('monthly', 'quarterly'))
+default_emirate        uae_emirate   -- F-43; seed/SQL only
 ```
 
 No PATCH API for these (D-13/E-26).
 
 ### 3.3 `vat_tax_rule_versions` (F-23)
 
-Global. Seed 5.00 from 2018-01-01.
+See F-23. Seed `standard_rate = 5.00`, `cas_threshold = 5000000`,
+`vd_amount_threshold = 10000`, `effective_from = 2018-01-01`.
 
 ### 3.4 `vat_return_box_definitions` (F-27)
 
@@ -1050,36 +1248,36 @@ calculated_at      timestamptz not null
 calculated_by      uuid not null
 ```
 
-### 3.8 `capital_goods_items` / `capital_goods_adjustments`
+### 3.8 `capital_goods_projects` / `capital_goods_items` / `capital_goods_adjustments`
 
 ```
+-- projects (F-40 staged payments)
+id                       uuid pk
+company_id               uuid not null
+description              text not null
+asset_category           capital_asset_category not null
+created_by               uuid not null
+created_at               timestamptz not null default now()
+
 -- items
 id                       uuid pk
 company_id               uuid not null
+project_id               uuid references capital_goods_projects(id)
 description              text not null
 acquisition_date         date not null
 capital_value            numeric(18,2) not null check (capital_value > 0)
 initial_vat              numeric(18,2) not null
 initial_recovery_pct     numeric(5,2) not null check (initial_recovery_pct between 0 and 100)
 adjustment_period_years  smallint not null check (adjustment_period_years in (5, 10))
+period_override_reason   text
 bill_line_id             uuid references bill_lines(id)
 created_by               uuid not null
 created_at               timestamptz not null default now()
-
--- adjustments (one per item per fiscal year)
-id                  uuid pk
-item_id             uuid not null references capital_goods_items(id)
-fiscal_year         int not null
-actual_use_pct      numeric(5,2) not null
-adjustment_amount   numeric(18,2) not null
-journal_entry_id    uuid references journal_entries(id)
-run_at              timestamptz
-run_by              uuid
-unique (item_id, fiscal_year)
 ```
 
-`adjustment_period_years in (5, 10)` is the module request's two
-windows, entered per asset (F-5) — not a class-based gate (F-36).
+`capital_goods_adjustments` unchanged from F-5. Cumulative project net
+(excl. VAT) vs `cas_threshold` gates whether an item may exist (F-40).
+`adjustment_period_years` defaults 10 / 5 from `asset_category`.
 
 ### 3.9 `vat_bad_debt_relief_claims`
 
@@ -1090,7 +1288,7 @@ write_off_id    uuid not null references write_offs(id) unique
 vat_amount      numeric(18,2) not null check (vat_amount > 0)
 status          vat_relief_claim_status not null default 'pending_eligible'
 vat_return_period_id uuid references vat_return_periods(id)
-journal_entry_id uuid references journal_entries(id)  -- null until F-37 resolved
+journal_entry_id uuid references journal_entries(id)  -- set on claim; F-41
 claimed_at      timestamptz
 created_at      timestamptz not null default now()
 ```
@@ -1108,6 +1306,10 @@ original_period_id    uuid not null references vat_return_periods(id)
 error_description     text not null
 corrected_figures     jsonb not null
 delta_net_vat         numeric(18,2) not null
+path                  vat_correction_path not null default 'voluntary_disclosure'
+emirate_mismatch      boolean not null default false
+discovered_at         date not null
+due_by                date not null  -- add_business_days(discovered_at, 20)
 status                text not null  -- draft | approved
 approved_by           uuid
 approved_at           timestamptz
@@ -1115,9 +1317,24 @@ created_by            uuid not null
 created_at            timestamptz not null default now()
 ```
 
-Approving sets the original period to `superseded` and inserts a new
-`vat_return_periods` row linked via `supersedes_period_id` (add that
-column on `vat_return_periods`). Does not call the FTA adapter.
+Approving a **voluntary_disclosure** row sets the original period to
+`superseded` and inserts a new `vat_return_periods` row linked via
+`supersedes_period_id`. Does not call the FTA adapter. Next-period
+corrections use §3.13 instead of this table when `path = next_period`.
+
+### 3.13 `vat_period_corrections` (F-39, below-threshold)
+
+```
+id                         uuid pk
+company_id                 uuid not null
+original_period_id         uuid not null references vat_return_periods(id)
+correction_period_id       uuid not null references vat_return_periods(id)
+delta_net_vat              numeric(18,2) not null
+journal_entry_id           uuid references journal_entries(id)
+created_by                 uuid not null
+created_at                 timestamptz not null default now()
+check (correction_period_id <> original_period_id)
+```
 
 ### 3.11 `fta_filing_log`
 
@@ -1146,14 +1363,15 @@ numeric suffix is not exactly prior+1). Voids are rows, not gaps.
 §4.1–§4.17 follow the deliverable map. Citations: F-n and Rules § as
 named.
 
-### 4.1 VAT category (F-1, F-19, F-23)
+### 4.1 VAT category (F-1, F-19, F-23, F-43)
 
 Every sales and purchase line that can hit a VAT 201 group carries
 `vat_category`. `vat_rate` remains the numeric used by existing line
 math (`set_*_line_computed_fields`). Standard-rated lines must match
-the effective `vat_tax_rule_versions.standard_rate` at Issue.
-Zero-rated, exempt, out-of-scope, designated-zone: `vat_rate = 0`.
-Designated-zone is disclosure/review until the box map says otherwise.
+the effective `vat_tax_rule_versions.standard_rate` at Issue **and**
+carry `emirate` (Box 1). Zero-rated, exempt, out-of-scope,
+designated-zone: `vat_rate = 0`. Designated-zone is disclosure/review
+until the box map says otherwise.
 
 ### 4.2 Reverse charge — imported services (F-3, F-25)
 
@@ -1175,19 +1393,22 @@ input VAT: irrecoverable = round(input × (1 − recoverable_pct), 2);
 `Dr 5800 Cr 1400`, `entry_type = vat_apportionment`. De-minimis off
 (F-35). Explicit RPC, lock `vap:`.
 
-### 4.4 Capital goods scheme (F-5, F-20, F-36)
+### 4.4 Capital goods scheme (F-5, F-20, F-40)
 
-Accountant creates `capital_goods_items` (no AED gate). Annual
+`capital_goods_projects` accumulate bill-line net excl. VAT. Below
+`cas_threshold` (seeded AED 5,000,000): no CAS item, fields hidden.
+At/above: auto-flag; years 10 if `building_real_estate`, else 5.
+Staged payments on one project count as one item. Annual
 `run_capital_goods_adjustment` as F-20. Lock `cgs:`. Never a cron.
 
-### 4.5 Bad debt relief (F-6, F-18, F-37)
+### 4.5 Bad debt relief (F-6, F-18, F-41)
 
 Insert claim when `write_offs.vat_relief_eligible = true`. Do not
-re-run the 6-month clock. Include `vat_amount` in
-`out_bad_debt_relief` when status = `claimed`. Dedicated JE waits on
-F-37. If the invoice is later recovered, status `reversed` and the
-next return (or F-12 if the original period is already filed) takes
-the opposite group amount.
+re-run the 6-month clock. Owner claim posts `Dr 1415 Cr 5641`,
+`entry_type = vat_bad_debt_relief`, and feeds `out_bad_debt_relief`.
+Later recovery: `reverse_journal_entry` + status `reversed`. If the
+original VAT period is already filed, the reversing effect follows
+F-39 (next-period vs VD) rather than posting into the filed window.
 
 ### 4.6 VAT 201 calculator + settlement (F-7, F-27, F-31)
 
@@ -1228,20 +1449,27 @@ and writes `fta_filing_log.not_available`. Never HTTP to FTA.
 
 Column only. Future reminder module reads it.
 
-### 4.12 Voluntary disclosure (F-12)
+### 4.12 Voluntary disclosure and next-period correction (F-12, F-39)
 
-Owner-approved template. Supersedes the filed period. Penalty warning
-F-28, no auto-post.
+F-38 forbids posting into a filed VAT window. Route the error (F-39):
+next-period correction below the versioned amount threshold with no
+Emirate-mismatch; Form 211 VD above it, or on Emirate-mismatch even
+at zero net-tax delta, due 20 business days from discovery. Owner
+approval. Penalty warning F-28. No FTA submission.
 
 ### 4.13 Refund claim (F-22)
 
 Negative net → `eligible`. Owner claim → `Dr 1420 Cr 1400`. 5-year
 window. No FTA submission.
 
-### 4.14 Immutable record (F-14)
+### 4.14 Immutable record and post-filing lock (F-14, F-38)
 
 Filed returns append-only. Retention_until = period_end + longest
-applicable Rules §2.5 period. No purge. F-33 for posting lock.
+applicable Rules §2.5 period. No purge.
+
+`assert_not_filed_vat_period` on every posting RPC (F-38): VAT-relevant
+account set **or** invoice/CN/bill Issue/void. Token `VAT_PERIOD_FILED`.
+Does not implement A's hard-close.
 
 ### 4.15 Audit pack (F-15)
 
@@ -1255,8 +1483,8 @@ visible. True gaps flagged. Not bills, not credit notes.
 
 ### 4.17 Reconciliation (F-17, F-31)
 
-Group totals vs GL movement on `1400`/`1410`/`1420`/`2200`/`2210`/
-`5580`/`5800`/`2230` for the VAT window, `is_ledger_truth_status`.
+Group totals vs GL movement on `1400`/`1410`/`1415`/`1420`/`2200`/`2210`/
+`5580`/`5800`/`2230`/`5641` for the VAT window, `is_ledger_truth_status`.
 Non-zero unexplained variance blocks approve.
 
 ### 4.18 Penalty warning (F-28)
@@ -1266,6 +1494,13 @@ Computed on GET; optional Owner accrue.
 ### 4.19 VAT payment (F-30)
 
 Explicit RPC; D-12 cash routing; not a supplier payment.
+
+### 4.20 Next-period correction vs VD routing (F-39)
+
+`POST /vat-returns/:id/corrections` with `discovered_at`, delta, and
+whether any standard-rated `emirate` changed. Server picks the path.
+Does not accept a client-supplied path that would bypass VD when the
+threshold or mismatch requires it.
 
 ---
 
@@ -1293,24 +1528,32 @@ Same guard stack as C/D/E: `SupabaseAuthGuard` +
 | CRUD | `/capital-goods-items` | F-5 |
 | POST | `/capital-goods-items/:id/adjust` | F-5 — body `{ fiscal_year, actual_use_pct }` |
 | POST / GET | `/bad-debt-relief-claims` | F-6 — insert from eligible write-off |
-| CRUD | `/vat-voluntary-disclosures` | F-12; POST `:id/approve` Owner |
+| POST | `/bad-debt-relief-claims/:id/claim` | F-41 Owner — posts Dr 1415 Cr 5641 |
+| GET | `/vat-voluntary-disclosures` | F-12 / F-39 — list (`company_id`) |
+| GET | `/vat-voluntary-disclosures/:id` | F-12 |
+| POST | `/vat-voluntary-disclosures/:id/approve` | F-12 / F-39 Owner |
+| POST | `/vat-returns/:id/corrections` | F-39 — server chooses next-period vs VD (inserts a VD when that path applies; no client POST-create on `/vat-voluntary-disclosures`) |
+| GET / POST / PATCH / DELETE | `/capital-goods-projects` | F-40 |
 | GET | `/reports/invoice-register` | F-16 |
 | GET | `/reports/vat-audit-pack/:id` | F-15 |
 | GET | `/reports/vat-registration-threshold` | F-32 |
 
-No company-settings write API. Resource kinds to add:
-`vat_return_period`, `capital_goods_item`, `vat_bad_debt_relief_claim`,
-`vat_voluntary_disclosure`.
+No company-settings write API. Resource kinds:
+`vat_return_period`, `capital_goods_item`, `capital_goods_project`,
+`vat_bad_debt_relief_claim`, `vat_voluntary_disclosure`,
+`vat_period_correction`.
 
 ---
 
 ## 6. Relationship to existing schema
 
-New tables: §3.3–§3.11. Additive columns: §3.2. F extends C/E Issue
-RPCs (vat_category required; RCM/blocked legs on `create_bill_journal_entry`).
-F extends `journal_entry_type`. F does not change `customers`,
-`suppliers`, `payments`, `supplier_payments`, or D's
-`mark_vat_relief_eligible` clock.
+New tables: §3.3–§3.13. Additive columns: §3.2 (`vat_category`,
+`emirate`, `vat_input_treatment`, `capital_goods_project_id`). F extends
+C/E Issue RPCs (vat_category required; emirate on standard-rated sales;
+RCM/blocked legs on `create_bill_journal_entry`; `VAT_PERIOD_FILED`).
+F extends `journal_entry_type`. Additive COA `1415` / `5641` at F build
+(F-41). F does not change `customers`, `suppliers`, `payments`,
+`supplier_payments`, or D's `mark_vat_relief_eligible` clock.
 
 C income-account suggestion reads `vat_category` when set (F-19).
 
@@ -1329,55 +1572,71 @@ C income-account suggestion reads `vat_category` when set (F-19).
 - **Company-settings admin API/UI** — D-13/E-26.
 - **Sales-side reverse charge** — F-34.
 - **Partial-exemption de-minimis** — F-35.
-- **Hardcoded Capital Assets Scheme AED / class split** — F-36.
 - **Auto-posting penalties** — F-28 warn only.
 - **Purging records after retention_until** — F-14 stores the date only.
 - **Activating demo-inactive COA rows (`4030`, `2230`) for every tenant**
   — per-company COA; F uses them when active.
+- **Seeding Box 2 / CAS box** — waits on an EmaraTax screenshot (F-42).
+- **Treating `vd_amount_threshold` as immutable law** — advisor-confirm
+  (F-39).
 
 ---
 
 ## 8. Build status / sign-off
 
-**Module 1.1.F is not built.** Status is 🟡 (grounded, not yet built).
-Owner-facing copy of the unanswered items is **§0**. Schema/RPC/Nest
-work waits on F-33 / F-36 / F-37 (append F-38+; do not silently edit
-those entries). F-27 box codes can wait until export.
+**Module 1.1.F is built (2026-09-16).** Status is ✅. §0 residuals remain
+(10k advisor-confirm is a seeded default, not a schema blocker; Box 2/CAS
+screenshot blocks **export only**).
 
-### Closed in this grounding pass
+### Closed
 
 1. `vat_rate` / line shape (F-18).
 2. COA: `1420`, `2200` as net payable, `2230`, `5800`/`5580`/`1410`/`2210`
-   (F-20, F-26).
+   (F-20, F-26); `1415`/`5641` additive at F build (F-41).
 3. D 6-month clock = `invoice_date` + `debtor_notified_at` (F-18).
 4. Payment due date = 28th of following month (F-21).
 5. Refund = negative net, carry-forward default, 5-year window (F-22).
-6. Versioned 5% rate table (F-23).
-7. Internal VAT groups; FTA box codes not invented (F-27).
+6. Versioned 5% / CAS 5m / VD 10k table (F-23 / F-39 / F-40).
+7. VAT 201 boxes 1, 3–14 seeded from filing guides (F-42); Box 1 by Emirate (F-43).
 8. De-minimis deferred (F-35); sales-side RCM deferred (F-34).
+9. Post-filing lock (F-38); two-tier correction (F-39); CAS gate (F-40);
+   relief JE `Dr 1415 Cr 5641` (F-41).
+10. Additive COA `1415` / `5641` in `seed_finalized_coa_demo_company_0002.sql`
+    (demo company 186 accounts).
 
-### Still needs the user (do not default)
+### Residual (not schema blockers)
 
-1. **F-33** — Does filing a VAT return block backdated operational
-   postings (`VAT_PERIOD_FILED` on Issue/post RPCs), or only lock the
-   return row? Rules §1.3 wants a block; A's hard-close is a stub.
-2. **F-36** — Supply FTA Capital Assets Scheme threshold + 5-yr/10-yr
-   class split to make them a system gate, **or** confirm F-5
-   (accountant-entered years, no gate) is enough for this pass.
-3. **F-37** — Bad-debt relief JE credit: A (no dedicated JE), B
-   (`Cr 1110`), or C (`Cr 1400`)?
-4. **F-27 box codes** — When available, seed `fta_box_code` against the
-   current FTA VAT 201. Calculate/review can ship without them; export
-   and file cannot.
+1. Tax advisor confirms AED 10,000 `vd_amount_threshold` is still current
+   (F-39). Seed 10000; set to 0 if the threshold was repealed.
+2. EmaraTax screenshot for Box 2 and the CAS adjustment box before
+   export mapping (F-42).
 
-### Build-time discipline (after F-38+ closes the above)
+### Tests that lock the behavior
+
+- `src/vat/vat.service.spec.ts` — F-8 / F-10 Nest role gates (approve/file/submit).
+- `src/vat/vat-returns.integration.spec.ts` — F-7 / F-21 calculate (AED 50 output,
+  due 2026-04-28); F-8 / F-24 file then `VAT_PERIOD_FILED` on Issue; Accountant
+  cannot file.
+- `src/invoices/invoices.integration.spec.ts` — C Issue still posts after F
+  vat_category / emirate suggestion.
+- `src/auth/company-membership.guard.integration.spec.ts` — F routes 403 across
+  tenants.
+- `src/common/controller-auth-coverage.spec.ts` — 200 guarded routes including F.
+
+### Live notes (Testing 1.1.A, 2026-09-16)
+
+F DDL/RPCs applied on project `kaihxmsskblynwjmwvfh`. New Issues get
+`vat_category` / `emirate` from suggestion triggers. Historical issued lines
+were not backfilled; `calculate_vat_return` raises `VAT_CATEGORY_UNBACKFILLED`
+if a period still has null categories.
+
+### Build-time discipline
 
 1. Fold all DDL into `schema.sql` — no `apply_*.sql`.
 2. Extend C/E Issue RPCs; do not reimplement posting in Nest.
-3. Audit-sweep (Build Order §6 / A §7.16-style) on F-14, F-16, F-9/F-10,
-   tenant isolation, and `VAT_PERIOD_FILED` if option B is chosen —
-   not just a green test suite.
-4. After F-38+, never silently edit; append F-n+.
+3. Audit-sweep (Build Order §6 / A §7.16-style) on F-14, F-16, F-38,
+   F-9/F-10, tenant isolation — not just a green test suite.
+4. After F-45+, never silently edit; append F-n+.
 
 ---
 
@@ -1417,8 +1676,15 @@ those entries). F-27 box codes can wait until export.
 | F-30 | 2026-09-14 | `record_vat_payment` vs `2200`/`1420` and D-12 cash | §2 F-30 |
 | F-31 | 2026-09-14 | Approve posts settlement JE netting `1400`/`2200` | §2 F-31 |
 | F-32 | 2026-09-14 | Registration-threshold readout (375k / 187.5k) | §2 F-32 |
-| F-33 | 2026-09-14 | **USER:** `VAT_PERIOD_FILED` vs return-row lock only | §2 F-33 |
+| F-33 | 2026-09-14 | Closed by F-38/F-39: account-keyed lock + two-tier correction | §2 F-33 |
 | F-34 | 2026-09-14 | Sales-side RCM out of pass | §2 F-34 |
 | F-35 | 2026-09-14 | De-minimis deferred | §2 F-35 |
-| F-36 | 2026-09-14 | **USER:** CGS AED/class gate vs accountant judgment | §2 F-36 |
-| F-37 | 2026-09-14 | **USER:** bad-debt relief credit account | §2 F-37 |
+| F-36 | 2026-09-14 | Closed by F-40: CAS AED 5m / 5-yr vs 10-yr | §2 F-36 |
+| F-37 | 2026-09-14 | Closed by F-41: `Dr 1415 Cr 5641` | §2 F-37 |
+| F-38 | 2026-09-15 | `VAT_PERIOD_FILED`: VAT accounts or invoice/CN/bill Issue | §2 F-38 |
+| F-39 | 2026-09-15 | Next-period correction vs Form 211; 10k versioned; Emirate VD | §2 F-39 |
+| F-40 | 2026-09-15 | CAS: AED 5m excl VAT; 10yr buildings; 5yr other; project cumulative | §2 F-40 |
+| F-41 | 2026-09-15 | Relief JE `Dr 1415 Cr 5641`; COA extension at F build | §2 F-41 |
+| F-42 | 2026-09-15 | VAT 201 boxes 1, 3–14 seeded; Box 2 + CAS box screenshot-gated | §2 F-42 |
+| F-43 | 2026-09-15 | `uae_emirate` on standard-rated sales lines (Box 1) | §2 F-43 |
+| F-44 | 2026-09-15 | F-31 settlement washes `1415` against `2200` | §2 F-44 |

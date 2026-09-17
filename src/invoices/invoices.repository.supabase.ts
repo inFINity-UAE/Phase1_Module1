@@ -144,6 +144,8 @@ export class SupabaseInvoicesRepository implements InvoicesRepository {
         vat_rate: dto.vat_rate,
         is_service: dto.is_service ?? false,
         income_account_id: dto.income_account_id ?? null,
+        vat_category: dto.vat_category ?? null,
+        emirate: dto.emirate ?? null,
       })
       .select()
       .single();

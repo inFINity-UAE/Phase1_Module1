@@ -156,7 +156,7 @@ const hasSupabase = Boolean(
     it('runs the full accounting engine lifecycle with trial balance integrity at every step', async () => {
       // Stage 1 — COA seed (scoped to this run's company — fresh UUID ⇒ TB starts at zero)
       const accountCount = await countAccounts();
-      expect(accountCount).toBeGreaterThanOrEqual(184);
+      expect(accountCount).toBeGreaterThanOrEqual(186);
       const openingTotals = await journalRepository.getTrialBalanceTotals(companyId);
       expect(openingTotals.total_debit).toBe(0);
       expect(openingTotals.total_credit).toBe(0);

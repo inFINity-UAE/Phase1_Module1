@@ -1,10 +1,10 @@
 -- verify_chart_of_accounts.sql
--- Stage 1 verification against finalized UAE COA seed (184 rows)
+-- Stage 1 verification against finalized UAE COA seed (186 rows)
 WITH seed AS (
   SELECT * FROM public.accounts WHERE company_id = '00000000-0000-0000-0000-000000000002'
 ),
 checks AS (
-  SELECT 'total_count' AS check_name, count(*)::text AS value, (count(*) = 184) AS pass FROM seed
+  SELECT 'total_count' AS check_name, count(*)::text AS value, (count(*) = 186) AS pass FROM seed
   UNION ALL
   SELECT 'no_duplicate_account_numbers', count(*)::text, count(*) = 0
   FROM (SELECT account_number FROM seed GROUP BY account_number HAVING count(*) > 1) d

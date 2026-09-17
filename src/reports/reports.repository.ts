@@ -96,4 +96,8 @@ export interface ReportsRepository {
     supplierId: string,
     statementDate: string,
   ): Promise<unknown>;
+
+  getInvoiceRegister(companyId: string, year: number): Promise<unknown>;
+  assembleVatAuditPack(periodId: string): Promise<unknown>;
+  getVatRegistrationThreshold(companyId: string, asOf: string): Promise<unknown>;
 }

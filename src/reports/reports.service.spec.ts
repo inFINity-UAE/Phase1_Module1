@@ -47,6 +47,9 @@ describe('ReportsService (period trial balance)', () => {
       getAgedPayables: jest.fn().mockResolvedValue([]),
       getBillsDue: jest.fn().mockResolvedValue([]),
       reconcileSupplierStatement: jest.fn().mockResolvedValue({}),
+      getInvoiceRegister: jest.fn().mockResolvedValue([]),
+      assembleVatAuditPack: jest.fn().mockResolvedValue({}),
+      getVatRegistrationThreshold: jest.fn().mockResolvedValue({}),
     };
     service = new ReportsService(repository);
   });
@@ -151,6 +154,9 @@ describe('ReportsService (balance sheet)', () => {
       getAgedPayables: jest.fn().mockResolvedValue([]),
       getBillsDue: jest.fn().mockResolvedValue([]),
       reconcileSupplierStatement: jest.fn().mockResolvedValue({}),
+      getInvoiceRegister: jest.fn().mockResolvedValue([]),
+      assembleVatAuditPack: jest.fn().mockResolvedValue({}),
+      getVatRegistrationThreshold: jest.fn().mockResolvedValue({}),
     };
     service = new ReportsService(repository);
   });
@@ -253,6 +259,9 @@ describe('ReportsService (profit and loss)', () => {
       getAgedPayables: jest.fn().mockResolvedValue([]),
       getBillsDue: jest.fn().mockResolvedValue([]),
       reconcileSupplierStatement: jest.fn().mockResolvedValue({}),
+      getInvoiceRegister: jest.fn().mockResolvedValue([]),
+      assembleVatAuditPack: jest.fn().mockResolvedValue({}),
+      getVatRegistrationThreshold: jest.fn().mockResolvedValue({}),
     };
     service = new ReportsService(repository);
   });
@@ -366,6 +375,9 @@ describe('ReportsService (general ledger)', () => {
       getAgedPayables: jest.fn().mockResolvedValue([]),
       getBillsDue: jest.fn().mockResolvedValue([]),
       reconcileSupplierStatement: jest.fn().mockResolvedValue({}),
+      getInvoiceRegister: jest.fn().mockResolvedValue([]),
+      assembleVatAuditPack: jest.fn().mockResolvedValue({}),
+      getVatRegistrationThreshold: jest.fn().mockResolvedValue({}),
     };
     service = new ReportsService(repository);
   });

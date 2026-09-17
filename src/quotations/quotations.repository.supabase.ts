@@ -132,6 +132,8 @@ export class SupabaseQuotationsRepository implements QuotationsRepository {
         discount_amount: dto.discount_amount ?? null,
         vat_rate: dto.vat_rate,
         is_service: dto.is_service ?? false,
+        vat_category: dto.vat_category ?? null,
+        emirate: dto.emirate ?? null,
       })
       .select()
       .single();

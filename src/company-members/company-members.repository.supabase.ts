@@ -375,6 +375,30 @@ export class SupabaseCompanyMembersRepository implements CompanyMembersRepositor
     return this.findDirectCompanyId('supplier_statement_lines', lineId);
   }
 
+  async findCompanyIdByVatReturnPeriodId(id: string): Promise<string | null> {
+    return this.findDirectCompanyId('vat_return_periods', id);
+  }
+
+  async findCompanyIdByCapitalGoodsItemId(id: string): Promise<string | null> {
+    return this.findDirectCompanyId('capital_goods_items', id);
+  }
+
+  async findCompanyIdByCapitalGoodsProjectId(id: string): Promise<string | null> {
+    return this.findDirectCompanyId('capital_goods_projects', id);
+  }
+
+  async findCompanyIdByVatBadDebtReliefClaimId(id: string): Promise<string | null> {
+    return this.findDirectCompanyId('vat_bad_debt_relief_claims', id);
+  }
+
+  async findCompanyIdByVatVoluntaryDisclosureId(id: string): Promise<string | null> {
+    return this.findDirectCompanyId('vat_voluntary_disclosures', id);
+  }
+
+  async findCompanyIdByVatPeriodCorrectionId(id: string): Promise<string | null> {
+    return this.findDirectCompanyId('vat_period_corrections', id);
+  }
+
   private async findDirectCompanyId(
     table: string,
     id: string,

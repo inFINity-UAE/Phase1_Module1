@@ -9,14 +9,14 @@ alwaysApply: true
 
 **Isolation unit:** `companies`. Tenant data is scoped by `company_id`. Demo COA clone source: `00000000-0000-0000-0000-000000000002` (read-only; never wipe).
 
-| Module | Spec | Status (Build Order, 2026-09-14) |
+| Module | Spec | Status (Build Order, 2026-09-15) |
 |---|---|---|
 | A ledger | `feature-spec.md` | Built |
 | H1 reports | `feature-spec-1.1.H1.md` | Built (TB/BS/P&L/GL) |
 | C sales docs | `feature-spec-1.1.C.md` | C1 core built; §9 presentation deferred |
 | D AR | `feature-spec-1_1_D.md` | Built; §7 deferrals remain |
 | E AP | `feature-spec-1_1_E.md` | Built 2026-09-13; §7 deferrals remain |
-| F VAT | `feature-spec-1_1_F.md` | Spec grounded 2026-09-14; not built |
+| F VAT | `feature-spec-1_1_F.md` | Built 2026-09-16; §0 residuals remain (10k VD confirm, Box 2/CAS screenshot) |
 | B/G/H-rest | — | Queued |
 
 **Do not invent** a frontend, CI, local `supabase/` folder, generated types, or company-onboarding API — none exist.

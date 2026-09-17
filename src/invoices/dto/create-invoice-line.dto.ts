@@ -1,5 +1,7 @@
-import { IsBoolean, IsNumber, IsOptional, IsString, Min, MinLength } from 'class-validator';
+import { IsBoolean, IsEnum, IsNumber, IsOptional, IsString, Min, MinLength } from 'class-validator';
 import { IsPostgresUuid } from '../../common/validators/is-postgres-uuid';
+import { UaeEmirate } from '../../common/enums/uae-emirate.enum';
+import { VatCategory } from '../../common/enums/vat-category.enum';
 
 export class CreateInvoiceLineDto {
   @IsNumber()
@@ -31,6 +33,14 @@ export class CreateInvoiceLineDto {
   @IsNumber()
   @Min(0)
   vat_rate!: number;
+
+  @IsOptional()
+  @IsEnum(VatCategory)
+  vat_category?: VatCategory | null;
+
+  @IsOptional()
+  @IsEnum(UaeEmirate)
+  emirate?: UaeEmirate | null;
 
   @IsOptional()
   @IsBoolean()

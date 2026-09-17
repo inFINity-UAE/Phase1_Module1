@@ -29,7 +29,7 @@ For the scope, search (do not rely on filenames alone):
 
 No finding without evidence (file + line/symbol, or a spec citation plus the missing symbol). If you cannot show current vs expected, it is not a finding.
 
-Do not call a documented deferral (C §9, D §7, E §7, hard-close HTTP, Module F until built) a gap unless the request was “vs the full product vision.”
+Do not call a documented deferral (C §9, D §7, E §7, hard-close HTTP, F §0 residuals) a gap unless the request was “vs the full product vision.”
 
 ## Severity
 

@@ -7,7 +7,7 @@ import { ensureCompanyMember, testUserEmail } from '../test/company-members.setu
 
 export const E2E_OWNER_ID = '00000000-0000-0000-0000-000000000003';
 export const E2E_ACCOUNTANT_ID = '00000000-0000-0000-0000-000000000004';
-/** Fixed demo company for cloning the finalized 184-account COA into fresh test companies. */
+/** Fixed demo company for cloning the finalized 186-account COA into fresh test companies. */
 export const DEMO_COMPANY_ID = '00000000-0000-0000-0000-000000000002';
 /** Auth user for demo-company membership seed — distinct from DEMO_COMPANY_ID. */
 export const DEMO_OWNER_ID = '00000000-0000-0000-0000-0000000000d2';
@@ -72,6 +72,8 @@ export async function ensureCompanyWithCoa(
     approval_threshold_currency: 'AED',
     default_period_length: 'monthly',
     allow_period_reopen: true,
+    // [feature-spec-1_1_F.md F-43] copied onto new sales lines so Issue can require emirate.
+    default_emirate: 'dubai',
   });
 
   if (settingsError) {
@@ -98,8 +100,8 @@ export async function ensureCompanyWithCoa(
     throw hierarchyError;
   }
 
-  // Finalized UAE COA = 180 Excel rows + 4 hierarchy demos = 184 (marker: 1021)
-  if ((count ?? 0) >= 184 && hierarchyDemo) {
+  // Finalized UAE COA = 180 Excel rows + 4 hierarchy demos + F-41 1415/5641 = 186 (marker: 1021)
+  if ((count ?? 0) >= 186 && hierarchyDemo) {
     await seedDefaultBankAccountId(supabase, companyId);
     return;
   }
@@ -108,7 +110,7 @@ export async function ensureCompanyWithCoa(
     // [feature-spec.md decision #18] Never wipe — mint a fresh UUID instead.
     throw new Error(
       `Company ${companyId} already has ${(count ?? 0)} accounts but not the finalized COA ` +
-        '(184 rows + hierarchy demo 1021). Do not wipe/reseed; use a fresh company UUID.',
+        '(186 rows + hierarchy demo 1021). Do not wipe/reseed; use a fresh company UUID.',
     );
   }
 
@@ -125,9 +127,9 @@ export async function ensureCompanyWithCoa(
     throw demoError ?? new Error('Demo COA not found — apply seed_finalized_coa_demo_company_0002.sql first');
   }
 
-  if (demoAccounts.length < 184) {
+  if (demoAccounts.length < 186) {
     throw new Error(
-      `Demo COA has ${demoAccounts.length} accounts — expected 184 after finalized seed (E-23 1350)`,
+      `Demo COA has ${demoAccounts.length} accounts — expected 186 after F-41 1415/5641`,
     );
   }
 
@@ -147,7 +149,7 @@ export async function ensureCompanyWithCoa(
   // Pre-assign UUIDs so parent_account_id can be resolved before insert.
   // Rows stay ordered by depth then account_number (same as the select above)
   // so trg_enforce_account_hierarchy_depth sees parents first within one statement.
-  // [feature-spec.md decision #33] Single batched insert — ~184 rows is well under
+  // [feature-spec.md decision #33] Single batched insert — 186 rows is well under
   // PostgREST’s practical per-request guidance (chunk at 500–1000); no chunking needed.
   const numberToCompanyId = new Map<string, string>();
   for (const account of demoAccounts) {
