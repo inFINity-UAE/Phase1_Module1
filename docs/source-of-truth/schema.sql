@@ -67,7 +67,8 @@ create type journal_entry_type as enum (
   'vat_refund_claim',
   'vat_bad_debt_relief',
   'vat_penalty',
-  'vat_period_correction'
+  'vat_period_correction',
+  'ct_provision'
 );
 
 -- [feature-spec-1_1_F.md §3.1 / F-19 / F-25 / F-43]
@@ -94,6 +95,18 @@ create type capital_asset_category as enum (
 );
 create type vat_correction_path as enum (
   'next_period', 'voluntary_disclosure'
+);
+
+-- [feature-spec-1_1_G.md §3.1]
+create type ct_income_adjustment_type as enum (
+  'qualifying_dividend', 'intragroup_transaction',
+  'non_deductible_entertainment', 'non_deductible_other'
+);
+create type ct_provision_status as enum (
+  'draft', 'posted', 'posted_nil', 'superseded'
+);
+create type related_party_relationship as enum (
+  'shareholder', 'director', 'group_company', 'other_connected_person'
 );
 
 -- [feature-spec-1_1_D.md §3.2 / D-12] Payment method → debit-account routing.
@@ -7064,6 +7077,122 @@ create table fta_filing_log (
   attempted_by         uuid not null
 );
 
+-- ============================================================================
+-- MODULE G — UAE Corporate Tax (feature-spec-1_1_G.md §3)
+-- ============================================================================
+
+-- [feature-spec-1_1_G.md §3.3 / G-10] Versioned CT rates. No company_id — same
+-- posture as vat_tax_rule_versions (global rule row, not tenant data).
+create table ct_tax_rule_versions (
+  id                        uuid primary key default gen_random_uuid(),
+  effective_from            date not null unique,
+  standard_rate             numeric(5,2) not null,
+  zero_rate_threshold       numeric(18,2) not null,
+  qfzp_rate                 numeric(5,2) not null,
+  qfzp_deminimis_pct        numeric(5,2) not null default 5,
+  qfzp_deminimis_cap        numeric(18,2) not null,
+  sbr_revenue_cap           numeric(18,2) not null,
+  sbr_eligible_through      date not null,
+  entertainment_addback_pct numeric(5,2) not null default 50,
+  other_addback_accounts    text[] not null default '{5810,5930}',
+  alert_threshold_pct       numeric(5,2) not null default 90,
+  notes                     text,
+  created_at                timestamptz not null default now()
+);
+
+-- [feature-spec-1_1_G.md §3.3 seed] Field values G-15/G-16/G-17/G-18 / G-40 / §4.2.
+-- [feature-spec-1_1_G.md G-40] effective_from 2023-06-01 is rate commencement
+-- (FY starting on or after 1 June 2023), not Decree-Law 47/2022 enactment.
+insert into ct_tax_rule_versions (
+  effective_from, standard_rate, zero_rate_threshold, qfzp_rate,
+  qfzp_deminimis_pct, qfzp_deminimis_cap, sbr_revenue_cap, sbr_eligible_through,
+  entertainment_addback_pct, other_addback_accounts, alert_threshold_pct, notes
+) values (
+  '2023-06-01', 9.00, 375000, 0.00,
+  5.00, 5000000, 3000000, '2026-12-31',
+  50.00, '{5810,5930}', 90.00,
+  'Federal Decree-Law No. 47 of 2022 as cited for Module G seed (G-10)'
+);
+
+-- [feature-spec-1_1_G.md §3.4 / G-25 / G-32]
+create table ct_income_adjustments (
+  id               uuid primary key default gen_random_uuid(),
+  company_id       uuid not null references companies(id),
+  fiscal_year      integer not null,
+  adjustment_type  ct_income_adjustment_type not null,
+  amount           numeric(18,2) not null,
+  invoice_line_id  uuid references invoice_lines(id),
+  journal_line_id  uuid references journal_lines(id),
+  journal_entry_id uuid references journal_entries(id),
+  recorded_at      timestamptz not null default now(),
+  recorded_by      uuid,
+  constraint ct_income_adjustments_source_xor check (
+    (
+      adjustment_type in ('qualifying_dividend', 'intragroup_transaction')
+      and (invoice_line_id is not null)::int
+        + (journal_line_id is not null)::int
+        + (journal_entry_id is not null)::int = 1
+    )
+    or (
+      adjustment_type in ('non_deductible_entertainment', 'non_deductible_other')
+      and invoice_line_id is null
+      and journal_line_id is null
+      and journal_entry_id is null
+    )
+  )
+);
+
+create index idx_ct_income_adjustments_company_fy
+  on ct_income_adjustments (company_id, fiscal_year);
+
+-- [feature-spec-1_1_G.md §3.5 / G-1 / G-13 / G-19 / G-22 / G-41]
+create table ct_provision_entries (
+  id                         uuid primary key default gen_random_uuid(),
+  company_id                 uuid not null references companies(id),
+  fiscal_year                integer not null,
+  taxable_profit_estimate    numeric(18,2) not null,
+  is_qfzp_calculation        boolean not null default false,
+  sbr_eligible               boolean not null default false,
+  ct_due                     numeric(18,2) not null,
+  payment_due_date           date not null,
+  status                     ct_provision_status not null default 'draft',
+  provision_journal_entry_id uuid references journal_entries(id),
+  posted_at                  timestamptz,
+  posted_by                  uuid,
+  unique (company_id, fiscal_year),
+  constraint ct_provision_entries_status_je_check check (
+    (
+      status = 'posted'
+      and provision_journal_entry_id is not null
+    )
+    or (
+      status = 'posted_nil'
+      and provision_journal_entry_id is null
+      and ct_due = 0
+    )
+    or (
+      status not in ('posted', 'posted_nil')
+    )
+  )
+);
+
+-- [feature-spec-1_1_G.md §3.6 / G-7 / G-26]
+create table related_party_transactions (
+  id                           uuid primary key default gen_random_uuid(),
+  company_id                   uuid not null references companies(id),
+  counterparty_name            text not null,
+  relationship                 related_party_relationship not null,
+  transaction_type             text not null,
+  amount                       numeric(18,2) not null,
+  transaction_date             date not null,
+  reference_journal_entry_id   uuid references journal_entries(id),
+  notes                        text,
+  created_at                   timestamptz not null default now()
+);
+
+create index idx_related_party_transactions_company
+  on related_party_transactions (company_id, transaction_date desc);
+
 create or replace view vat_invoice_register
   with (security_invoker = true)
 as
@@ -9063,6 +9192,10 @@ alter table vat_voluntary_disclosures enable row level security;
 alter table vat_period_corrections enable row level security;
 alter table fta_filing_log enable row level security;
 
+alter table ct_income_adjustments enable row level security;
+alter table ct_provision_entries enable row level security;
+alter table related_party_transactions enable row level security;
+
 
 create policy company_isolation_accounts on accounts
   using (company_id = (select current_setting('app.current_company_id', true))::uuid);
@@ -9217,6 +9350,15 @@ create policy company_isolation_fta_filing_log on fta_filing_log
     select id from vat_return_periods
      where company_id = (select current_setting('app.current_company_id', true))::uuid
   ));
+
+-- [feature-spec-1_1_G.md G-36] tenant tables only — ct_tax_rule_versions is global
+-- like vat_tax_rule_versions (F-23 analogue: no company_id, no company_isolation_*).
+create policy company_isolation_ct_income_adjustments on ct_income_adjustments
+  using (company_id = (select current_setting('app.current_company_id', true))::uuid);
+create policy company_isolation_ct_provision_entries on ct_provision_entries
+  using (company_id = (select current_setting('app.current_company_id', true))::uuid);
+create policy company_isolation_related_party_transactions on related_party_transactions
+  using (company_id = (select current_setting('app.current_company_id', true))::uuid);
 
 -- journal_lines and template_lines inherit isolation via their parent entry/template
 create policy company_isolation_journal_lines on journal_lines
@@ -10563,15 +10705,21 @@ grant execute on function create_opening_balance_entry(uuid, integer, date, text
 -- [race fix] Lock 'ye:' namespace FIRST, then allocate_next_entry_number's
 -- company-scoped lock. 'ob:' and 'ye:' namespaces do NOT block each other.
 -- Exception tokens: YEAR_END_ALREADY_CLOSED, NO_PERIOD_FOR_FISCAL_YEAR,
--- RETAINED_EARNINGS_NOT_FOUND, NO_PL_BALANCES_TO_CLOSE
+-- RETAINED_EARNINGS_NOT_FOUND, NO_PL_BALANCES_TO_CLOSE,
+-- CT_PROVISION_NOT_POSTED [feature-spec-1_1_G.md G-22 / G-32 / G-41]
 -- [feature-spec.md decision #10] service_role only.
+-- G-32: DROP the live five-arg overload so PostgREST cannot skip the CT check.
+
+drop function if exists create_year_end_closing_entry(uuid, integer, uuid, date, text);
 
 create or replace function create_year_end_closing_entry(
   p_company_id uuid,
   p_fiscal_year integer,
   p_created_by uuid,
   p_entry_date date default null,
-  p_narration text default null
+  p_narration text default null,
+  p_skip_ct_check boolean default false,
+  p_skip_reason text default null
 )
 returns jsonb
 language plpgsql
@@ -10585,6 +10733,7 @@ declare
   v_entry               journal_entries%rowtype;
   v_lines_json          jsonb;
   v_exists              boolean;
+  v_ct_posted           boolean;
   v_entry_date          date;
   v_narration           text;
   v_line_number         int := 1;
@@ -10609,6 +10758,22 @@ begin
 
   if v_exists then
     raise exception 'YEAR_END_ALREADY_CLOSED';
+  end if;
+
+  -- [feature-spec-1_1_G.md G-22 / G-32 / G-41] after lock, before P&L aggregation.
+  select exists (
+    select 1
+      from ct_provision_entries
+     where company_id = p_company_id
+       and fiscal_year = p_fiscal_year
+       and status in ('posted', 'posted_nil')
+     limit 1
+  ) into v_ct_posted;
+
+  if not v_ct_posted then
+    if p_skip_ct_check is not true or btrim(coalesce(p_skip_reason, '')) = '' then
+      raise exception 'CT_PROVISION_NOT_POSTED';
+    end if;
   end if;
 
   select * into v_period
@@ -10695,6 +10860,10 @@ begin
     nullif(trim(p_narration), ''),
     format('Year-end closing for fiscal year %s', p_fiscal_year)
   );
+  -- [feature-spec-1_1_G.md G-32] prepend skip reason onto YE narration.
+  if not v_ct_posted and p_skip_ct_check is true then
+    v_narration := '[CT skip: ' || btrim(p_skip_reason) || '] ' || v_narration;
+  end if;
 
   v_entry_number := allocate_next_entry_number(p_company_id);
 
@@ -10733,10 +10902,672 @@ begin
 end;
 $$;
 
-revoke all on function create_year_end_closing_entry(uuid, integer, uuid, date, text) from public;
-revoke all on function create_year_end_closing_entry(uuid, integer, uuid, date, text) from authenticated;
-revoke all on function create_year_end_closing_entry(uuid, integer, uuid, date, text) from anon;
-grant execute on function create_year_end_closing_entry(uuid, integer, uuid, date, text) to service_role;
+revoke all on function create_year_end_closing_entry(uuid, integer, uuid, date, text, boolean, text) from public;
+revoke all on function create_year_end_closing_entry(uuid, integer, uuid, date, text, boolean, text) from authenticated;
+revoke all on function create_year_end_closing_entry(uuid, integer, uuid, date, text, boolean, text) from anon;
+grant execute on function create_year_end_closing_entry(uuid, integer, uuid, date, text, boolean, text) to service_role;
+
+-- ============================================================================
+-- MODULE G — UAE Corporate Tax RPCs (feature-spec-1_1_G.md §4)
+-- ============================================================================
+
+-- Internal helpers (not Nest-facing). Named spec functions below.
+
+create or replace function ct_account_fy_signed(
+  p_company_id uuid,
+  p_fiscal_year integer,
+  p_account_number char(4)
+)
+returns numeric(18,2)
+language sql
+stable
+security invoker
+set search_path = public, pg_temp
+as $$
+  select coalesce((
+    select account_signed_balance(
+             a.normal_balance,
+             coalesce(x.total_debit, 0),
+             coalesce(x.total_credit, 0)
+           )
+      from accounts a
+      left join (
+        select jl.account_id,
+               sum(jl.debit) as total_debit,
+               sum(jl.credit) as total_credit
+          from journal_lines jl
+          join journal_entries je on je.id = jl.journal_entry_id
+          join accounting_periods ap on ap.id = je.period_id
+         where je.company_id = p_company_id
+           and is_ledger_truth_status(je.status)
+           and ap.fiscal_year = p_fiscal_year
+         group by jl.account_id
+      ) x on x.account_id = a.id
+     where a.company_id = p_company_id
+       and a.account_number = p_account_number
+  ), 0)::numeric(18,2);
+$$;
+revoke all on function ct_account_fy_signed(uuid, integer, char) from public;
+revoke all on function ct_account_fy_signed(uuid, integer, char) from authenticated;
+revoke all on function ct_account_fy_signed(uuid, integer, char) from anon;
+grant execute on function ct_account_fy_signed(uuid, integer, char) to service_role;
+
+create or replace function ct_fy_net_profit(
+  p_company_id uuid,
+  p_fiscal_year integer
+)
+returns numeric(18,2)
+language sql
+stable
+security invoker
+set search_path = public, pg_temp
+as $$
+  select coalesce(sum(
+    case
+      when a.category = 'income' then account_signed_balance(
+        a.normal_balance, coalesce(x.total_debit, 0), coalesce(x.total_credit, 0))
+      when a.category = 'expense' then -account_signed_balance(
+        a.normal_balance, coalesce(x.total_debit, 0), coalesce(x.total_credit, 0))
+      else 0
+    end
+  ), 0)::numeric(18,2)
+    from accounts a
+    left join (
+      select jl.account_id,
+             sum(jl.debit) as total_debit,
+             sum(jl.credit) as total_credit
+        from journal_lines jl
+        join journal_entries je on je.id = jl.journal_entry_id
+        join accounting_periods ap on ap.id = je.period_id
+       where je.company_id = p_company_id
+         and is_ledger_truth_status(je.status)
+         and ap.fiscal_year = p_fiscal_year
+       group by jl.account_id
+    ) x on x.account_id = a.id
+   where a.company_id = p_company_id
+     and a.category in ('income', 'expense');
+$$;
+revoke all on function ct_fy_net_profit(uuid, integer) from public;
+revoke all on function ct_fy_net_profit(uuid, integer) from authenticated;
+revoke all on function ct_fy_net_profit(uuid, integer) from anon;
+grant execute on function ct_fy_net_profit(uuid, integer) to service_role;
+
+create or replace function ct_fy_revenue(
+  p_company_id uuid,
+  p_fiscal_year integer
+)
+returns numeric(18,2)
+language sql
+stable
+security invoker
+set search_path = public, pg_temp
+as $$
+  select coalesce(sum(
+    account_signed_balance(
+      a.normal_balance, coalesce(x.total_debit, 0), coalesce(x.total_credit, 0))
+  ), 0)::numeric(18,2)
+    from accounts a
+    left join (
+      select jl.account_id,
+             sum(jl.debit) as total_debit,
+             sum(jl.credit) as total_credit
+        from journal_lines jl
+        join journal_entries je on je.id = jl.journal_entry_id
+        join accounting_periods ap on ap.id = je.period_id
+       where je.company_id = p_company_id
+         and is_ledger_truth_status(je.status)
+         and ap.fiscal_year = p_fiscal_year
+       group by jl.account_id
+    ) x on x.account_id = a.id
+   where a.company_id = p_company_id
+     and a.category = 'income';
+$$;
+revoke all on function ct_fy_revenue(uuid, integer) from public;
+revoke all on function ct_fy_revenue(uuid, integer) from authenticated;
+revoke all on function ct_fy_revenue(uuid, integer) from anon;
+grant execute on function ct_fy_revenue(uuid, integer) to service_role;
+
+-- [feature-spec-1_1_G.md §4.4 / G-17 / G-23]
+create or replace function check_small_business_relief_eligibility(
+  p_company_id uuid,
+  p_fiscal_year integer
+)
+returns jsonb
+language plpgsql
+stable
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  v_rule ct_tax_rule_versions%rowtype;
+  v_fy_end date;
+  v_sunset_ok boolean;
+  v_cap_ok boolean := true;
+  v_history jsonb := '[]'::jsonb;
+  r record;
+begin
+  select max(period_end) into v_fy_end
+    from accounting_periods
+   where company_id = p_company_id
+     and fiscal_year = p_fiscal_year;
+  if v_fy_end is null then
+    raise exception 'NO_PERIOD_FOR_FISCAL_YEAR';
+  end if;
+
+  select * into v_rule
+    from ct_tax_rule_versions
+   where effective_from <= v_fy_end
+   order by effective_from desc
+   limit 1;
+  if not found then
+    raise exception 'CT_TAX_RULE_NOT_FOUND';
+  end if;
+
+  v_sunset_ok := v_fy_end <= v_rule.sbr_eligible_through;
+
+  for r in
+    select fy, ct_fy_revenue(p_company_id, fy) as revenue
+      from (
+        select distinct fiscal_year as fy
+          from accounting_periods
+         where company_id = p_company_id
+           and fiscal_year <= p_fiscal_year
+      ) y
+     order by fy
+  loop
+    v_history := v_history || jsonb_build_array(jsonb_build_object(
+      'fiscal_year', r.fy,
+      'revenue', r.revenue,
+      'exceeds_cap', r.revenue > v_rule.sbr_revenue_cap
+    ));
+    if r.revenue > v_rule.sbr_revenue_cap then
+      v_cap_ok := false;
+    end if;
+  end loop;
+
+  return jsonb_build_object(
+    'eligible', v_sunset_ok and v_cap_ok,
+    'sunset_ok', v_sunset_ok,
+    'revenue_cap_ok', v_cap_ok,
+    'sbr_eligible_through', v_rule.sbr_eligible_through,
+    'sbr_revenue_cap', v_rule.sbr_revenue_cap,
+    'period_end', v_fy_end,
+    'rule_id', v_rule.id,
+    'revenue_history', v_history
+  );
+end;
+$$;
+revoke all on function check_small_business_relief_eligibility(uuid, integer) from public;
+revoke all on function check_small_business_relief_eligibility(uuid, integer) from authenticated;
+revoke all on function check_small_business_relief_eligibility(uuid, integer) from anon;
+grant execute on function check_small_business_relief_eligibility(uuid, integer) to service_role;
+
+-- [feature-spec-1_1_G.md §4.1 / §4.2 / G-2 / G-15 / G-18 / G-24]
+create or replace function get_ct_taxable_profit_estimate(
+  p_company_id uuid,
+  p_fiscal_year integer
+)
+returns jsonb
+language plpgsql
+stable
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  v_rule ct_tax_rule_versions%rowtype;
+  v_fy_end date;
+  v_is_fz boolean;
+  v_net numeric(18,2);
+  v_ent numeric(18,2);
+  v_other numeric(18,2) := 0;
+  v_exempt numeric(18,2);
+  v_qi numeric(18,2);
+  v_nqi numeric(18,2);
+  v_tp numeric(18,2);
+  v_due numeric(18,2);
+  v_acct text;
+  v_sbr jsonb;
+begin
+  select max(period_end) into v_fy_end
+    from accounting_periods
+   where company_id = p_company_id
+     and fiscal_year = p_fiscal_year;
+  if v_fy_end is null then
+    raise exception 'NO_PERIOD_FOR_FISCAL_YEAR';
+  end if;
+
+  select * into v_rule
+    from ct_tax_rule_versions
+   where effective_from <= v_fy_end
+   order by effective_from desc
+   limit 1;
+  if not found then
+    raise exception 'CT_TAX_RULE_NOT_FOUND';
+  end if;
+
+  select is_free_zone_entity into v_is_fz
+    from companies
+   where id = p_company_id;
+  if not found then
+    raise exception 'COMPANY_NOT_FOUND';
+  end if;
+
+  v_net := ct_fy_net_profit(p_company_id, p_fiscal_year);
+  v_ent := round(
+    ct_account_fy_signed(p_company_id, p_fiscal_year, '5580')
+      * v_rule.entertainment_addback_pct / 100
+  , 2);
+  foreach v_acct in array v_rule.other_addback_accounts
+  loop
+    v_other := v_other + ct_account_fy_signed(p_company_id, p_fiscal_year, v_acct::char(4));
+  end loop;
+  v_other := round(v_other, 2);
+
+  select coalesce(sum(amount), 0) into v_exempt
+    from ct_income_adjustments
+   where company_id = p_company_id
+     and fiscal_year = p_fiscal_year
+     and adjustment_type in ('qualifying_dividend', 'intragroup_transaction');
+
+  v_qi := case when v_is_fz then ct_account_fy_signed(p_company_id, p_fiscal_year, '4300') else 0 end;
+  v_nqi := case when v_is_fz then
+    ct_account_fy_signed(p_company_id, p_fiscal_year, '4310')
+    + ct_account_fy_signed(p_company_id, p_fiscal_year, '4320')
+  else 0 end;
+
+  -- [feature-spec-1_1_G.md §4.1] TP = net + add-backs − exempt − QI (FZ only).
+  v_tp := round((v_net + v_ent + v_other - v_exempt - v_qi)::numeric, 2);
+
+  -- [feature-spec-1_1_G.md G-15 / G-34] QFZP: (QI×qfzp_rate)+(NQI×standard_rate), no 375k band.
+  if v_is_fz then
+    v_due := round(
+      (v_qi * v_rule.qfzp_rate / 100) + (v_nqi * v_rule.standard_rate / 100)
+    , 2);
+  else
+    v_due := round(greatest(0, v_tp - v_rule.zero_rate_threshold) * v_rule.standard_rate / 100, 2);
+  end if;
+
+  v_sbr := check_small_business_relief_eligibility(p_company_id, p_fiscal_year);
+
+  return jsonb_build_object(
+    'fiscal_year', p_fiscal_year,
+    'is_qfzp_calculation', v_is_fz,
+    'net_profit', v_net,
+    'entertainment_addback', v_ent,
+    'other_addback', v_other,
+    'exempt_income_exclusions', v_exempt,
+    'qualifying_income', v_qi,
+    'non_qualifying_income', v_nqi,
+    'taxable_profit_estimate', v_tp,
+    'ct_due', v_due,
+    'zero_rate_threshold', v_rule.zero_rate_threshold,
+    'standard_rate', v_rule.standard_rate,
+    'qfzp_rate', v_rule.qfzp_rate,
+    'alert_threshold_pct', v_rule.alert_threshold_pct,
+    -- [feature-spec-1_1_G.md G-35] threshold × alert_threshold_pct / 100 at read time; never hardcoded.
+    'threshold_alert', (not v_is_fz) and v_tp >= round(v_rule.zero_rate_threshold * v_rule.alert_threshold_pct / 100, 2),
+    'sbr_eligible', (v_sbr->>'eligible')::boolean,
+    'rule_id', v_rule.id
+  );
+end;
+$$;
+revoke all on function get_ct_taxable_profit_estimate(uuid, integer) from public;
+revoke all on function get_ct_taxable_profit_estimate(uuid, integer) from authenticated;
+revoke all on function get_ct_taxable_profit_estimate(uuid, integer) from anon;
+grant execute on function get_ct_taxable_profit_estimate(uuid, integer) to service_role;
+
+-- [feature-spec-1_1_G.md §4.3 / G-1 / G-13 / G-15 / G-22 / G-23 / G-33 / G-41]
+create or replace function create_ct_provision_entry(
+  p_company_id uuid,
+  p_fiscal_year integer,
+  p_created_by uuid
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  v_est jsonb;
+  v_period accounting_periods%rowtype;
+  v_due numeric(18,2);
+  v_fy_end date;
+  v_due_date date;
+  v_dr uuid;
+  v_cr uuid;
+  v_entry_number bigint;
+  v_entry journal_entries%rowtype;
+  v_row ct_provision_entries%rowtype;
+  v_status ct_provision_status;
+begin
+  if p_created_by is null then
+    raise exception 'CREATED_BY_REQUIRED';
+  end if;
+
+  perform pg_advisory_xact_lock(
+    hashtext('ct:' || p_company_id::text || ':' || p_fiscal_year::text)
+  );
+
+  if exists (
+    select 1 from ct_provision_entries
+     where company_id = p_company_id
+       and fiscal_year = p_fiscal_year
+       and status in ('posted', 'posted_nil')
+  ) then
+    raise exception 'CT_PROVISION_ALREADY_POSTED';
+  end if;
+
+  select * into v_period
+    from accounting_periods
+   where company_id = p_company_id
+     and fiscal_year = p_fiscal_year
+     and status = 'open'
+   order by period_end desc
+   limit 1;
+  if not found then
+    raise exception 'NO_OPEN_PERIOD_FOR_FISCAL_YEAR';
+  end if;
+
+  select max(period_end) into v_fy_end
+    from accounting_periods
+   where company_id = p_company_id
+     and fiscal_year = p_fiscal_year;
+  v_due_date := (v_fy_end + interval '9 months')::date;
+
+  v_est := get_ct_taxable_profit_estimate(p_company_id, p_fiscal_year);
+  v_due := (v_est->>'ct_due')::numeric(18,2);
+
+  v_dr := account_id_by_number(p_company_id, '5830', true);
+  v_cr := account_id_by_number(p_company_id, '2300', true);
+  if v_dr is null or v_cr is null then
+    raise exception 'CT_POSTING_ACCOUNT_NOT_FOUND';
+  end if;
+
+  -- [feature-spec-1_1_G.md G-41] ct_due = 0 → posted_nil, no JE (journal_lines debit XOR credit > 0).
+  if v_due > 0 then
+    v_status := 'posted';
+    v_entry_number := allocate_next_entry_number(p_company_id);
+    insert into journal_entries (
+      company_id, entry_number, period_id, entry_date, entry_type, status,
+      narration, created_by
+    ) values (
+      p_company_id, v_entry_number, v_period.id, v_period.period_end, 'ct_provision', 'draft',
+      format('CT provision fiscal year %s', p_fiscal_year), p_created_by
+    ) returning * into v_entry;
+
+    insert into journal_lines (journal_entry_id, line_number, account_id, debit, credit, description)
+    values
+      (v_entry.id, 1, v_dr, v_due, 0, 'CT expense (5830)'),
+      (v_entry.id, 2, v_cr, 0, v_due, 'CT payable / provision (2300)');
+
+    update journal_entries
+       set status = 'posted'
+     where id = v_entry.id and status = 'draft'
+    returning * into v_entry;
+    if not found then
+      raise exception 'Failed to post CT provision entry %', v_entry_number;
+    end if;
+  else
+    v_status := 'posted_nil';
+  end if;
+
+  insert into ct_provision_entries (
+    company_id, fiscal_year, taxable_profit_estimate, is_qfzp_calculation,
+    sbr_eligible, ct_due, payment_due_date, status,
+    provision_journal_entry_id, posted_at, posted_by
+  ) values (
+    p_company_id, p_fiscal_year,
+    (v_est->>'taxable_profit_estimate')::numeric,
+    (v_est->>'is_qfzp_calculation')::boolean,
+    (v_est->>'sbr_eligible')::boolean,
+    v_due, v_due_date, v_status,
+    v_entry.id, now(), p_created_by -- [feature-spec-1_1_G.md G-33]
+  ) returning * into v_row;
+
+  return jsonb_build_object(
+    'provision', to_jsonb(v_row),
+    'estimate', v_est,
+    'entry', case when v_status = 'posted' then to_jsonb(v_entry) else null end
+  );
+end;
+$$;
+revoke all on function create_ct_provision_entry(uuid, integer, uuid) from public;
+revoke all on function create_ct_provision_entry(uuid, integer, uuid) from authenticated;
+revoke all on function create_ct_provision_entry(uuid, integer, uuid) from anon;
+grant execute on function create_ct_provision_entry(uuid, integer, uuid) to service_role;
+
+-- [feature-spec-1_1_G.md §4.6 / G-16 / G-24 / G-30 / G-37]
+create or replace function summarize_free_zone_income(
+  p_company_id uuid,
+  p_fiscal_year integer
+)
+returns jsonb
+language plpgsql
+stable
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  v_is_fz boolean;
+  v_rule ct_tax_rule_versions%rowtype;
+  v_fy_start date;
+  v_fy_end date;
+  v_revenue numeric(18,2);
+  v_qi numeric(18,2) := 0;
+  v_nqi numeric(18,2) := 0;
+  v_threshold numeric(18,2);
+begin
+  select is_free_zone_entity into v_is_fz
+    from companies where id = p_company_id;
+  if not found then
+    raise exception 'COMPANY_NOT_FOUND';
+  end if;
+
+  select min(period_start), max(period_end)
+    into v_fy_start, v_fy_end
+    from accounting_periods
+   where company_id = p_company_id
+     and fiscal_year = p_fiscal_year;
+  if v_fy_end is null then
+    raise exception 'NO_PERIOD_FOR_FISCAL_YEAR';
+  end if;
+
+  if not v_is_fz then
+    return jsonb_build_object(
+      'applicable', false,
+      'qualifying_income', 0,
+      'non_qualifying_income', 0,
+      'revenue', ct_fy_revenue(p_company_id, p_fiscal_year),
+      'deminimis_threshold', null,
+      'deminimis_breach', false
+    );
+  end if;
+
+  select * into v_rule
+    from ct_tax_rule_versions
+   where effective_from <= v_fy_end
+   order by effective_from desc
+   limit 1;
+  if not found then
+    raise exception 'CT_TAX_RULE_NOT_FOUND';
+  end if;
+
+  v_revenue := ct_fy_revenue(p_company_id, p_fiscal_year);
+
+  select
+    coalesce(sum(case when a.account_number = '4300' then il.line_total else 0 end), 0),
+    coalesce(sum(case when a.account_number in ('4310', '4320') then il.line_total else 0 end), 0)
+    into v_qi, v_nqi
+    from invoice_lines il
+    join invoices i on i.id = il.invoice_id
+    join accounts a on a.id = il.income_account_id
+   where i.company_id = p_company_id
+     and i.invoice_date >= v_fy_start
+     and i.invoice_date <= v_fy_end
+     -- [feature-spec-1_1_G.md G-37] exclude draft/void — not realized / cancelled.
+     and i.status not in ('draft', 'void');
+
+  v_threshold := least(
+    round(v_revenue * v_rule.qfzp_deminimis_pct / 100, 2),
+    v_rule.qfzp_deminimis_cap
+  );
+
+  return jsonb_build_object(
+    'applicable', true,
+    'qualifying_income', v_qi,
+    'non_qualifying_income', v_nqi,
+    'revenue', v_revenue,
+    'deminimis_threshold', v_threshold,
+    'deminimis_breach', v_nqi > v_threshold
+  );
+end;
+$$;
+revoke all on function summarize_free_zone_income(uuid, integer) from public;
+revoke all on function summarize_free_zone_income(uuid, integer) from authenticated;
+revoke all on function summarize_free_zone_income(uuid, integer) from anon;
+grant execute on function summarize_free_zone_income(uuid, integer) to service_role;
+
+-- [feature-spec-1_1_G.md §4.7 / G-7 / G-26] insert-only.
+create or replace function record_related_party_transaction(
+  p_company_id uuid,
+  p_counterparty_name text,
+  p_relationship related_party_relationship,
+  p_transaction_type text,
+  p_amount numeric,
+  p_transaction_date date,
+  p_reference_journal_entry_id uuid default null,
+  p_notes text default null
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  v_row related_party_transactions%rowtype;
+begin
+  if p_counterparty_name is null or btrim(p_counterparty_name) = '' then
+    raise exception 'COUNTERPARTY_NAME_REQUIRED';
+  end if;
+  if p_transaction_type is null or btrim(p_transaction_type) = '' then
+    raise exception 'TRANSACTION_TYPE_REQUIRED';
+  end if;
+  if p_amount is null then
+    raise exception 'AMOUNT_REQUIRED';
+  end if;
+  if p_transaction_date is null then
+    raise exception 'TRANSACTION_DATE_REQUIRED';
+  end if;
+
+  insert into related_party_transactions (
+    company_id, counterparty_name, relationship, transaction_type,
+    amount, transaction_date, reference_journal_entry_id, notes
+  ) values (
+    p_company_id, btrim(p_counterparty_name), p_relationship, btrim(p_transaction_type),
+    p_amount, p_transaction_date, p_reference_journal_entry_id, p_notes
+  ) returning * into v_row;
+
+  return to_jsonb(v_row);
+end;
+$$;
+revoke all on function record_related_party_transaction(uuid, text, related_party_relationship, text, numeric, date, uuid, text) from public;
+revoke all on function record_related_party_transaction(uuid, text, related_party_relationship, text, numeric, date, uuid, text) from authenticated;
+revoke all on function record_related_party_transaction(uuid, text, related_party_relationship, text, numeric, date, uuid, text) from anon;
+grant execute on function record_related_party_transaction(uuid, text, related_party_relationship, text, numeric, date, uuid, text) to service_role;
+
+-- [feature-spec-1_1_G.md §4.8 / G-8]
+create or replace function prepare_ct_return_summary(
+  p_company_id uuid,
+  p_fiscal_year integer
+)
+returns jsonb
+language plpgsql
+stable
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  v_provision jsonb;
+  v_sbr jsonb;
+  v_fz jsonb;
+  v_rp_count int;
+  v_rp_total numeric(18,2);
+  v_est jsonb;
+begin
+  select to_jsonb(p) into v_provision
+    from ct_provision_entries p
+   where p.company_id = p_company_id
+     and p.fiscal_year = p_fiscal_year;
+
+  v_est := get_ct_taxable_profit_estimate(p_company_id, p_fiscal_year);
+  v_sbr := check_small_business_relief_eligibility(p_company_id, p_fiscal_year);
+  v_fz := summarize_free_zone_income(p_company_id, p_fiscal_year);
+
+  select count(*), coalesce(sum(amount), 0)
+    into v_rp_count, v_rp_total
+    from related_party_transactions
+   where company_id = p_company_id
+     and extract(year from transaction_date)::int = p_fiscal_year;
+
+  return jsonb_build_object(
+    'fiscal_year', p_fiscal_year,
+    'provision', v_provision,
+    'estimate', v_est,
+    'sbr', v_sbr,
+    'free_zone', v_fz,
+    'related_party', jsonb_build_object(
+      'count', v_rp_count,
+      'total_amount', v_rp_total
+    )
+  );
+end;
+$$;
+revoke all on function prepare_ct_return_summary(uuid, integer) from public;
+revoke all on function prepare_ct_return_summary(uuid, integer) from authenticated;
+revoke all on function prepare_ct_return_summary(uuid, integer) from anon;
+grant execute on function prepare_ct_return_summary(uuid, integer) to service_role;
+
+-- [feature-spec-1_1_G.md §4.11 / G-12]
+create or replace function check_ct_penalty_exposure(
+  p_company_id uuid,
+  p_fiscal_year integer
+)
+returns jsonb
+language plpgsql
+stable
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  v_row ct_provision_entries%rowtype;
+begin
+  select * into v_row
+    from ct_provision_entries
+   where company_id = p_company_id
+     and fiscal_year = p_fiscal_year
+     and status = 'posted';
+  if not found then
+    return jsonb_build_object(
+      'has_posted_provision', false,
+      'overdue', false,
+      'payment_due_date', null,
+      'days_overdue', 0
+    );
+  end if;
+
+  return jsonb_build_object(
+    'has_posted_provision', true,
+    'overdue', v_row.payment_due_date < current_date,
+    'payment_due_date', v_row.payment_due_date,
+    'days_overdue', greatest(0, (current_date - v_row.payment_due_date)),
+    'ct_due', v_row.ct_due
+  );
+end;
+$$;
+revoke all on function check_ct_penalty_exposure(uuid, integer) from public;
+revoke all on function check_ct_penalty_exposure(uuid, integer) from authenticated;
+revoke all on function check_ct_penalty_exposure(uuid, integer) from anon;
+grant execute on function check_ct_penalty_exposure(uuid, integer) to service_role;
 
 -- ============================================================================
 -- 9c. RECURRING DUE GENERATION RPC (advisory lock + claim next_run_date)

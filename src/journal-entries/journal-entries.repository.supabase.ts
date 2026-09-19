@@ -667,6 +667,8 @@ export class SupabaseJournalEntriesRepository implements JournalEntriesRepositor
       p_created_by: dto.created_by,
       p_entry_date: dto.entry_date ?? null,
       p_narration: dto.narration ?? null,
+      p_skip_ct_check: dto.skip_ct_check ?? false,
+      p_skip_reason: dto.skip_reason ?? null,
     });
 
     if (error) {
@@ -686,6 +688,7 @@ export class SupabaseJournalEntriesRepository implements JournalEntriesRepositor
       'OPENING_BALANCE_ALREADY_EXISTS',
       'OPENING_BALANCE_INVALID_ACCOUNT_CATEGORY',
       'YEAR_END_ALREADY_CLOSED',
+      'CT_PROVISION_NOT_POSTED',
       'NO_OPEN_PERIOD_FOR_FISCAL_YEAR',
       'NO_PERIOD_FOR_FISCAL_YEAR',
       'RETAINED_EARNINGS_NOT_FOUND',

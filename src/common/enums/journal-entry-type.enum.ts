@@ -29,4 +29,6 @@ export enum JournalEntryType {
   VatBadDebtRelief = 'vat_bad_debt_relief',
   VatPenalty = 'vat_penalty',
   VatPeriodCorrection = 'vat_period_correction',
+  // [feature-spec-1_1_G.md §3.1]
+  CtProvision = 'ct_provision',
 }

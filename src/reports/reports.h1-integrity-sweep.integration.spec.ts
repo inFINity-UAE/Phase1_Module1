@@ -20,8 +20,10 @@ import {
 } from '../test/company-members.setup';
 import {
   INTEGRATION_USER_ID,
+  LEGACY_YE_SKIP_CT,
   mintFreshIntegrationCompany,
 } from '../test/integration-company.setup';
+import { CompanyRole } from '../common/enums/company-role.enum';
 
 const hasSupabase = Boolean(
   process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.SUPABASE_SECRET_KEY,
@@ -335,8 +337,9 @@ type GlRow = {
       expect(preGap).toBe(pnlFy.net_profit);
 
       const ye = await journalService.runYearEndClosing(
-        { company_id: companyId, fiscal_year: 2026 },
+        { company_id: companyId, fiscal_year: 2026, ...LEGACY_YE_SKIP_CT },
         INTEGRATION_USER_ID,
+        CompanyRole.Owner,
       );
       const reLine = ye.lines.find((l) => l.account_id === reId);
       expect(reLine).toBeDefined();

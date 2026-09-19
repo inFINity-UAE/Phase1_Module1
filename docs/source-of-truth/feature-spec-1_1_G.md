@@ -1,5 +1,5 @@
 # Module 1.1.G — UAE Corporate Tax (9%) Add-On
-## Feature Specification (Ratified 2026-09-18 — not yet implemented)
+## Feature Specification (Ratified 2026-09-18 — implemented 2026-09-18)
 
 Part of Module 1.1 · AI-Based Accounting Foundation, inFINity Phase 1 (MVP).
 This is the scope document for Module 1.1.G only — do not infer scope from
@@ -105,6 +105,11 @@ G-12 raised. G-32 closes the two leftover schema-verification items
 (YE signature, adjustment source FKs). §8 lists implementation-
 readiness items — those are build tasks, not open spec questions.
 
+### Post-build owner confirms (G-38 / G-39)
+
+G-33…G-37 close post-build findings (2026-09-19). G-40 closes G-38.
+G-41 closes G-39. No G-numbered entries remain open.
+
 ---
 
 ## 1. Scope boundary
@@ -115,7 +120,7 @@ in the module request):
 | # | Deliverable | Section |
 |---|---|---|
 | 1 | Taxable profit tracker: real-time running profit vs AED 375,000 threshold | §4.1 |
-| 2 | Threshold alert: notification at AED 330,000 (90%) — configurable | §4.2 |
+| 2 | Threshold alert: notification at 90% of `zero_rate_threshold` (AED 337,500 at the current 375,000 threshold — G-35) — configurable | §4.2 |
 | 3 | CT provision: 9% on profit above threshold — auto-posts to CT Provision account | §4.3 |
 | 4 | Small Business Relief monitor: eligibility under AED 3M revenue (valid until Dec 2026) | §4.4 |
 | 5 | Exempt income identification: qualifying dividends, intragroup transactions | §4.5 |
@@ -157,15 +162,19 @@ no direct schema dependency on F's tables.
 Numbered G-1 onward. G-1…G-12 are the first-draft entries (bodies not
 rewritten). G-13…G-21 close schema/COA/PDF verification. G-22…G-31 close
 the owner round. G-32 quotes the live YE signature and replaces
-`source_reference` with typed XOR FKs. **Do not silently edit a prior
-entry — append G-N+.**
+`source_reference` with typed XOR FKs. G-33…G-37 close post-build
+findings (2026-09-19). G-40 closes G-38 (`effective_from` seed). G-41
+closes G-39 (`posted_nil`). **Do not silently edit a prior entry —
+append G-N+.**
 
 ### G-1 — CT provision posts via a dedicated RPC, not an extension of year-end close
 
-**Closed by G-14 / G-22 / G-32 (2026-09-18):** provision JE is `Dr 5830
-Cr 2300` (G-13); YE zeros `5830` into `3100` (G-14). G-22: provision
-posts into the FY's last open period **before** YE; YE raises
-`CT_PROVISION_NOT_POSTED` unless skipped. Live YE signature is G-32.
+**Closed by G-14 / G-22 / G-32 / G-33 (2026-09-18 / 2026-09-19):**
+provision JE is `Dr 5830 Cr 2300` (G-13); YE zeros `5830` into `3100`
+(G-14). G-22: provision posts into the FY's last open period **before**
+YE; YE raises `CT_PROVISION_NOT_POSTED` unless skipped. Live YE
+signature is G-32. RPC signature is three-arg (G-33), not the two-arg
+shape named in the Decision paragraph below.
 
 **Decision:** CT provision posting is a separate
 `create_ct_provision_entry(company_id, fiscal_year)` RPC, run after
@@ -720,6 +729,118 @@ Manual rows (G-25) = exactly one source FK, same XOR as VAT drill-down.
 Automated add-backs (G-18) are account-level GL aggregates, so all
 three FKs stay null — they are not line-sourced.
 
+### G-33 — `create_ct_provision_entry` is three-arg (2026-09-19)
+
+**Decision:** formalizes G-1/G-3's `create_ct_provision_entry` signature
+as `(company_id uuid, fiscal_year integer, created_by uuid)` — three
+args, not two. Every other posting RPC in this schema that writes a
+`journal_entries` row (including `create_year_end_closing_entry`) takes
+a `created_by` argument for journal-entry attribution. G-27's
+Owner-only posting requirement also needs that actor id to populate
+`ct_provision_entries.posted_by`. This supersedes the two-arg signature
+G-1 originally named. G-1's Decision paragraph is left as written.
+
+### G-34 — QFZP `ct_due` uses `standard_rate` on NQI, not `qfzp_rate` (2026-09-19)
+
+**Decision:** §4.3's literal text (`non_qualifying_income × qfzp_rate`)
+conflicts with G-15, Build Status §8 item 3, and the Decision Log
+Index, all of which specify that NQI is taxed at `standard_rate` (9%),
+not `qfzp_rate` (0%, defined in §3.3 as applying only to qualifying
+income). §4.3 is corrected to read `(qualifying_income × qfzp_rate) +
+(non_qualifying_income × standard_rate)`. The implemented behavior
+(already matching G-15) is authoritative. G-15's original paragraph is
+left as written.
+
+### G-35 — Threshold alert is 90% of `zero_rate_threshold`, not AED 330,000 (2026-09-19)
+
+**Decision:** 90% of AED 375,000 is AED 337,500, not 330,000 — the
+original module request's figure in §1 deliverable #2 and §4.2's
+parenthetical was arithmetically wrong. The implementation is correct
+as built: `alert_threshold_pct` is applied dynamically against
+`zero_rate_threshold` from `ct_tax_rule_versions`
+(`threshold × alert_threshold_pct / 100`) at read time, never
+hardcoded, consistent with G-10's no-hardcoding principle.
+
+### G-36 — `ct_tax_rule_versions` is global config, not tenant data (2026-09-19)
+
+**Decision:** `ct_tax_rule_versions` intentionally has no `company_id`
+and no `company_isolation_*` policy, mirroring F-23's
+`vat_tax_rule_versions` (global regulatory config, not tenant data).
+The three tenant-scoped tables (`ct_income_adjustments`,
+`ct_provision_entries`, `related_party_transactions`) are the correct
+and complete set for isolation tests.
+
+### G-37 — `summarize_free_zone_income` excludes draft and void invoices (2026-09-19)
+
+**Decision:** `summarize_free_zone_income` (§4.6) excludes invoices with
+status `draft` or `void` from the qualifying / non-qualifying income
+aggregation. §4.6 was silent on invoice status. Drafts are not realized
+transactions; voids are cancelled. This filter feeds the G-16/G-30
+de-minimis breach calculation, so it is explicit rather than implicit.
+
+### G-38 [OPEN — NEEDS OWNER CONFIRMATION] — `ct_tax_rule_versions.effective_from` seed date
+
+**Closed by G-40 (2026-09-19):** seed `effective_from` is `2023-06-01`
+(rate commencement, not law enactment). The Open paragraph below is
+left as written.
+
+**Open:** `ct_tax_rule_versions.effective_from` (NOT NULL, no default)
+has no seed value specified anywhere in G-1…G-32, unlike every other
+column in §3.3 which cites a specific G-decision. `2023-06-01` (Federal
+Decree-Law No. 47/2022 commencement) was used as a provisional seed
+value pending explicit owner confirmation. This entry stays open until
+confirmed.
+
+### G-39 [OPEN — NEEDS OWNER CONFIRMATION] — `ct_due = 0` cannot produce a journal entry
+
+**Closed by G-41 (2026-09-19):** owner picked (a) — additive
+`posted_nil`. `'posted'` always implies a JE. YE accepts both statuses.
+The Open paragraph below is left as written.
+
+**Open:** `ct_due = 0` (taxable profit at or below the zero-rate
+threshold, or a QFZP entity with no non-qualifying income) cannot
+produce a journal entry, because `journal_lines` requires debit XOR
+credit > 0. A `ct_provision_entries` row is currently still inserted
+with `status = 'posted'` and a null `provision_journal_entry_id` so
+`create_year_end_closing_entry`'s G-22 check can proceed, but that
+makes `status = 'posted'` ambiguous (it no longer strictly implies a
+JE exists). Owner to confirm one of:
+
+(a) add a new `ct_provision_status` enum value (e.g. `posted_nil`) for
+the zero-liability case, so `'posted'` always implies a JE exists, or
+
+(b) accept the null-JE `'posted'` row as-is and document the exception
+permanently in §3.5.
+
+Do not resolve this in code until the owner picks (a) or (b).
+
+### G-40 — `ct_tax_rule_versions.effective_from` seed is 2023-06-01 (2026-09-19)
+
+**Decision:** closes G-38. `ct_tax_rule_versions.effective_from` seed is
+`2023-06-01`. Federal Decree-Law No. 47/2022 was issued December 2022,
+but UAE CT applies to financial years starting on or after 1 June 2023
+— `effective_from` marks commencement of the rate, not enactment of the
+law. Owner-confirmed; no longer provisional.
+
+### G-41 — `posted_nil` for zero `ct_due` (2026-09-19)
+
+**Decision:** closes G-39. Owner picks G-39 option (a). Additive enum
+value `posted_nil` on `ct_provision_status` for the zero-`ct_due` case,
+so `'posted'` always strictly implies `provision_journal_entry_id` is
+not null. CHECK on `ct_provision_entries`:
+
+- `status = 'posted'` requires `provision_journal_entry_id` is not null
+- `status = 'posted_nil'` requires `provision_journal_entry_id` is null
+  AND `ct_due = 0`
+
+`create_ct_provision_entry` writes `'posted_nil'` and leaves the JE id
+null (no JE insert) when computed `ct_due = 0`; when `ct_due > 0` it
+still writes `'posted'`, inserts `Dr 5830 Cr 2300`, and sets
+`provision_journal_entry_id`. `create_year_end_closing_entry`'s G-22
+`CT_PROVISION_NOT_POSTED` check accepts `status in ('posted',
+'posted_nil')`. A second call for either completed status still raises
+`CT_PROVISION_ALREADY_POSTED`.
+
 ---
 
 ## 3. Schema (additive — grounded against G-13…G-32; fold into `schema.sql` at build; no `apply_*.sql`)
@@ -739,7 +860,7 @@ create type ct_income_adjustment_type as enum (
   'non_deductible_entertainment', 'non_deductible_other'
 );
 create type ct_provision_status as enum (
-  'draft', 'posted', 'superseded'
+  'draft', 'posted', 'posted_nil', 'superseded'
 );
 create type related_party_relationship as enum (
   'shareholder', 'director', 'group_company', 'other_connected_person'
@@ -771,8 +892,12 @@ sbr_revenue_cap             numeric(18,2) not null           -- 3000000, current
 sbr_eligible_through        date not null                    -- 2026-12-31, period end basis (G-17)
 entertainment_addback_pct   numeric(5,2) not null default 50 -- 5580 (G-18)
 other_addback_accounts      text[] not null default '{5810,5930}' -- 100% addback (G-18)
-alert_threshold_pct         numeric(5,2) not null default 90 -- deliverable #2, configurable
+alert_threshold_pct         numeric(5,2) not null default 90 -- deliverable #2, configurable (G-35)
 ```
+
+Seed values for the numeric/date columns above are G-15/G-16/G-17/G-18 /
+§4.2. `effective_from` seed is `2023-06-01` (G-40) — rate commencement
+for financial years starting on or after 1 June 2023.
 
 ### 3.4 `ct_income_adjustments` (G-5 / G-18 / G-25)
 
@@ -802,11 +927,18 @@ sbr_eligible                boolean not null default false  -- readout only, G-2
 ct_due                      numeric(18,2) not null
 payment_due_date            date not null            -- G-19, FY period_end + 9 months
 status                      ct_provision_status not null default 'draft'
-provision_journal_entry_id  uuid references journal_entries(id)  -- Dr 5830 Cr 2300 (G-13)
+                            -- posted | posted_nil | draft | superseded (G-41)
+provision_journal_entry_id  uuid references journal_entries(id)  -- Dr 5830 Cr 2300 (G-13); required iff status=posted (G-41)
 posted_at                   timestamptz
-posted_by                   uuid                     -- Owner only (G-27)
+posted_by                   uuid                     -- Owner only (G-27); from create_ct_provision_entry.created_by (G-33)
 unique (company_id, fiscal_year)
+-- constraint ct_provision_entries_status_je_check (G-41):
+--   status = 'posted'     → provision_journal_entry_id is not null
+--   status = 'posted_nil' → provision_journal_entry_id is null AND ct_due = 0
 ```
+
+RPC that writes this table: `create_ct_provision_entry(company_id uuid,
+fiscal_year integer, created_by uuid)` (G-33).
 
 ### 3.6 `related_party_transactions` (G-7 / G-26)
 
@@ -840,27 +972,35 @@ live — not cached — the same way H1's reports read live.
 ### 4.2 Threshold alert (deliverable #2)
 
 Configurable percentage (`alert_threshold_pct` on G-10's rule table,
-default 90 → AED 330,000 at the current 375,000 threshold) triggers a
-flag on the same read query, not a push notification — no notification
+default 90 → `zero_rate_threshold × alert_threshold_pct / 100`, AED
+337,500 at the current 375,000 threshold — G-35) triggers a flag on
+the same read query, not a push notification — no notification
 infrastructure exists in this pass (mirrors F-11/G-9's stance).
-Front-end/consuming layer decides how to surface the flag.
+Front-end/consuming layer decides how to surface the flag. The
+original module-request figure of AED 330,000 was arithmetically
+wrong; do not hardcode either amount (G-10 / G-35).
 
 ### 4.3 CT provision posting (G-1/G-3)
 
-`create_ct_provision_entry(company_id, fiscal_year)`: reads G-10's
-current rule row. If `is_free_zone_entity`: `ct_due = (qualifying_income
-× 0) + (non_qualifying_income × qfzp_rate)` — no threshold band (G-15).
-Otherwise: `ct_due = max(0, taxable_profit_estimate −
+`create_ct_provision_entry(company_id uuid, fiscal_year integer,
+created_by uuid)` (G-33): reads G-10's current rule row. If
+`is_free_zone_entity`: `ct_due = (qualifying_income × qfzp_rate) +
+(non_qualifying_income × standard_rate)` — no threshold band
+(G-15 / G-34). Otherwise: `ct_due = max(0, taxable_profit_estimate −
 zero_rate_threshold) × standard_rate`. SBR (G-23) is monitor-only and
 never zeroes `ct_due` automatically — `sbr_eligible` is stored on the
-row as a readout, not applied. Posts `Dr 5830 Cr 2300` (G-13) for
-`ct_due`, into the fiscal year's **last open accounting period** (G-22)
-— must run before `create_year_end_closing_entry` for the same year, or
-that RPC raises `CT_PROVISION_NOT_POSTED` (G-22). One row per
-`(company_id, fiscal_year)` — a second call for an already-`posted` row
-raises `CT_PROVISION_ALREADY_POSTED`. Posting itself is Owner-only
-(G-27); an Accountant may call a separate calculate/draft path that
-computes but does not post.
+row as a readout, not applied. When `ct_due > 0`, posts `Dr 5830 Cr
+2300` (G-13) with `status = 'posted'`. When `ct_due = 0`, writes
+`status = 'posted_nil'` and no JE (G-41) — `journal_lines` cannot take
+a zero debit XOR credit. Posts into the fiscal year's **last open
+accounting period** (G-22) — must run before
+`create_year_end_closing_entry` for the same year, or that RPC raises
+`CT_PROVISION_NOT_POSTED` (G-22) unless a row with `status in
+('posted', 'posted_nil')` exists (G-41). One row per
+`(company_id, fiscal_year)` — a second call for an already-`posted` or
+`posted_nil` row raises `CT_PROVISION_ALREADY_POSTED`. Posting itself
+is Owner-only (G-27); an Accountant may call a separate calculate/draft
+path that computes but does not post.
 
 ### 4.4 Small Business Relief monitor (G-4)
 
@@ -891,7 +1031,10 @@ dividends or intragroup from an account mapping (G-25).
 income by `invoice_lines.income_account_id` against COA `4300`
 (qualifying) / `4310` / `4320` (G-24) for free-zone entities only
 (`companies.is_free_zone_entity = true`); non-free-zone companies get
-no qualifying-income calculation (not applicable). Flags — never
+no qualifying-income calculation (not applicable). Excludes invoices
+with status `draft` or `void` (G-37) — drafts are not realized
+transactions; voids are cancelled. This filter feeds the G-16/G-30
+de-minimis breach calculation. Flags — never
 gates — when non-qualifying income exceeds `MIN(5% of revenue, AED
 5,000,000)` (G-16). A breach never strips the 0% rate already applied
 to qualifying income (G-30) — QFZP status loss is a legal
@@ -964,6 +1107,9 @@ schema coupling.
 G adds **no** column on `invoice_lines` (G-24 / G-32). C's
 `income_account_id` and F's `vat_category`/`emirate` stay as they are.
 
+`create_ct_provision_entry` is `(company_id uuid, fiscal_year integer,
+created_by uuid)` (G-33).
+
 ---
 
 ## 7. Out of scope for this pass
@@ -999,16 +1145,14 @@ G adds **no** column on `invoice_lines` (G-24 / G-32). C's
 
 ## 8. Build status / sign-off
 
-**Module 1.1.G spec is ratified (2026-09-18); nothing is implemented
-yet.** G-1…G-12 (first draft) → G-13…G-21 (schema/COA/PDF grounding) →
-G-22…G-31 (owner decisions) → G-32 (live YE signature + typed
-adjustment FKs).
+**Module 1.1.G implemented 2026-09-18** against this ratified spec.
 
 ### Closed
 
 1. Provision posting: `Dr 5830 Cr 2300`, single control account (G-13).
 2. Sequencing: provision before YE, enforced via `CT_PROVISION_NOT_POSTED`
-   on the live five-arg `create_year_end_closing_entry` (G-14/G-22/G-32).
+   on `create_year_end_closing_entry` (G-14/G-22/G-32/G-41). `posted` and
+   `posted_nil` both satisfy the gate.
 3. Rate formulas: standard 0%/9% band vs. QFZP `(QI×0)+(NQI×9%)`, no
    band for QFZP (G-15).
 4. QFZP de-minimis `MIN(5%, AED 5m)` (G-16).
@@ -1018,34 +1162,37 @@ adjustment FKs).
 7. Due date anchor: `period_end` + 9 months (G-19).
 8. Registration readout: `companies.trn` (G-20).
 9. Route shape matches F's convention (G-21).
-10. Role gate: Accountant drafts, Owner posts (G-27).
+10. Role gate: Accountant drafts, Owner posts (G-27) at the Nest service
+    layer (same `assertOwner` pattern as F-8).
 11. Scope closed at: three add-back accounts + two manual adjustment
     categories (G-25); standalone related-party log (G-26); deferred
     tax, VAT–CT cross-check, natural persons/tax groups all out (G-28/
     G-29/G-31); de-minimis breach flag-only (G-30).
+12. `ct_tax_rule_versions.effective_from` seed is `2023-06-01` (G-40).
+13. Zero `ct_due` uses `posted_nil` + null JE; `'posted'` always implies
+    a JE; CHECK + YE gate per G-41.
+
+### Implemented
+
+DDL folded into `schema.sql` (enums, four tables, RLS, seed, named §4
+RPCs, seven-arg `create_year_end_closing_entry`). Nest `CtModule` at
+`/ct/*`. Tests in `src/ct/ct.integration.spec.ts` cover the seven
+required cases. Pre-G year-end callers pass `skip_ct_check` + reason.
 
 ### No open spec residuals
 
-Unlike F (which shipped with two post-ratification residuals — the VD
-threshold and the Box 2/CAS screenshot), G's grounding pass had all
-three source documents in hand before the owner round, so no
-`[OPEN — NEEDS VERIFICATION]` flags remain in §2.
+G-1…G-41 are closed. No G-numbered entries remain open.
 
-### Before implementation starts (build tasks, not spec questions)
+### Build tasks completed
 
 1. Additive DDL in `schema.sql` (no `apply_*.sql`): §3 tables/enums,
-   `ALTER TYPE journal_entry_type ADD VALUE 'ct_provision'` in its own
-   statement, G-32 skip params on `create_year_end_closing_entry` plus
-   GRANT/REVOKE on the seven-arg signature.
-2. Nest: map `CT_PROVISION_NOT_POSTED` next to `YEAR_END_ALREADY_CLOSED`;
-   optional Owner-only `skip_ct_check` / `skip_reason` on the YE DTO.
+   `ct_provision` on `journal_entry_type`, G-32 skip params on
+   `create_year_end_closing_entry` plus GRANT/REVOKE on the seven-arg
+   signature.
+2. Nest: `CT_PROVISION_NOT_POSTED` mapped next to `YEAR_END_ALREADY_CLOSED`;
+   Owner-only `skip_ct_check` / `skip_reason` on the YE DTO.
 3. Dependency status: Module 0 (A) ✅, Module 1 (H-core) ✅, Module 6
-   (F) ✅. G is next in Build Order sequence.
-
-### Not yet started
-
-No DDL is folded into `schema.sql`, no RPCs exist, no routes exist, no
-tests exist. §3–§5 are ratified design, not code.
+   (F) ✅, Module G ✅.
 
 ---
 
@@ -1053,7 +1200,7 @@ tests exist. §3–§5 are ratified design, not code.
 
 | # | Summary | Detail in |
 |---|---|---|
-| G-1 | Dedicated `create_ct_provision_entry` RPC, `ct:` lock; YE order closed by G-22; live signature G-32 | §2 G-1, G-22, G-32 |
+| G-1 | Dedicated `create_ct_provision_entry` RPC, `ct:` lock; YE order closed by G-22; live YE signature G-32; three-arg RPC G-33 | §2 G-1, G-22, G-32, G-33 |
 | G-2 | Taxable profit tracker reads reporting core live; named `taxable_profit_estimate` | §2 G-2 |
 | G-3 | CT accounts flagged, not invented — closed by G-13 (`Dr 5830 Cr 2300`) | §2 G-3, G-13 |
 | G-4 | SBR via versioned rule; sunset closed by G-17; election closed by G-23 | §2 G-4, G-17, G-23 |
@@ -1085,3 +1232,12 @@ tests exist. §3–§5 are ratified design, not code.
 | G-30 | QFZP de-minimis breach: flag only, never auto-strips 0% | §2 G-30 |
 | G-31 | Natural persons / tax groups out of scope | §2 G-31 |
 | G-32 | Live YE signature `(uuid, integer, uuid, date, text) → jsonb`; drop `source_reference`; XOR FKs like `vat_return_line_item_sources` | §2 G-32 |
+| G-33 | `create_ct_provision_entry(company_id uuid, fiscal_year integer, created_by uuid)`; `posted_by` from `created_by` | §2 G-33, §3.5, §4.3, §6 |
+| G-34 | QFZP `ct_due = (QI × qfzp_rate) + (NQI × standard_rate)`; §4.3 text corrected; G-15 behavior authoritative | §2 G-34, §4.3 |
+| G-35 | Alert = `zero_rate_threshold × alert_threshold_pct / 100` (AED 337,500 at 375,000 × 90%); never hardcode 330,000 | §2 G-35, §1, §4.2 |
+| G-36 | `ct_tax_rule_versions` is global (no `company_id` / no `company_isolation_*`, F-23 analogue); isolation tests cover the three tenant tables | §2 G-36 |
+| G-37 | `summarize_free_zone_income` excludes invoice status `draft` and `void` | §2 G-37, §4.6 |
+| G-38 | `ct_tax_rule_versions.effective_from` seed date — closed by G-40 (`2023-06-01`) | §2 G-38, G-40 |
+| G-39 | Zero `ct_due` posting — closed by G-41 (`posted_nil` + CHECK + YE gate) | §2 G-39, G-41 |
+| G-40 | Seed `effective_from = 2023-06-01` (rate commencement, not law enactment) | §2 G-40, §3.3 |
+| G-41 | `posted_nil` enum; CHECK (`posted` ⇒ JE, `posted_nil` ⇒ null JE and `ct_due = 0`); YE accepts both | §2 G-41, §3.1, §3.5 |

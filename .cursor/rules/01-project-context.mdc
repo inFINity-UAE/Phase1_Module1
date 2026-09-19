@@ -17,7 +17,8 @@ alwaysApply: true
 | D AR | `feature-spec-1_1_D.md` | Built; §7 deferrals remain |
 | E AP | `feature-spec-1_1_E.md` | Built 2026-09-13; §7 deferrals remain |
 | F VAT | `feature-spec-1_1_F.md` | Built 2026-09-16; §0 residuals remain (10k VD confirm, Box 2/CAS screenshot) |
-| B/G/H-rest | — | Queued |
+| G CT | `feature-spec-1_1_G.md` | Built 2026-09-18 |
+| B/H-rest | — | Queued |
 
 **Do not invent** a frontend, CI, local `supabase/` folder, generated types, or company-onboarding API — none exist.
 

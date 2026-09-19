@@ -51,6 +51,7 @@ import {
   BadDebtReliefClaimsController,
   VatVoluntaryDisclosuresController,
 } from '../vat/vat-claims.controller';
+import { CtController } from '../ct/ct.controller';
 import { REQUIRE_COMPANY_MEMBERSHIP_KEY } from '../auth/decorators/require-company-membership.decorator';
 import { SupabaseService } from '../database/supabase.service';
 import { CompanyRole } from '../common/enums/company-role.enum';
@@ -100,6 +101,7 @@ const HTTP_CONTROLLERS: Type[] = [
   CapitalGoodsItemsController,
   BadDebtReliefClaimsController,
   VatVoluntaryDisclosuresController,
+  CtController,
 ];
 
 /**
@@ -1092,6 +1094,47 @@ const HTTP_CONTROLLERS: Type[] = [
         },
         { method: 'GET', path: `/vat-voluntary-disclosures?company_id=${foreignCompanyId}` },
         { method: 'GET', path: `/vat-voluntary-disclosures/${foreignVatVdId}` },
+        { method: 'GET', path: `/ct/taxable-profit?company_id=${foreignCompanyId}&fiscal_year=2026` },
+        {
+          method: 'POST',
+          path: '/ct/provisions/calculate',
+          body: { company_id: foreignCompanyId, fiscal_year: 2026 },
+        },
+        {
+          method: 'POST',
+          path: '/ct/provisions/post',
+          body: { company_id: foreignCompanyId, fiscal_year: 2026 },
+        },
+        { method: 'GET', path: `/ct/provisions?company_id=${foreignCompanyId}&fiscal_year=2026` },
+        { method: 'GET', path: `/ct/sbr-eligibility?company_id=${foreignCompanyId}&fiscal_year=2026` },
+        {
+          method: 'POST',
+          path: '/ct/income-adjustments',
+          body: {
+            company_id: foreignCompanyId,
+            fiscal_year: 2026,
+            adjustment_type: 'qualifying_dividend',
+            amount: 100,
+            journal_entry_id: foreignEntryId,
+          },
+        },
+        { method: 'GET', path: `/ct/free-zone-summary?company_id=${foreignCompanyId}&fiscal_year=2026` },
+        {
+          method: 'POST',
+          path: '/ct/related-party-transactions',
+          body: {
+            company_id: foreignCompanyId,
+            counterparty_name: 'Foreign party',
+            relationship: 'shareholder',
+            transaction_type: 'loan',
+            amount: 1,
+            transaction_date: '2026-03-01',
+          },
+        },
+        { method: 'GET', path: `/ct/related-party-transactions?company_id=${foreignCompanyId}` },
+        { method: 'GET', path: `/ct/return-summary?company_id=${foreignCompanyId}&fiscal_year=2026` },
+        { method: 'GET', path: `/ct/registration-status?company_id=${foreignCompanyId}` },
+        { method: 'GET', path: `/ct/penalty-exposure?company_id=${foreignCompanyId}&fiscal_year=2026` },
       ];
 
       const failures: string[] = [];

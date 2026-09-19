@@ -31,7 +31,8 @@ import { JournalEntriesModule } from '../journal-entries/journal-entries.module'
 import { JournalEntriesService } from '../journal-entries/journal-entries.service';
 import { RecurringJournalTemplatesModule } from '../recurring-journal-templates/recurring-journal-templates.module';
 import { RecurringJournalTemplatesService } from '../recurring-journal-templates/recurring-journal-templates.service';
-import { mintFreshIntegrationCompany, INTEGRATION_USER_ID } from './integration-company.setup';
+import { mintFreshIntegrationCompany, INTEGRATION_USER_ID, LEGACY_YE_SKIP_CT } from './integration-company.setup';
+import { CompanyRole } from '../common/enums/company-role.enum';
 
 const hasSupabase = Boolean(
   process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.SUPABASE_SECRET_KEY,
@@ -772,8 +773,9 @@ async function periodIdForMonth(
           Math.abs(incomeBeforeClose.balance) - Math.abs(expenseBeforeClose.balance);
 
         await journalService.runYearEndClosing(
-          { company_id: yeCompany, fiscal_year: FISCAL_YEAR },
+          { company_id: yeCompany, fiscal_year: FISCAL_YEAR, ...LEGACY_YE_SKIP_CT },
           OWNER_ID,
+          CompanyRole.Owner,
         );
 
         const incomeAfter = await accountsService.getTrialBalance(income4000);

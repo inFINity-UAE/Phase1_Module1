@@ -19,6 +19,7 @@ import { GoodsReceiptsModule } from './goods-receipts/goods-receipts.module';
 import { BillsModule } from './bills/bills.module';
 import { SupplierPaymentsModule } from './supplier-payments/supplier-payments.module';
 import { VatModule } from './vat/vat.module';
+import { CtModule } from './ct/ct.module';
 
 @Module({
   imports: [
@@ -42,6 +43,7 @@ import { VatModule } from './vat/vat.module';
     BillsModule,
     SupplierPaymentsModule,
     VatModule,
+    CtModule,
   ],
 })
 export class AppModule {}

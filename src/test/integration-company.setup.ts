@@ -16,6 +16,12 @@ export const INTEGRATION_USER_ID = '00000000-0000-0000-0000-0000000000a2';
 /** Non-Owner/non-Manager member for RBAC negative tests. */
 export const INTEGRATION_ACCOUNTANT_ID = E2E_ACCOUNTANT_ID;
 
+/** Pre-G year-end callers: skip the G-22 provision gate (Owner + reason). */
+export const LEGACY_YE_SKIP_CT = {
+  skip_ct_check: true,
+  skip_reason: 'legacy year-end caller; CT provision enforced in ct.integration.spec',
+} as const;
+
 const INTEGRATION_FISCAL_YEAR = 2026;
 
 /**

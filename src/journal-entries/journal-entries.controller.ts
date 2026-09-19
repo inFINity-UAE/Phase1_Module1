@@ -47,7 +47,7 @@ export class JournalEntriesController {
     @Body() dto: CreateYearEndClosingDto,
     @CurrentUser() user: AuthenticatedUser,
   ) {
-    return this.journalEntriesService.runYearEndClosing(dto, user.id);
+    return this.journalEntriesService.runYearEndClosing(dto, user.id, user.role);
   }
 
   /**

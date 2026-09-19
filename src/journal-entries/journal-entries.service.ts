@@ -144,7 +144,17 @@ export class JournalEntriesService {
   async runYearEndClosing(
     dto: CreateYearEndClosingDto,
     createdBy: string,
+    role?: CompanyRole,
   ): Promise<JournalEntryWithDetails> {
+    if (dto.skip_ct_check) {
+      // [feature-spec-1_1_G.md G-32] Owner-only skip, E-25 analogue.
+      if (role !== CompanyRole.Owner) {
+        throw new ForbiddenException('Only Owner can skip the CT provision check on year-end close');
+      }
+      if (!dto.skip_reason?.trim()) {
+        throw new BadRequestException('skip_reason is required when skip_ct_check is true');
+      }
+    }
     try {
       const posted = await this.journalEntriesRepository.createYearEndClosingEntry({
         ...dto,
@@ -206,6 +216,12 @@ export class JournalEntriesService {
       throw new BadRequestException(
         `A year-end closing entry already exists for fiscal year ${fiscalYear}. ` +
           'Running year-end close again would double-transfer P&L into Retained Earnings.',
+      );
+    }
+    if (message === 'CT_PROVISION_NOT_POSTED') {
+      throw new BadRequestException(
+        `No posted CT provision exists for fiscal year ${fiscalYear}. ` +
+          'Post create_ct_provision_entry first, or pass skip_ct_check with skip_reason.',
       );
     }
     if (message === 'NO_OPEN_PERIOD_FOR_FISCAL_YEAR') {

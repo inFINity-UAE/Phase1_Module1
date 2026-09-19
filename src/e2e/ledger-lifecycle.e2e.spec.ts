@@ -6,6 +6,7 @@ config({ path: resolve(__dirname, '../../.env.local') });
 import { BadRequestException, ForbiddenException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { AuditAction } from '../common/enums/audit-action.enum';
+import { CompanyRole } from '../common/enums/company-role.enum';
 import { JournalEntryStatus } from '../common/enums/journal-entry-status.enum';
 import { JournalEntryType } from '../common/enums/journal-entry-type.enum';
 import { RecurrenceFrequency } from '../common/enums/recurrence-frequency.enum';
@@ -437,8 +438,11 @@ const hasSupabase = Boolean(
           company_id: companyId,
           fiscal_year: fiscalYear,
           entry_date: `${fiscalYear}-12-31`,
+          skip_ct_check: true,
+          skip_reason: 'e2e ledger lifecycle; CT provision enforced in ct.integration.spec',
         },
         E2E_OWNER_ID,
+        CompanyRole.Owner,
       );
       trackedEntryIds.push(yearEndClose.entry.id);
       expect(yearEndClose.entry.entry_type).toBe(JournalEntryType.YearEndClosing);

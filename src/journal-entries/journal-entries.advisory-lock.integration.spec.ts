@@ -20,7 +20,7 @@ import { CompanyRole } from '../common/enums/company-role.enum';
 import { ensureCompanyMember, testUserEmail } from '../test/company-members.setup';
 import { JournalEntryStatus } from '../common/enums/journal-entry-status.enum';
 import { JournalEntryType } from '../common/enums/journal-entry-type.enum';
-import { INTEGRATION_USER_ID } from '../test/integration-company.setup';
+import { INTEGRATION_USER_ID, LEGACY_YE_SKIP_CT } from '../test/integration-company.setup';
 
 const hasSupabase = Boolean(
   process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.SUPABASE_SECRET_KEY,
@@ -164,8 +164,14 @@ const OTHER_FISCAL_YEAR = 2111;
       const results = await Promise.allSettled(
         Array.from({ length: CONCURRENCY }, () =>
           service.runYearEndClosing(
-            { company_id: companyId, fiscal_year: FISCAL_YEAR, entry_date: `${FISCAL_YEAR}-12-31` },
+            {
+              company_id: companyId,
+              fiscal_year: FISCAL_YEAR,
+              entry_date: `${FISCAL_YEAR}-12-31`,
+              ...LEGACY_YE_SKIP_CT,
+            },
             USER_ID,
+            CompanyRole.Owner,
           ),
         ),
       );
@@ -230,16 +236,24 @@ const OTHER_FISCAL_YEAR = 2111;
 
       const [closeA, closeB] = await Promise.all([
         service.runYearEndClosing(
-          { company_id: companyId, fiscal_year: FISCAL_YEAR, entry_date: `${FISCAL_YEAR}-12-31` },
+          {
+            company_id: companyId,
+            fiscal_year: FISCAL_YEAR,
+            entry_date: `${FISCAL_YEAR}-12-31`,
+            ...LEGACY_YE_SKIP_CT,
+          },
           USER_ID,
+          CompanyRole.Owner,
         ),
         service.runYearEndClosing(
           {
             company_id: companyId,
             fiscal_year: OTHER_FISCAL_YEAR,
             entry_date: `${OTHER_FISCAL_YEAR}-12-31`,
+            ...LEGACY_YE_SKIP_CT,
           },
           USER_ID,
+          CompanyRole.Owner,
         ),
       ]);
 
@@ -324,8 +338,14 @@ const OTHER_FISCAL_YEAR = 2111;
           USER_ID,
         ),
         service.runYearEndClosing(
-          { company_id: companyId, fiscal_year: FISCAL_YEAR, entry_date: `${FISCAL_YEAR}-12-31` },
+          {
+            company_id: companyId,
+            fiscal_year: FISCAL_YEAR,
+            entry_date: `${FISCAL_YEAR}-12-31`,
+            ...LEGACY_YE_SKIP_CT,
+          },
           USER_ID,
+          CompanyRole.Owner,
         ),
       ]);
 

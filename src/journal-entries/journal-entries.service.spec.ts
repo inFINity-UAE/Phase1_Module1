@@ -1415,6 +1415,39 @@ describe('JournalEntriesService', () => {
         `A year-end closing entry already exists for fiscal year ${FISCAL_YEAR}`,
       );
     });
+
+    it('rejects year-end close when no CT provision is posted [G-22]', async () => {
+      repository.createYearEndClosingEntry.mockRejectedValue(
+        new Error('CT_PROVISION_NOT_POSTED'),
+      );
+
+      await expect(service.runYearEndClosing(yearEndDto, USER_ID)).rejects.toThrow(
+        BadRequestException,
+      );
+      await expect(service.runYearEndClosing(yearEndDto, USER_ID)).rejects.toThrow(
+        /No posted CT provision exists/,
+      );
+    });
+
+    it('Owner-only skip_ct_check requires skip_reason [G-32]', async () => {
+      repository.createYearEndClosingEntry.mockClear();
+      await expect(
+        service.runYearEndClosing(
+          { ...yearEndDto, skip_ct_check: true },
+          USER_ID,
+          CompanyRole.Owner,
+        ),
+      ).rejects.toThrow(/skip_reason is required/);
+      expect(repository.createYearEndClosingEntry).not.toHaveBeenCalled();
+
+      await expect(
+        service.runYearEndClosing(
+          { ...yearEndDto, skip_ct_check: true, skip_reason: 'test skip' },
+          USER_ID,
+          CompanyRole.Accountant,
+        ),
+      ).rejects.toThrow(/Only Owner can skip/);
+    });
   });
 
   describe('findAll / update (decision #31)', () => {

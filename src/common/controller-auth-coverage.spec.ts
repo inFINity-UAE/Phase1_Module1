@@ -61,12 +61,14 @@ import {
   VatVoluntaryDisclosuresController,
 } from '../vat/vat-claims.controller';
 import { VatService } from '../vat/vat.service';
+import { CtController } from '../ct/ct.controller';
+import { CtService } from '../ct/ct.service';
 
 /**
  * [feature-spec.md decisions #24/#27/#41; feature-spec-1.1.H1.md #1]
  * Controllers reject unauthenticated requests (401) and succeed for a
  * verified Bearer session with membership. Regression list covers all
- * 200 guarded HTTP routes across controllers.
+ * 212 guarded HTTP routes across controllers.
  *
  * Blind spot (C1-3): this spec registers controllers in isolation and mocks
  * CompanyMembershipGuard + CompanyMembersService — it does NOT import real
@@ -253,6 +255,47 @@ describe('Controller auth coverage (decision #24)', () => {
     { method: 'POST', path: `/bad-debt-relief-claims/${vatClaimId}/claim` },
     { method: 'GET', path: `/vat-voluntary-disclosures?company_id=${companyId}` },
     { method: 'GET', path: `/vat-voluntary-disclosures/${vatVdId}` },
+    { method: 'GET', path: `/ct/taxable-profit?company_id=${companyId}&fiscal_year=2026` },
+    {
+      method: 'POST',
+      path: '/ct/provisions/calculate',
+      body: { company_id: companyId, fiscal_year: 2026 },
+    },
+    {
+      method: 'POST',
+      path: '/ct/provisions/post',
+      body: { company_id: companyId, fiscal_year: 2026 },
+    },
+    { method: 'GET', path: `/ct/provisions?company_id=${companyId}&fiscal_year=2026` },
+    { method: 'GET', path: `/ct/sbr-eligibility?company_id=${companyId}&fiscal_year=2026` },
+    {
+      method: 'POST',
+      path: '/ct/income-adjustments',
+      body: {
+        company_id: companyId,
+        fiscal_year: 2026,
+        adjustment_type: 'qualifying_dividend',
+        amount: 100,
+        journal_entry_id: entryId,
+      },
+    },
+    { method: 'GET', path: `/ct/free-zone-summary?company_id=${companyId}&fiscal_year=2026` },
+    {
+      method: 'POST',
+      path: '/ct/related-party-transactions',
+      body: {
+        company_id: companyId,
+        counterparty_name: 'Related Co',
+        relationship: 'shareholder',
+        transaction_type: 'loan',
+        amount: 1000,
+        transaction_date: '2026-03-01',
+      },
+    },
+    { method: 'GET', path: `/ct/related-party-transactions?company_id=${companyId}` },
+    { method: 'GET', path: `/ct/return-summary?company_id=${companyId}&fiscal_year=2026` },
+    { method: 'GET', path: `/ct/registration-status?company_id=${companyId}` },
+    { method: 'GET', path: `/ct/penalty-exposure?company_id=${companyId}&fiscal_year=2026` },
     { method: 'POST', path: `/vat-voluntary-disclosures/${vatVdId}/approve` },
     { method: 'GET', path: `/accounts?company_id=${companyId}` },
     { method: 'GET', path: `/accounts/${accountId}` },
@@ -1050,6 +1093,7 @@ describe('Controller auth coverage (decision #24)', () => {
         CapitalGoodsItemsController,
         BadDebtReliefClaimsController,
         VatVoluntaryDisclosuresController,
+        CtController,
       ],
       providers: [
         SupabaseAuthGuard,
@@ -1067,6 +1111,23 @@ describe('Controller auth coverage (decision #24)', () => {
         { provide: AuditLogService, useValue: auditLogService },
         { provide: ReportsService, useValue: reportsService },
         { provide: VatService, useValue: vatService },
+        {
+          provide: CtService,
+          useValue: {
+            taxableProfit: jest.fn().mockResolvedValue({}),
+            calculate: jest.fn().mockResolvedValue({}),
+            postProvision: jest.fn().mockResolvedValue({}),
+            listProvisions: jest.fn().mockResolvedValue([]),
+            sbrEligibility: jest.fn().mockResolvedValue({}),
+            createIncomeAdjustment: jest.fn().mockResolvedValue({}),
+            freeZoneSummary: jest.fn().mockResolvedValue({}),
+            recordRelatedParty: jest.fn().mockResolvedValue({}),
+            listRelatedParty: jest.fn().mockResolvedValue([]),
+            returnSummary: jest.fn().mockResolvedValue({}),
+            registrationStatus: jest.fn().mockResolvedValue({ trn: null }),
+            penaltyExposure: jest.fn().mockResolvedValue({}),
+          },
+        },
         { provide: SuppliersService, useValue: suppliersService },
         { provide: PurchaseOrdersService, useValue: purchaseOrdersService },
         { provide: GoodsReceiptsService, useValue: goodsReceiptsService },
@@ -1128,7 +1189,7 @@ describe('Controller auth coverage (decision #24)', () => {
   }
 
   it('covers all guarded HTTP routes', () => {
-    expect(ALL_GUARDED_ROUTES).toHaveLength(200);
+    expect(ALL_GUARDED_ROUTES).toHaveLength(212);
   });
 
   it.each(ALL_GUARDED_ROUTES)(

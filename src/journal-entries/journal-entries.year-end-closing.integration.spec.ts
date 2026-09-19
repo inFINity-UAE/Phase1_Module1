@@ -18,7 +18,9 @@ import { CreateYearEndClosingDto } from './dto/create-year-end-closing.dto';
 import {
   ensureYearEndIntegrationCompanyReady,
   INTEGRATION_USER_ID,
+  LEGACY_YE_SKIP_CT,
 } from '../test/integration-company.setup';
+import { CompanyRole } from '../common/enums/company-role.enum';
 
 const hasSupabase = Boolean(
   process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.SUPABASE_SECRET_KEY,
@@ -265,9 +267,10 @@ async function resolveImbalanceProbeFiscalYear(
         const dto: CreateYearEndClosingDto = {
           company_id: companyId,
           fiscal_year: FISCAL_YEAR,
+          ...LEGACY_YE_SKIP_CT,
         };
 
-        const result = await service.runYearEndClosing(dto, USER_ID);
+        const result = await service.runYearEndClosing(dto, USER_ID, CompanyRole.Owner);
         createdEntryIds.push(result.entry.id);
         yearEndAlreadyClosed = true;
 
@@ -296,9 +299,10 @@ async function resolveImbalanceProbeFiscalYear(
       const dto: CreateYearEndClosingDto = {
         company_id: companyId,
         fiscal_year: emptyFiscalYear,
+        ...LEGACY_YE_SKIP_CT,
       };
 
-      await expect(service.runYearEndClosing(dto, USER_ID)).rejects.toThrow(
+      await expect(service.runYearEndClosing(dto, USER_ID, CompanyRole.Owner)).rejects.toThrow(
         `No income or expense balances to close for fiscal year ${emptyFiscalYear}`,
       );
 
@@ -318,14 +322,16 @@ async function resolveImbalanceProbeFiscalYear(
         const dto: CreateYearEndClosingDto = {
           company_id: companyId,
           fiscal_year: FISCAL_YEAR,
+          ...LEGACY_YE_SKIP_CT,
         };
-        const firstClose = await service.runYearEndClosing(dto, USER_ID);
+        const firstClose = await service.runYearEndClosing(dto, USER_ID, CompanyRole.Owner);
         createdEntryIds.push(firstClose.entry.id);
         yearEndAlreadyClosed = true;
       }
       const dto: CreateYearEndClosingDto = {
         company_id: companyId,
         fiscal_year: FISCAL_YEAR,
+        ...LEGACY_YE_SKIP_CT,
       };
 
       const incomeBefore = await getAccountBalance(incomeAccountId);
@@ -339,7 +345,7 @@ async function resolveImbalanceProbeFiscalYear(
           .eq('period_id', closingPeriodId)
       ).count;
 
-      await expect(service.runYearEndClosing(dto, USER_ID)).rejects.toThrow(
+      await expect(service.runYearEndClosing(dto, USER_ID, CompanyRole.Owner)).rejects.toThrow(
         `A year-end closing entry already exists for fiscal year ${FISCAL_YEAR}`,
       );
 
