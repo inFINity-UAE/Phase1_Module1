@@ -30,6 +30,7 @@ import {
 } from '../test/integration-company.setup';
 import { BillsModule } from './bills.module';
 import { BillsService } from './bills.service';
+import { VatCategory } from '../common/enums/vat-category.enum';
 import { BillMatchStatus } from './common/enums/bill-match-status.enum';
 import { BillStatus } from './common/enums/bill-status.enum';
 
@@ -172,6 +173,7 @@ const BILL_DATE = '2026-06-01';
               quantity: 1,
               unit_price: APPROVAL_THRESHOLD,
               vat_rate: 0,
+              vat_category: VatCategory.ZeroRated,
               account_id: account5000,
             },
           ],
@@ -210,6 +212,7 @@ const BILL_DATE = '2026-06-01';
               quantity: 1,
               unit_price: APPROVAL_THRESHOLD,
               vat_rate: 0,
+              vat_category: VatCategory.ZeroRated,
               account_id: account5000,
             },
           ],
@@ -267,6 +270,7 @@ const BILL_DATE = '2026-06-01';
               quantity: 10,
               unit_price: 101.5,
               vat_rate: 0,
+              vat_category: VatCategory.ZeroRated,
               account_id: account5000,
               purchase_order_line_id: poLineId,
             },
@@ -290,6 +294,7 @@ const BILL_DATE = '2026-06-01';
               quantity: 11,
               unit_price: 100,
               vat_rate: 0,
+              vat_category: VatCategory.ZeroRated,
               account_id: account5000,
               purchase_order_line_id: poLineId,
             },
@@ -344,6 +349,7 @@ const BILL_DATE = '2026-06-01';
               quantity: 2,
               unit_price: 200,
               vat_rate: 0,
+              vat_category: VatCategory.ZeroRated,
               account_id: account5000,
               purchase_order_line_id: poLineId,
             },
@@ -419,6 +425,7 @@ const BILL_DATE = '2026-06-01';
               quantity: 1,
               unit_price: 50,
               vat_rate: 0,
+              vat_category: VatCategory.ZeroRated,
               account_id: account5000,
             },
           ],
@@ -453,6 +460,7 @@ const BILL_DATE = '2026-06-01';
               quantity: 1,
               unit_price: APPROVAL_THRESHOLD,
               vat_rate: 0,
+              vat_category: VatCategory.ZeroRated,
               account_id: account5000,
             },
           ],
@@ -494,6 +502,7 @@ const BILL_DATE = '2026-06-01';
                 quantity: 1,
                 unit_price: 1,
                 vat_rate: 0,
+                vat_category: VatCategory.ZeroRated,
                 account_id: account5000,
               },
             ],
@@ -516,6 +525,7 @@ const BILL_DATE = '2026-06-01';
               quantity: 1,
               unit_price: 250,
               vat_rate: 0,
+              vat_category: VatCategory.ZeroRated,
               account_id: account5000,
             },
           ],
@@ -640,6 +650,7 @@ const BILL_DATE = '2026-06-01';
               quantity: 5,
               unit_price: 25,
               vat_rate: 0,
+              vat_category: VatCategory.ZeroRated,
               account_id: account5000,
               purchase_order_line_id: po.lines[0].id,
             },

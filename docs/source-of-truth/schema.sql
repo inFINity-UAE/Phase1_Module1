@@ -10760,7 +10760,21 @@ begin
     raise exception 'YEAR_END_ALREADY_CLOSED';
   end if;
 
-  -- [feature-spec-1_1_G.md G-22 / G-32 / G-41] after lock, before P&L aggregation.
+  -- Period must exist before the CT gate: the provision posts into the FY's
+  -- last open period (G-22), so a year with no accounting_periods row is
+  -- NO_PERIOD_FOR_FISCAL_YEAR, not CT_PROVISION_NOT_POSTED.
+  select * into v_period
+    from accounting_periods
+   where company_id = p_company_id
+     and fiscal_year = p_fiscal_year
+   order by period_end desc
+   limit 1;
+
+  if not found then
+    raise exception 'NO_PERIOD_FOR_FISCAL_YEAR';
+  end if;
+
+  -- [feature-spec-1_1_G.md G-22 / G-32 / G-41] after lock + period exists, before P&L.
   select exists (
     select 1
       from ct_provision_entries
@@ -10774,17 +10788,6 @@ begin
     if p_skip_ct_check is not true or btrim(coalesce(p_skip_reason, '')) = '' then
       raise exception 'CT_PROVISION_NOT_POSTED';
     end if;
-  end if;
-
-  select * into v_period
-    from accounting_periods
-   where company_id = p_company_id
-     and fiscal_year = p_fiscal_year
-   order by period_end desc
-   limit 1;
-
-  if not found then
-    raise exception 'NO_PERIOD_FOR_FISCAL_YEAR';
   end if;
 
   select id into v_re_id
