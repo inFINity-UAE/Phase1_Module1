@@ -9389,7 +9389,7 @@ create policy company_isolation_attachments on journal_attachments
 -- 9. HELPER VIEW — trial balance (sanity-check view, expand into full reports later)
 -- ============================================================================
 
--- [feature-spec-1.1.H1.md decision #4 / feature-spec.md decision #60]
+-- [feature-spec-1.1.H.md decision #4 / feature-spec.md decision #60]
 -- Ledger-truth status for reporting reads AND v_trial_balance.
 -- posted + reversed are ground truth; draft / pending_approval / rejected
 -- (and approved) never contribute.
@@ -9454,7 +9454,7 @@ left join (
 ) ql on ql.account_id = a.id
 group by a.company_id, a.id, a.account_number, a.account_name, a.category, a.normal_balance;
 
--- [feature-spec-1.1.H1.md decision #1 / #4] Period-scoped Trial Balance.
+-- [feature-spec-1.1.H.md decision #1 / #4] Period-scoped Trial Balance.
 -- Opening = ledger-truth lines with entry_date < period_start.
 -- Period activity = ledger-truth lines with entry_date in [period_start, period_end].
 -- Closing = opening + period activity. Signed balances use the same
@@ -9570,7 +9570,7 @@ revoke all on function get_trial_balance_for_period(uuid, uuid, boolean) from au
 revoke all on function get_trial_balance_for_period(uuid, uuid, boolean) from anon;
 grant execute on function get_trial_balance_for_period(uuid, uuid, boolean) to service_role;
 
--- [feature-spec-1.1.H1.md decision #2 / #4] Balance Sheet as of a date.
+-- [feature-spec-1.1.H.md decision #2 / #4] Balance Sheet as of a date.
 -- Cumulative A/L/E balances from journal_lines whose parent has
 -- entry_date <= p_as_of_date and is_ledger_truth_status(status).
 -- Including 'reversed' is required so an as-of date before the reversing
@@ -9647,7 +9647,7 @@ revoke all on function get_balance_sheet(uuid, date) from authenticated;
 revoke all on function get_balance_sheet(uuid, date) from anon;
 grant execute on function get_balance_sheet(uuid, date) to service_role;
 
--- [feature-spec-1.1.H1.md decision #3] Shared P&L / year-end signed balance.
+-- [feature-spec-1.1.H.md decision #3] Shared P&L / year-end signed balance.
 -- Identical CASE to the historical create_year_end_closing_entry inline
 -- expression — both YE and get_profit_and_loss MUST call this helper so
 -- net_profit and the RE transfer cannot drift.
@@ -9676,7 +9676,7 @@ revoke all on function account_signed_balance(normal_balance_type, numeric, nume
 revoke all on function account_signed_balance(normal_balance_type, numeric, numeric) from anon;
 grant execute on function account_signed_balance(normal_balance_type, numeric, numeric) to service_role;
 
--- [feature-spec-1.1.H1.md decision #3 / #4] Single-period P&L (no prior-period
+-- [feature-spec-1.1.H.md decision #3 / #4] Single-period P&L (no prior-period
 -- comparison — deferred to H2 / build-order Extended Reports).
 -- Income/expense only; entry_date in [p_period_start, p_period_end].
 -- is_ledger_truth_status so originals still count when the reversing entry
@@ -9756,13 +9756,13 @@ revoke all on function get_profit_and_loss(uuid, date, date) from authenticated;
 revoke all on function get_profit_and_loss(uuid, date, date) from anon;
 grant execute on function get_profit_and_loss(uuid, date, date) to service_role;
 
--- [feature-spec-1.1.H1.md decision #5] General Ledger — line-level listing
+-- [feature-spec-1.1.H.md decision #5] General Ledger — line-level listing
 -- with per-account running balance. Not an aggregate report.
 -- Status: is_ledger_truth_status (#4). Order: account_number, entry_date,
 -- entry_number, line_number. Running balance is ALWAYS true cumulative
 -- (partitioned by account); date filters only limit which rows are
 -- returned — they do NOT reset the running balance to zero.
--- [feature-spec-1.1.H2.md H2-3 / H2-11] Optional p_limit / p_offset
+-- [feature-spec-1.1.H.md H2-3 / H2-11] Optional p_limit / p_offset
 -- (null / 0). LIMIT/OFFSET only on the outer SELECT after running
 -- balance is computed. total_count is COUNT(*) over the same
 -- date-filtered set. SECURITY INVOKER + §5.1 grants.
@@ -9897,11 +9897,11 @@ revoke all on function get_general_ledger(uuid, uuid, date, date, int, int) from
 grant execute on function get_general_ledger(uuid, uuid, date, date, int, int) to service_role;
 
 -- ============================================================================
--- 9a1b. Module 1.1.H2 extended reports (feature-spec-1.1.H2.md H2-1…H2-5)
+-- 9a1b. Module 1.1.H2 extended reports (feature-spec-1.1.H.md H2-1…H2-5)
 -- SECURITY INVOKER + §5.1 grants. No new tables.
 -- ============================================================================
 
--- [feature-spec-1.1.H2.md H2-1 / H2-9] P&L comparison: call
+-- [feature-spec-1.1.H.md H2-1 / H2-9] P&L comparison: call
 -- get_profit_and_loss twice, FULL OUTER JOIN on account_id, missing
 -- side coalesced to 0. Do not copy the P&L CTE.
 create or replace function get_profit_and_loss_comparison(
@@ -9972,7 +9972,7 @@ revoke all on function get_profit_and_loss_comparison(uuid, date, date, date, da
 revoke all on function get_profit_and_loss_comparison(uuid, date, date, date, date) from anon;
 grant execute on function get_profit_and_loss_comparison(uuid, date, date, date, date) to service_role;
 
--- [feature-spec-1.1.H2.md H2-2 / H2-10] Range TB — same opening/closing
+-- [feature-spec-1.1.H.md H2-2 / H2-10] Range TB — same opening/closing
 -- definitions as get_trial_balance_for_period, keyed on caller dates.
 create or replace function get_trial_balance_for_range(
   p_company_id uuid,
@@ -10079,7 +10079,7 @@ revoke all on function get_trial_balance_for_range(uuid, date, date, boolean) fr
 revoke all on function get_trial_balance_for_range(uuid, date, date, boolean) from anon;
 grant execute on function get_trial_balance_for_range(uuid, date, date, boolean) to service_role;
 
--- [feature-spec-1.1.H2.md H2-4 / H2-12] Expense analysis — monthly
+-- [feature-spec-1.1.H.md H2-4 / H2-12] Expense analysis — monthly
 -- buckets of P&L expense balances grouped by accounts.sub_category.
 create or replace function get_expense_analysis(
   p_company_id uuid,
@@ -10174,7 +10174,7 @@ revoke all on function get_expense_analysis(uuid, integer) from authenticated;
 revoke all on function get_expense_analysis(uuid, integer) from anon;
 grant execute on function get_expense_analysis(uuid, integer) to service_role;
 
--- [feature-spec-1.1.H2.md H2-5 / H2-13 / H2-14 / H2-15] Sales by customer
+-- [feature-spec-1.1.H.md H2-5 / H2-13 / H2-14 / H2-15] Sales by customer
 -- from invoice line net on Sales Revenue (plus FZ 4300/4310/4320), net of
 -- credit-note line net via credit_notes.customer_id. G-37 status filter.
 -- H2-15: do not sum line_total (gross = net + VAT).
@@ -11213,7 +11213,7 @@ begin
       a.normal_balance,
       round(sum(jl.debit)::numeric, 2) as total_debit,
       round(sum(jl.credit)::numeric, 2) as total_credit,
-      -- [feature-spec-1.1.H1.md decision #3 / #4] lockstep with get_profit_and_loss:
+      -- [feature-spec-1.1.H.md decision #3 / #4] lockstep with get_profit_and_loss:
       -- same signed-balance helper and is_ledger_truth_status (posted ∪ reversed).
       -- posted-only would drop reversed originals while keeping reversing entries,
       -- producing a wrong RE transfer after mid-year reversals (H1-5 sweep).

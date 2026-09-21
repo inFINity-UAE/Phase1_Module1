@@ -1,5 +1,5 @@
 /**
- * [feature-spec-1.1.H2.md H2-7 / H2-8] Flatten a report JSON payload to CSV
+ * [feature-spec-1.1.H.md H2-7 / H2-8] Flatten a report JSON payload to CSV
  * and store-method ZIP for the audit pack. No PDF/XLSX.
  */
 

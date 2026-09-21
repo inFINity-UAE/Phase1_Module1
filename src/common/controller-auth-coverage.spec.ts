@@ -65,7 +65,7 @@ import { CtController } from '../ct/ct.controller';
 import { CtService } from '../ct/ct.service';
 
 /**
- * [feature-spec.md decisions #24/#27/#41; feature-spec-1.1.H1.md #1]
+ * [feature-spec.md decisions #24/#27/#41; feature-spec-1.1.H.md #1]
  * Controllers reject unauthenticated requests (401) and succeed for a
  * verified Bearer session with membership. Regression list covers all
  * 218 guarded HTTP routes across controllers.

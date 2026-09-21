@@ -1,6 +1,6 @@
 import { ProfitAndLossAccountRow, ProfitAndLossReport } from './profit-and-loss.entity';
 
-/** [feature-spec-1.1.H2.md H2-1] One outer-joined account row. */
+/** [feature-spec-1.1.H.md H2-1] One outer-joined account row. */
 export type ProfitAndLossComparisonAccountRow = {
   account_id: string;
   account_number: string;

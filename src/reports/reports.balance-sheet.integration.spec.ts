@@ -77,7 +77,7 @@ type BalanceSheetBody = {
 };
 
 /**
- * [feature-spec-1.1.H1.md decision #2] Balance Sheet HTTP + RPC.
+ * [feature-spec-1.1.H.md decision #2] Balance Sheet HTTP + RPC.
  */
 (hasSupabase ? describe : describe.skip)(
   'GET /reports/balance-sheet (H1 decision #2)',

@@ -68,7 +68,7 @@ function money(n: unknown): number {
 }
 
 /**
- * [feature-spec-1.1.H1.md decision #1] Period Trial Balance HTTP + RPC.
+ * [feature-spec-1.1.H.md decision #1] Period Trial Balance HTTP + RPC.
  */
 (hasSupabase ? describe : describe.skip)(
   'GET /reports/trial-balance (H1 decision #1)',

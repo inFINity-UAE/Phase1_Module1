@@ -36,7 +36,7 @@ import { flattenReportToCsv, zipStore } from './reports-csv';
 import { REPORTS_REPOSITORY, ReportsRepository } from './reports.repository';
 
 
-/** [feature-spec-1.1.H1.md decision #2] Server today as YYYY-MM-DD (UTC calendar date). */
+/** [feature-spec-1.1.H.md decision #2] Server today as YYYY-MM-DD (UTC calendar date). */
 export function serverAsOfDateToday(now: Date = new Date()): string {
   return now.toISOString().slice(0, 10);
 }
@@ -46,7 +46,7 @@ function roundMoney(value: number): number {
 }
 
 /**
- * [feature-spec-1.1.H1.md decision #2] Sum signed balances by A/L/E and
+ * [feature-spec-1.1.H.md decision #2] Sum signed balances by A/L/E and
  * set is_balanced when total_assets = total_liabilities + total_equity.
  */
 export function summarizeBalanceSheet(
@@ -84,7 +84,7 @@ export function summarizeBalanceSheet(
 }
 
 /**
- * [feature-spec-1.1.H1.md decision #3] net_profit = total_income − total_expense
+ * [feature-spec-1.1.H.md decision #3] net_profit = total_income − total_expense
  * using the same category split as create_year_end_closing_entry
  * (income balances → YE v_total_debits; expense → v_total_credits; net = debit−credit).
  */
@@ -117,7 +117,7 @@ export function summarizeProfitAndLoss(
   };
 }
 
-/** [feature-spec-1.1.H2.md H2-1] Inclusive same-length window immediately before period A. */
+/** [feature-spec-1.1.H.md H2-1] Inclusive same-length window immediately before period A. */
 export function precedingSameLengthPeriod(
   periodAStart: string,
   periodAEnd: string,
@@ -157,7 +157,7 @@ export class ReportsService {
   ) {}
 
   /**
-   * [feature-spec-1.1.H1.md decision #1] Period Trial Balance.
+   * [feature-spec-1.1.H.md decision #1] Period Trial Balance.
    * Period ownership check mirrors Module 1.1.A §4.18 / decision #51
    * (assertPeriodUsableForCompany) — no parallel same-company helper.
    */
@@ -181,7 +181,7 @@ export class ReportsService {
   }
 
   /**
-   * [feature-spec-1.1.H1.md decision #2] Balance Sheet as of a date.
+   * [feature-spec-1.1.H.md decision #2] Balance Sheet as of a date.
    * Omitted as_of_date → server today (not client-trusted).
    */
   async getBalanceSheet(
@@ -201,7 +201,7 @@ export class ReportsService {
   }
 
   /**
-   * [feature-spec-1.1.H1.md decision #3] Single-period P&L.
+   * [feature-spec-1.1.H.md decision #3] Single-period P&L.
    * Rejects period_end < period_start in Nest (clear 400) before RPC.
    */
   async getProfitAndLoss(
@@ -228,7 +228,7 @@ export class ReportsService {
   }
 
   /**
-   * [feature-spec-1.1.H2.md H2-1 / H2-9] Two-period P&L + variance.
+   * [feature-spec-1.1.H.md H2-1 / H2-9] Two-period P&L + variance.
    * Totals via summarizeProfitAndLoss twice — do not reimplement.
    * period B omitted → immediately preceding same-length window.
    */
@@ -284,7 +284,7 @@ export class ReportsService {
   }
 
   /**
-   * [feature-spec-1.1.H2.md H2-2] Additive range TB — period_id route untouched.
+   * [feature-spec-1.1.H.md H2-2] Additive range TB — period_id route untouched.
    */
   async getTrialBalanceForRange(
     companyId: string,
@@ -310,11 +310,11 @@ export class ReportsService {
   }
 
   /**
-   * [feature-spec-1.1.H1.md decision #5] General Ledger — line listing with
+   * [feature-spec-1.1.H.md decision #5] General Ledger — line listing with
    * true cumulative running balance. Optional account_id uses
    * assertAccountBelongsToCompany (§4.8/#35 company-match; inactive OK).
    * Nest rejects inverted date range before RPC.
-   * [feature-spec-1.1.H2.md H2-3] Optional limit/offset; unpaginated returns
+   * [feature-spec-1.1.H.md H2-3] Optional limit/offset; unpaginated returns
    * the same row array (no total_count) as H1.
    */
   async getGeneralLedger(
@@ -368,7 +368,7 @@ export class ReportsService {
     }
   }
 
-  /** [feature-spec-1.1.H2.md H2-4] Expense analysis by sub_category. */
+  /** [feature-spec-1.1.H.md H2-4] Expense analysis by sub_category. */
   async getExpenseAnalysis(
     companyId: string,
     fiscalYear: number,
@@ -380,7 +380,7 @@ export class ReportsService {
     }
   }
 
-  /** [feature-spec-1.1.H2.md H2-5 / H2-14] Invoice sales by customer, CNs netted. */
+  /** [feature-spec-1.1.H.md H2-5 / H2-14] Invoice sales by customer, CNs netted. */
   async getSalesByCustomer(
     companyId: string,
     periodStart: string,
@@ -403,7 +403,7 @@ export class ReportsService {
   }
 
   /**
-   * [feature-spec-1.1.H2.md H2-6] Nest composition of BS / P&L / aged AR / AP.
+   * [feature-spec-1.1.H.md H2-6] Nest composition of BS / P&L / aged AR / AP.
    * as-of = period_end. No new SQL.
    */
   async getExecutiveSummary(
@@ -444,7 +444,7 @@ export class ReportsService {
   }
 
   /**
-   * [feature-spec-1.1.H2.md H2-8] Zip of H1 TB / BS / P&L / GL CSVs for a period.
+   * [feature-spec-1.1.H.md H2-8] Zip of H1 TB / BS / P&L / GL CSVs for a period.
    * No new computation — flatten the same payloads the H1 routes return.
    */
   async getAuditPack(companyId: string, periodId: string): Promise<StreamableFile> {

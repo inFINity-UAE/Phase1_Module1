@@ -9,7 +9,7 @@ import { Observable } from 'rxjs';
 import { map } from 'rxjs/operators';
 import { flattenReportToCsv } from './reports-csv';
 
-/** [feature-spec-1.1.H2.md H2-7] ?format=csv → flattened CSV attachment. */
+/** [feature-spec-1.1.H.md H2-7] ?format=csv → flattened CSV attachment. */
 @Injectable()
 export class ReportsCsvInterceptor implements NestInterceptor {
   intercept(context: ExecutionContext, next: CallHandler): Observable<unknown> {

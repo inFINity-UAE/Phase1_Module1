@@ -529,7 +529,7 @@ cancellation (reversed original still summed). `GET /accounts/:id/trial-balance`
 
 **Fixed (#60):** qualify lines in an inner subquery filtered by
 `is_ledger_truth_status(status)` (`posted` ∪ `reversed`, same helper as
-H1 reports — feature-spec-1.1.H1.md #4), then LEFT JOIN that set to
+H1 reports — feature-spec-1.1.H.md #4), then LEFT JOIN that set to
 `accounts` so empty / draft-only accounts still appear as 0/0/0.
 `security_invoker = true` retained on `CREATE OR REPLACE VIEW`.
 *(Decision #60)*

@@ -87,7 +87,7 @@ export class SupabaseReportsRepository implements ReportsRepository {
   }
 
   /**
-   * [feature-spec-1.1.H1.md decision #1] Period Trial Balance RPC
+   * [feature-spec-1.1.H.md decision #1] Period Trial Balance RPC
    * (SECURITY INVOKER, service_role EXECUTE only — Module 1.1.A §5.1).
    */
   async getTrialBalanceForPeriod(
@@ -125,7 +125,7 @@ export class SupabaseReportsRepository implements ReportsRepository {
     }));
   }
 
-  /** [feature-spec-1.1.H2.md H2-2] Additive range TB. */
+  /** [feature-spec-1.1.H.md H2-2] Additive range TB. */
   async getTrialBalanceForRange(
     companyId: string,
     rangeStart: string,
@@ -164,7 +164,7 @@ export class SupabaseReportsRepository implements ReportsRepository {
   }
 
   /**
-   * [feature-spec-1.1.H1.md decision #2] Balance Sheet RPC
+   * [feature-spec-1.1.H.md decision #2] Balance Sheet RPC
    * (SECURITY INVOKER, service_role EXECUTE only — Module 1.1.A §5.1).
    */
   async getBalanceSheet(
@@ -193,7 +193,7 @@ export class SupabaseReportsRepository implements ReportsRepository {
   }
 
   /**
-   * [feature-spec-1.1.H1.md decision #3] P&L RPC
+   * [feature-spec-1.1.H.md decision #3] P&L RPC
    * (SECURITY INVOKER, service_role EXECUTE only — Module 1.1.A §5.1).
    */
   async getProfitAndLoss(
@@ -223,7 +223,7 @@ export class SupabaseReportsRepository implements ReportsRepository {
     }));
   }
 
-  /** [feature-spec-1.1.H2.md H2-1] P&L comparison RPC. */
+  /** [feature-spec-1.1.H.md H2-1] P&L comparison RPC. */
   async getProfitAndLossComparison(
     companyId: string,
     periodAStart: string,
@@ -263,7 +263,7 @@ export class SupabaseReportsRepository implements ReportsRepository {
   }
 
   /**
-   * [feature-spec-1.1.H1.md decision #5] General Ledger RPC
+   * [feature-spec-1.1.H.md decision #5] General Ledger RPC
    * (SECURITY INVOKER, service_role EXECUTE only — Module 1.1.A §5.1).
    */
   async getGeneralLedger(
@@ -307,7 +307,7 @@ export class SupabaseReportsRepository implements ReportsRepository {
     }));
   }
 
-  /** [feature-spec-1.1.H2.md H2-4] Expense analysis RPC. */
+  /** [feature-spec-1.1.H.md H2-4] Expense analysis RPC. */
   async getExpenseAnalysis(
     companyId: string,
     fiscalYear: number,
@@ -327,7 +327,7 @@ export class SupabaseReportsRepository implements ReportsRepository {
     }));
   }
 
-  /** [feature-spec-1.1.H2.md H2-5 / H2-14] Sales by customer RPC. */
+  /** [feature-spec-1.1.H.md H2-5 / H2-14] Sales by customer RPC. */
   async getSalesByCustomer(
     companyId: string,
     periodStart: string,

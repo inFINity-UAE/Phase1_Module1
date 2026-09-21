@@ -17,6 +17,6 @@ Use `.cursor/templates/adr.md`:
 
 ## After approval
 
-Append `A #n` / `H1 #n` / `C #n` / `D-n` / `E-n` to the **owning** spec. Do not rewrite the old entry’s body to mean something else.
+Append `A #n` / `H #n` or `H2-n` / `C #n` / `D-n` / `E-n` to the **owning** spec. Do not rewrite the old entry’s body to mean something else.
 
 E-1 (Bill = `bills` table) is closed — do not reopen when scoping B or E implementation.

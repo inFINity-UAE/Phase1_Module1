@@ -1,5 +1,5 @@
 /**
- * [feature-spec-1.1.H1.md decision #5] One General Ledger row per
+ * [feature-spec-1.1.H.md decision #5] One General Ledger row per
  * journal_lines entry (ledger-truth parent), with per-account running balance.
  */
 export type GeneralLedgerRow = {

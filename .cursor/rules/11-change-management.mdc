@@ -5,7 +5,7 @@ alwaysApply: false
 
 # Change management
 
-Signed-off decisions (A #1–#64, H1 #1–#6, C #1–#23, D-1…D-17, E-1…E-28) are not to be silently reversed.
+Signed-off decisions (A #1–#64, H #1–#9 / H2-1…H2-15, C #1–#23, D-1…D-17, E-1…E-28) are not to be silently reversed.
 
 If a change would alter one: stop and follow `.cursor/workflows/architectural-decision.md`. Append a new numbered decision to the module spec; do not edit the old entry’s meaning.
 
