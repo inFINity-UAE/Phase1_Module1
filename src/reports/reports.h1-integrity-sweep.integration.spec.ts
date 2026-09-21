@@ -13,6 +13,9 @@ import { createClient } from '@supabase/supabase-js';
 import { AppModule } from '../app.module';
 import { SupabaseService } from '../database/supabase.service';
 import { JournalEntriesService } from '../journal-entries/journal-entries.service';
+import { CustomersService } from '../customers/customers.service';
+import { InvoicesService } from '../invoices/invoices.service';
+import { ensureFiscalYearPeriods } from '../e2e/e2e-company.setup';
 import {
   ensureAuthUser,
   testUserEmail,
@@ -24,6 +27,7 @@ import {
   mintFreshIntegrationCompany,
 } from '../test/integration-company.setup';
 import { CompanyRole } from '../common/enums/company-role.enum';
+import { flattenReportToCsv } from './reports-csv';
 
 const hasSupabase = Boolean(
   process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.SUPABASE_SECRET_KEY,
@@ -69,6 +73,26 @@ function money(n: unknown): number {
 
 function roundMoney(n: number): number {
   return Math.round(n * 100) / 100;
+}
+
+function unzipStore(buf: Buffer): Map<string, string> {
+  const files = new Map<string, string>();
+  let offset = 0;
+  while (offset + 30 <= buf.length) {
+    const sig = buf.readUInt32LE(offset);
+    if (sig !== 0x04034b50) {
+      break;
+    }
+    const nameLen = buf.readUInt16LE(offset + 26);
+    const extraLen = buf.readUInt16LE(offset + 28);
+    const size = buf.readUInt32LE(offset + 18);
+    const nameStart = offset + 30;
+    const name = buf.slice(nameStart, nameStart + nameLen).toString('utf8');
+    const dataStart = nameStart + nameLen + extraLen;
+    files.set(name, buf.slice(dataStart, dataStart + size).toString('utf8'));
+    offset = dataStart + size;
+  }
+  return files;
 }
 
 type BalanceSheetBody = {
@@ -123,6 +147,8 @@ type GlRow = {
     let baseUrl: string;
     let supabase: SupabaseService;
     let journalService: JournalEntriesService;
+    let customersService: CustomersService;
+    let invoicesService: InvoicesService;
     let accessToken = '';
 
     beforeAll(async () => {
@@ -146,6 +172,8 @@ type GlRow = {
 
       supabase = module.get(SupabaseService);
       journalService = module.get(JournalEntriesService);
+      customersService = module.get(CustomersService);
+      invoicesService = module.get(InvoicesService);
 
       await ensureAuthUser(
         supabase,
@@ -439,6 +467,207 @@ type GlRow = {
       expect(bankBs).toBeDefined();
       expect(money(bankGl[bankGl.length - 1].running_balance)).toBe(
         money(bankBs!.balance),
+      );
+
+      // ── H2 (same fixture; H1 assertions above must stay unchanged) ───────
+      const pnlJan = await http(
+        'GET',
+        `/reports/profit-and-loss?company_id=${companyId}&period_start=2026-01-01&period_end=2026-01-31`,
+      );
+      expect(pnlJan.status).toBe(200);
+      const pnlFeb = await http(
+        'GET',
+        `/reports/profit-and-loss?company_id=${companyId}&period_start=2026-02-01&period_end=2026-02-28`,
+      );
+      expect(pnlFeb.status).toBe(200);
+
+      // H2-1: comparison totals equal two separate direct P&L calls.
+      const cmpRes = await http(
+        'GET',
+        `/reports/profit-and-loss-comparison?company_id=${companyId}` +
+          `&period_a_start=2026-01-01&period_a_end=2026-01-31` +
+          `&period_b_start=2026-02-01&period_b_end=2026-02-28`,
+      );
+      expect(cmpRes.status).toBe(200);
+      const cmp = cmpRes.json as {
+        period_a: PnLBody;
+        period_b: PnLBody;
+        accounts: Array<{
+          period_a_balance: number;
+          period_b_balance: number;
+          variance: number;
+        }>;
+      };
+      const pnlJanBody = pnlJan.json as PnLBody;
+      const pnlFebBody = pnlFeb.json as PnLBody;
+      expect(cmp.period_a.total_income).toBe(pnlJanBody.total_income);
+      expect(cmp.period_a.total_expense).toBe(pnlJanBody.total_expense);
+      expect(cmp.period_a.net_profit).toBe(pnlJanBody.net_profit);
+      expect(cmp.period_b.total_income).toBe(pnlFebBody.total_income);
+      expect(cmp.period_b.total_expense).toBe(pnlFebBody.total_expense);
+      expect(cmp.period_b.net_profit).toBe(pnlFebBody.net_profit);
+      for (const row of cmp.accounts) {
+        expect(roundMoney(money(row.variance))).toBe(
+          roundMoney(money(row.period_a_balance) - money(row.period_b_balance)),
+        );
+      }
+
+      // H2-2: range TB over an exact period equals period TB.
+      const tbRange = await http(
+        'GET',
+        `/reports/trial-balance-range?company_id=${companyId}` +
+          `&range_start=2026-12-01&range_end=2026-12-31&include_zero_balance=true`,
+      );
+      expect(tbRange.status).toBe(200);
+      expect(tbRange.json).toEqual(tbRows);
+
+      // H2-3: paginated GL reconstructs unpaginated rows + running_balance.
+      const glAllRes = await http('GET', `/reports/general-ledger?company_id=${companyId}`);
+      expect(glAllRes.status).toBe(200);
+      const glAll = glAllRes.json as GlRow[];
+      expect(Array.isArray(glAll)).toBe(true);
+      expect(glAll.length).toBeGreaterThan(10);
+      expect(glAll[0]).not.toHaveProperty('total_count');
+
+      const rebuilt: GlRow[] = [];
+      let pageOffset = 0;
+      let reportedTotal = Number.POSITIVE_INFINITY;
+      while (pageOffset < reportedTotal) {
+        const pageRes = await http(
+          'GET',
+          `/reports/general-ledger?company_id=${companyId}&limit=10&offset=${pageOffset}`,
+        );
+        expect(pageRes.status).toBe(200);
+        const page = pageRes.json as { rows: GlRow[]; total_count: number };
+        expect(page.rows).toBeDefined();
+        reportedTotal = page.total_count;
+        rebuilt.push(...page.rows);
+        if (page.rows.length === 0) {
+          break;
+        }
+        pageOffset += 10;
+      }
+      expect(reportedTotal).toBe(glAll.length);
+      expect(rebuilt).toEqual(glAll);
+
+      // H2-4: FY expense-analysis monthly sum equals P&L total_expense.
+      const expRes = await http(
+        'GET',
+        `/reports/expense-analysis?company_id=${companyId}&fiscal_year=2026`,
+      );
+      expect(expRes.status).toBe(200);
+      const expRows = expRes.json as Array<{ month_start: string; amount: number }>;
+      const expSum = roundMoney(expRows.reduce((s, r) => s + money(r.amount), 0));
+      expect(expSum).toBe((pnlAfterYe.json as PnLBody).total_expense);
+      const janExpSum = roundMoney(
+        expRows
+          .filter((r) => String(r.month_start).slice(0, 7) === '2026-01')
+          .reduce((s, r) => s + money(r.amount), 0),
+      );
+      expect(janExpSum).toBe(pnlJanBody.total_expense);
+
+      // H2-5: 2027 invoice after YE — sales-by-customer vs Sales Revenue P&L.
+      await ensureFiscalYearPeriods(supabase, companyId, 2027);
+      const customer = await customersService.create({
+        company_id: companyId,
+        customer_name: 'H2-5 sweep customer',
+        trn: `2${Date.now()}`.slice(0, 15),
+      });
+      const issued = await invoicesService.create(
+        {
+          company_id: companyId,
+          customer_id: customer.id,
+          invoice_date: '2027-01-15',
+          lines: [
+            {
+              line_number: 1,
+              description: 'H2-5 sales',
+              quantity: 1,
+              unit_price: 800,
+              vat_rate: 5,
+              income_account_id: incomeId,
+            },
+          ],
+        },
+        INTEGRATION_USER_ID,
+      );
+      await invoicesService.issue(issued.invoice.id);
+
+      const salesRes = await http(
+        'GET',
+        `/reports/sales-by-customer?company_id=${companyId}` +
+          `&period_start=2027-01-01&period_end=2027-12-31`,
+      );
+      expect(salesRes.status).toBe(200);
+      const salesRows = salesRes.json as Array<{
+        customer_id: string;
+        total_revenue: number;
+      }>;
+      const salesTotal = roundMoney(
+        salesRows.reduce((s, r) => s + money(r.total_revenue), 0),
+      );
+
+      const pnl2027Sales = await http(
+        'GET',
+        `/reports/profit-and-loss?company_id=${companyId}&period_start=2027-01-01&period_end=2027-12-31`,
+      );
+      expect(pnl2027Sales.status).toBe(200);
+      const { data: salesAccts, error: salesAcctErr } = await supabase.client
+        .from('accounts')
+        .select('id, account_number, sub_category')
+        .eq('company_id', companyId);
+      if (salesAcctErr || !salesAccts) {
+        throw salesAcctErr ?? new Error('accounts lookup failed');
+      }
+      const salesAccountIds = new Set(
+        salesAccts
+          .filter((a) => a.sub_category === 'Sales Revenue')
+          .map((a) => a.id as string),
+      );
+      const pnlSales = roundMoney(
+        ((pnl2027Sales.json as PnLBody).accounts ?? [])
+          .filter((a) => salesAccountIds.has(String(a.account_id)))
+          .reduce((s, a) => s + money(a.balance), 0),
+      );
+      expect(salesTotal).toBe(pnlSales);
+      expect(salesTotal).toBe(800);
+
+      // H2-8: audit pack CSVs match calling each H1 route directly.
+      const tbDirect = await http(
+        'GET',
+        `/reports/trial-balance?company_id=${companyId}&period_id=${decPeriodId}`,
+      );
+      expect(tbDirect.status).toBe(200);
+      const glDirect = await http(
+        'GET',
+        `/reports/general-ledger?company_id=${companyId}`,
+      );
+      expect(glDirect.status).toBe(200);
+
+      const pnlPeriod = await http(
+        'GET',
+        `/reports/profit-and-loss?company_id=${companyId}&period_start=2026-12-01&period_end=2026-12-31`,
+      );
+      expect(pnlPeriod.status).toBe(200);
+
+      const packResponse = await fetch(
+        `${baseUrl}/reports/audit-pack?company_id=${companyId}&period_id=${decPeriodId}`,
+        { headers: { Authorization: `Bearer ${accessToken}` } },
+      );
+      expect(packResponse.status).toBe(200);
+      const packBuf = Buffer.from(await packResponse.arrayBuffer());
+      const packFiles = unzipStore(packBuf);
+      expect(packFiles.get('trial-balance.csv')).toBe(
+        flattenReportToCsv(tbDirect.json),
+      );
+      expect(packFiles.get('balance-sheet.csv')).toBe(
+        flattenReportToCsv(bsFinal),
+      );
+      expect(packFiles.get('profit-and-loss.csv')).toBe(
+        flattenReportToCsv(pnlPeriod.json),
+      );
+      expect(packFiles.get('general-ledger.csv')).toBe(
+        flattenReportToCsv(glDirect.json),
       );
     });
   },

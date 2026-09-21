@@ -12,10 +12,12 @@ SOURCE OF TRUTH — when they disagree, STOP and report the conflict (do not pic
 3. The **module feature spec for the code being changed** (not a later module's spec):
    - A — `feature-spec.md`
    - H1 — `feature-spec-1.1.H1.md`
+   - H2 — `feature-spec-1.1.H2.md` (built 2026-09-20; H2-1…H2-15)
    - C — `feature-spec-1.1.C.md`
    - D — `feature-spec-1_1_D.md`
    - E — `feature-spec-1_1_E.md` (built; §7 deferrals remain)
    - F — `feature-spec-1_1_F.md` (built 2026-09-16; §0 residuals: 10k VD confirm, Box 2/CAS screenshot)
+   - G — `feature-spec-1_1_G.md` (built 2026-09-18)
 4. `Module_1.1_Build_Order_Scope.md` — sequencing only, never a substitute for a feature spec
 
 Stale counts, intros, or manuals (`README.md`, `INFINITY_ACCOUNTING_DOCUMENTATION.md`, older §7.2 snapshots) are **not** authoritative over (1)–(3).
@@ -25,4 +27,4 @@ HARD RULES:
 - Every non-trivial piece of business logic (validation, calculation, workflow rule) must have a code comment citing which document and section it implements, e.g. `// [Rules §1.3] no hard deletes, reversing entries only`.
 - Never reshape existing `schema.sql` tables/constraints to make Nest easier. If a **ratified module spec** requires additive DDL, use `.cursor/workflows/database-change.md` (update `schema.sql` and any matching `apply_*.sql`). If the spec is silent or ambiguous, stop and ask — do not invent columns.
 - All monetary values are `numeric(18,2)` AED unless a document states otherwise.
-- Implement only the module the user scoped. Built: A, H1, C1 core, D, E, F. Do **not** implement B, G, H-remainder, C §9 presentation, D §7 deferrals, or E §7 deferrals unless the user explicitly scopes that work. Do not treat "related" as in-scope.
+- Implement only the module the user scoped. Built: A, H1, H2, C1 core, D, E, F, G. Do **not** implement B, leftover H-R items (H-R2/H-R4/H-R7/H-R8/PDF-XLSX/H-R14/H-R15), C §9 presentation, D §7 deferrals, or E §7 deferrals unless the user explicitly scopes that work. Do not treat "related" as in-scope.

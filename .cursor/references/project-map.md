@@ -46,7 +46,7 @@ Fresh DB: `schema.sql` → `seed_finalized_coa_demo_company_0002.sql` → option
 | `goods-receipts/` | E GRNs + nested lines |
 | `bills/` | E bills + match/issue/approve/void |
 | `supplier-payments/` | E payments, runs, statement lines |
-| `reports/` | H1 reads + D AR + E AP + F VAT report RPCs |
+| `reports/` | H1 + H2 reads + D AR + E AP + F VAT report RPCs |
 | `vat/` | F VAT 201, apportionment, CAS, claims, VD |
 | `ct/` | G UAE CT 9% provision, SBR monitor, related-party log |
 | `test/`, `e2e/` | Shared mint + packs |
@@ -77,13 +77,13 @@ F: `calculate_vat_return`, `submit_vat_return_for_review`, `approve_vat_return`,
 
 G: `get_ct_taxable_profit_estimate`, `create_ct_provision_entry`, `check_small_business_relief_eligibility`, `summarize_free_zone_income`, `record_related_party_transaction`, `prepare_ct_return_summary`, `check_ct_penalty_exposure`. `create_year_end_closing_entry` extended with `p_skip_ct_check` / `p_skip_reason` (G-22).
 
-Reports: `get_trial_balance_for_period`, `get_balance_sheet`, `get_profit_and_loss`, `get_general_ledger`, `get_customer_ledger`, `get_aged_receivables`, `check_customer_credit_limit`, `get_customer_payment_history`. Helper: `is_ledger_truth_status`, `account_signed_balance`.
+Reports: `get_trial_balance_for_period`, `get_trial_balance_for_range`, `get_balance_sheet`, `get_profit_and_loss`, `get_profit_and_loss_comparison`, `get_general_ledger` (6-arg: optional `limit`/`offset`), `get_expense_analysis`, `get_sales_by_customer` (ex-VAT `line_net_amount`; H2-15), `get_customer_ledger`, `get_aged_receivables`, `check_customer_credit_limit`, `get_customer_payment_history`. Helper: `is_ledger_truth_status`, `account_signed_balance`. Executive summary and audit pack are Nest composition (no extra SQL).
 
 ## HTTP surface (prefix)
 
 `/accounts`, `/accounting-periods`, `/journal-entries`, `/journal-lines`, `/recurring-journal-templates`, `/audit-log`, `/customers`, `/quotations`, `/quotation-lines`, `/invoices`, `/invoice-lines`, `/credit-notes`, `/credit-note-lines`, `/payments`, `/payment-applications`, `/public-holidays`, `/suppliers`, `/purchase-orders`, `/goods-receipts`, `/bills`, `/supplier-payments`, `/supplier-payment-runs`, `/supplier-statement-lines`, `/vat-returns`, `/vat-apportionment`, `/capital-goods-projects`, `/capital-goods-items`, `/bad-debt-relief-claims`, `/vat-voluntary-disclosures`, `/ct/*`, `/reports/*`.
 
-Reports: trial-balance, balance-sheet, profit-and-loss, general-ledger, customer-ledger, customer-statement (data), aged-receivables, credit-limit-check, customer-payment-history, supplier-ledger, aged-payables, bills-due, reconcile-supplier-statement, invoice-register, vat-registration-threshold, vat-audit-pack/:id.
+Reports: trial-balance, trial-balance-range, balance-sheet, profit-and-loss, profit-and-loss-comparison, general-ledger (`limit`/`offset` optional), expense-analysis, sales-by-customer, executive-summary, audit-pack, customer-ledger, customer-statement (data), aged-receivables, credit-limit-check, customer-payment-history, supplier-ledger, aged-payables, bills-due, reconcile-supplier-statement, invoice-register, vat-registration-threshold, vat-audit-pack/:id. `?format=csv` on H1 four + H2 report routes (not D/E/F reports).
 
 Journal extras: `POST /journal-entries/accrue-unbilled-receipts` (E-21, static path before `:id`).
 
@@ -112,7 +112,7 @@ Journal extras: `POST /journal-entries/accrue-unbilled-receipts` (E-21, static p
 
 ## Tests
 
-Live DB; skip without keys. Shared setup: `src/test/integration-company.setup.ts`, `src/e2e/e2e-company.setup.ts`. `controller-auth-coverage` **212** guarded routes. F: `src/vat/vat.service.spec.ts` (F-8/F-10 roles) + `src/vat/vat-returns.integration.spec.ts` (calculate/file/lock). G: `src/ct/ct.service.spec.ts` + `src/ct/ct.integration.spec.ts`. Invoice Issue and membership isolation cover F Issue guards.
+Live DB; skip without keys. Shared setup: `src/test/integration-company.setup.ts`, `src/e2e/e2e-company.setup.ts`. `controller-auth-coverage` **218** guarded routes. F: `src/vat/vat.service.spec.ts` (F-8/F-10 roles) + `src/vat/vat-returns.integration.spec.ts` (calculate/file/lock). G: `src/ct/ct.service.spec.ts` + `src/ct/ct.integration.spec.ts`. H2: `src/reports/reports.service.spec.ts` + `src/reports/reports.h1-integrity-sweep.integration.spec.ts`. Invoice Issue and membership isolation cover F Issue guards.
 
 ## Scripts
 

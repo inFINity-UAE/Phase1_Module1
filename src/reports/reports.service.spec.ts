@@ -1,6 +1,7 @@
 import { BadRequestException } from '@nestjs/common';
 import {
   ReportsService,
+  precedingSameLengthPeriod,
   serverAsOfDateToday,
   summarizeBalanceSheet,
   summarizeProfitAndLoss,
@@ -23,6 +24,10 @@ describe('ReportsService (period trial balance)', () => {
       getBalanceSheet: jest.fn().mockResolvedValue([]),
       getProfitAndLoss: jest.fn().mockResolvedValue([]),
       getGeneralLedger: jest.fn().mockResolvedValue([]),
+      getTrialBalanceForRange: jest.fn().mockResolvedValue([]),
+      getProfitAndLossComparison: jest.fn().mockResolvedValue([]),
+      getExpenseAnalysis: jest.fn().mockResolvedValue([]),
+      getSalesByCustomer: jest.fn().mockResolvedValue([]),
       getCustomerLedger: jest.fn().mockResolvedValue([]),
       getAgedReceivables: jest.fn().mockResolvedValue([]),
       checkCustomerCreditLimit: jest.fn().mockResolvedValue({
@@ -130,6 +135,10 @@ describe('ReportsService (balance sheet)', () => {
       getBalanceSheet: jest.fn().mockResolvedValue([]),
       getProfitAndLoss: jest.fn().mockResolvedValue([]),
       getGeneralLedger: jest.fn().mockResolvedValue([]),
+      getTrialBalanceForRange: jest.fn().mockResolvedValue([]),
+      getProfitAndLossComparison: jest.fn().mockResolvedValue([]),
+      getExpenseAnalysis: jest.fn().mockResolvedValue([]),
+      getSalesByCustomer: jest.fn().mockResolvedValue([]),
       getCustomerLedger: jest.fn().mockResolvedValue([]),
       getAgedReceivables: jest.fn().mockResolvedValue([]),
       checkCustomerCreditLimit: jest.fn().mockResolvedValue({
@@ -235,6 +244,10 @@ describe('ReportsService (profit and loss)', () => {
       getBalanceSheet: jest.fn(),
       getProfitAndLoss: jest.fn().mockResolvedValue([]),
       getGeneralLedger: jest.fn().mockResolvedValue([]),
+      getTrialBalanceForRange: jest.fn().mockResolvedValue([]),
+      getProfitAndLossComparison: jest.fn().mockResolvedValue([]),
+      getExpenseAnalysis: jest.fn().mockResolvedValue([]),
+      getSalesByCustomer: jest.fn().mockResolvedValue([]),
       getCustomerLedger: jest.fn().mockResolvedValue([]),
       getAgedReceivables: jest.fn().mockResolvedValue([]),
       checkCustomerCreditLimit: jest.fn().mockResolvedValue({
@@ -351,6 +364,10 @@ describe('ReportsService (general ledger)', () => {
       getBalanceSheet: jest.fn().mockResolvedValue([]),
       getProfitAndLoss: jest.fn().mockResolvedValue([]),
       getGeneralLedger: jest.fn().mockResolvedValue([]),
+      getTrialBalanceForRange: jest.fn().mockResolvedValue([]),
+      getProfitAndLossComparison: jest.fn().mockResolvedValue([]),
+      getExpenseAnalysis: jest.fn().mockResolvedValue([]),
+      getSalesByCustomer: jest.fn().mockResolvedValue([]),
       getCustomerLedger: jest.fn().mockResolvedValue([]),
       getAgedReceivables: jest.fn().mockResolvedValue([]),
       checkCustomerCreditLimit: jest.fn().mockResolvedValue({
@@ -428,6 +445,54 @@ describe('ReportsService (general ledger)', () => {
       ACCOUNT_ID,
       '2026-01-01',
       '2026-01-31',
+      null,
+      0,
     );
+  });
+
+  it('returns a page object when limit is set and strips total_count from rows', async () => {
+    repository.getGeneralLedger.mockResolvedValue([
+      {
+        journal_line_id: 'l1',
+        journal_entry_id: 'e1',
+        entry_number: 1,
+        entry_date: '2026-01-05',
+        narration: null,
+        entry_status: 'posted',
+        account_id: ACCOUNT_ID,
+        account_number: '1020',
+        account_name: 'Bank',
+        normal_balance: 'debit',
+        line_number: 1,
+        debit: 100,
+        credit: 0,
+        line_balance: 100,
+        running_balance: 100,
+        total_count: 25,
+      },
+    ]);
+
+    const page = (await service.getGeneralLedger(
+      COMPANY_ID,
+      undefined,
+      undefined,
+      undefined,
+      10,
+      0,
+    )) as { rows: Array<Record<string, unknown>>; total_count: number };
+
+    expect(page.total_count).toBe(25);
+    expect(page.rows).toHaveLength(1);
+    expect(page.rows[0].running_balance).toBe(100);
+    expect(page.rows[0]).not.toHaveProperty('total_count');
+  });
+});
+
+describe('ReportsService (H2 helpers)', () => {
+  it('precedingSameLengthPeriod maps January to the prior 31 days (1–31 Dec)', () => {
+    expect(precedingSameLengthPeriod('2026-01-01', '2026-01-31')).toEqual({
+      start: '2025-12-01',
+      end: '2025-12-31',
+    });
   });
 });

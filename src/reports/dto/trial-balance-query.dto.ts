@@ -1,11 +1,12 @@
 import { IsBoolean, IsOptional, IsUUID } from 'class-validator';
 import { Transform } from 'class-transformer';
+import { ReportFormatQuery } from './report-format';
 
 /**
  * [feature-spec-1.1.H1.md decision #1] Period Trial Balance query.
  * company_id + period_id required; include_zero_balance defaults false.
  */
-export class TrialBalanceQueryDto {
+export class TrialBalanceQueryDto extends ReportFormatQuery {
   @IsUUID()
   company_id!: string;
 

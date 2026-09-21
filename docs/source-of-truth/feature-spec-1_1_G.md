@@ -1124,7 +1124,8 @@ created_by uuid)` (G-33).
 - **Multi-entity UAE tax-group consolidation.**
 - **Auto-posting CT penalties** — G-12 warn only, mirrors F-28.
 - **PDF/XLSX/CSV rendering mechanics generally** — H-remainder, mirrors
-  F-9's split.
+  F-9's split. Standing 2026-09-20: H2-7 closed CSV for H1 four + H2
+  report routes only; CT return PDF/XLSX remains deferred.
 - **SBR election recording** — G-4 monitors eligibility; does not
   record or enforce an election.
 - **QFZP eligibility determination as a system-enforced gate** — G-24/

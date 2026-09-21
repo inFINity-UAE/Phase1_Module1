@@ -9762,13 +9762,17 @@ grant execute on function get_profit_and_loss(uuid, date, date) to service_role;
 -- entry_number, line_number. Running balance is ALWAYS true cumulative
 -- (partitioned by account); date filters only limit which rows are
 -- returned — they do NOT reset the running balance to zero.
--- Pagination: deferred (same as GET /accounts and GET /journal-entries).
--- SECURITY INVOKER + §5.1 grants.
+-- [feature-spec-1.1.H2.md H2-3 / H2-11] Optional p_limit / p_offset
+-- (null / 0). LIMIT/OFFSET only on the outer SELECT after running
+-- balance is computed. total_count is COUNT(*) over the same
+-- date-filtered set. SECURITY INVOKER + §5.1 grants.
 create or replace function get_general_ledger(
   p_company_id uuid,
   p_account_id uuid default null,
   p_date_from date default null,
-  p_date_to date default null
+  p_date_to date default null,
+  p_limit int default null,
+  p_offset int default 0
 )
 returns table (
   journal_line_id uuid,
@@ -9785,7 +9789,8 @@ returns table (
   debit numeric(18,2),
   credit numeric(18,2),
   line_balance numeric(18,2),
-  running_balance numeric(18,2)
+  running_balance numeric(18,2),
+  total_count bigint
 )
 language plpgsql
 security invoker
@@ -9799,6 +9804,14 @@ begin
 
   if p_date_from is not null and p_date_to is not null and p_date_to < p_date_from then
     raise exception 'INVALID_DATE_RANGE';
+  end if;
+
+  if p_limit is not null and p_limit < 0 then
+    raise exception 'INVALID_LIMIT';
+  end if;
+
+  if p_offset is not null and p_offset < 0 then
+    raise exception 'INVALID_OFFSET';
   end if;
 
   if p_account_id is not null then
@@ -9845,34 +9858,418 @@ begin
         rows between unbounded preceding and current row
       )::numeric(18,2) as running_balance
     from ledger_lines ll
+  ),
+  filtered as (
+    select
+      wr.*,
+      count(*) over () as total_count
+    from with_running wr
+    where (p_date_from is null or wr.entry_date >= p_date_from)
+      and (p_date_to is null or wr.entry_date <= p_date_to)
   )
   select
-    wr.journal_line_id,
-    wr.journal_entry_id,
-    wr.entry_number,
-    wr.entry_date,
-    wr.narration,
-    wr.entry_status,
-    wr.account_id,
-    wr.account_number,
-    wr.account_name,
-    wr.normal_balance,
-    wr.line_number,
-    wr.debit,
-    wr.credit,
-    wr.line_balance,
-    wr.running_balance
-  from with_running wr
-  where (p_date_from is null or wr.entry_date >= p_date_from)
-    and (p_date_to is null or wr.entry_date <= p_date_to)
-  order by wr.account_number, wr.entry_date, wr.entry_number, wr.line_number;
+    f.journal_line_id,
+    f.journal_entry_id,
+    f.entry_number,
+    f.entry_date,
+    f.narration,
+    f.entry_status,
+    f.account_id,
+    f.account_number,
+    f.account_name,
+    f.normal_balance,
+    f.line_number,
+    f.debit,
+    f.credit,
+    f.line_balance,
+    f.running_balance,
+    f.total_count
+  from filtered f
+  order by f.account_number, f.entry_date, f.entry_number, f.line_number
+  offset coalesce(p_offset, 0)
+  limit p_limit;
 end;
 $$;
 
-revoke all on function get_general_ledger(uuid, uuid, date, date) from public;
-revoke all on function get_general_ledger(uuid, uuid, date, date) from authenticated;
-revoke all on function get_general_ledger(uuid, uuid, date, date) from anon;
-grant execute on function get_general_ledger(uuid, uuid, date, date) to service_role;
+revoke all on function get_general_ledger(uuid, uuid, date, date, int, int) from public;
+revoke all on function get_general_ledger(uuid, uuid, date, date, int, int) from authenticated;
+revoke all on function get_general_ledger(uuid, uuid, date, date, int, int) from anon;
+grant execute on function get_general_ledger(uuid, uuid, date, date, int, int) to service_role;
+
+-- ============================================================================
+-- 9a1b. Module 1.1.H2 extended reports (feature-spec-1.1.H2.md H2-1…H2-5)
+-- SECURITY INVOKER + §5.1 grants. No new tables.
+-- ============================================================================
+
+-- [feature-spec-1.1.H2.md H2-1 / H2-9] P&L comparison: call
+-- get_profit_and_loss twice, FULL OUTER JOIN on account_id, missing
+-- side coalesced to 0. Do not copy the P&L CTE.
+create or replace function get_profit_and_loss_comparison(
+  p_company_id uuid,
+  p_period_a_start date,
+  p_period_a_end date,
+  p_period_b_start date,
+  p_period_b_end date
+)
+returns table (
+  account_id uuid,
+  account_number char(4),
+  account_name text,
+  category account_category,
+  normal_balance normal_balance_type,
+  period_a_total_debit numeric(18,2),
+  period_a_total_credit numeric(18,2),
+  period_a_balance numeric(18,2),
+  period_b_total_debit numeric(18,2),
+  period_b_total_credit numeric(18,2),
+  period_b_balance numeric(18,2),
+  variance numeric(18,2)
+)
+language plpgsql
+security invoker
+stable
+set search_path = public, pg_temp
+as $$
+begin
+  if p_company_id is null
+     or p_period_a_start is null or p_period_a_end is null
+     or p_period_b_start is null or p_period_b_end is null then
+    raise exception 'PERIOD_RANGE_REQUIRED';
+  end if;
+
+  if p_period_a_end < p_period_a_start or p_period_b_end < p_period_b_start then
+    raise exception 'INVALID_PERIOD_RANGE';
+  end if;
+
+  return query
+  with period_a as (
+    select * from get_profit_and_loss(p_company_id, p_period_a_start, p_period_a_end)
+  ),
+  period_b as (
+    select * from get_profit_and_loss(p_company_id, p_period_b_start, p_period_b_end)
+  )
+  select
+    coalesce(a.account_id, b.account_id),
+    coalesce(a.account_number, b.account_number),
+    coalesce(a.account_name, b.account_name),
+    coalesce(a.category, b.category),
+    coalesce(a.normal_balance, b.normal_balance),
+    coalesce(a.total_debit, 0)::numeric(18,2),
+    coalesce(a.total_credit, 0)::numeric(18,2),
+    coalesce(a.balance, 0)::numeric(18,2),
+    coalesce(b.total_debit, 0)::numeric(18,2),
+    coalesce(b.total_credit, 0)::numeric(18,2),
+    coalesce(b.balance, 0)::numeric(18,2),
+    (coalesce(a.balance, 0) - coalesce(b.balance, 0))::numeric(18,2)
+  from period_a a
+  full outer join period_b b on b.account_id = a.account_id
+  order by coalesce(a.category, b.category), coalesce(a.account_number, b.account_number);
+end;
+$$;
+
+revoke all on function get_profit_and_loss_comparison(uuid, date, date, date, date) from public;
+revoke all on function get_profit_and_loss_comparison(uuid, date, date, date, date) from authenticated;
+revoke all on function get_profit_and_loss_comparison(uuid, date, date, date, date) from anon;
+grant execute on function get_profit_and_loss_comparison(uuid, date, date, date, date) to service_role;
+
+-- [feature-spec-1.1.H2.md H2-2 / H2-10] Range TB — same opening/closing
+-- definitions as get_trial_balance_for_period, keyed on caller dates.
+create or replace function get_trial_balance_for_range(
+  p_company_id uuid,
+  p_range_start date,
+  p_range_end date,
+  p_include_zero_balance boolean default false
+)
+returns table (
+  account_id uuid,
+  account_number char(4),
+  account_name text,
+  category account_category,
+  normal_balance normal_balance_type,
+  opening_debit numeric(18,2),
+  opening_credit numeric(18,2),
+  opening_balance numeric(18,2),
+  period_debit numeric(18,2),
+  period_credit numeric(18,2),
+  closing_debit numeric(18,2),
+  closing_credit numeric(18,2),
+  closing_balance numeric(18,2)
+)
+language plpgsql
+security invoker
+stable
+set search_path = public, pg_temp
+as $$
+begin
+  if p_company_id is null or p_range_start is null or p_range_end is null then
+    raise exception 'PERIOD_RANGE_REQUIRED';
+  end if;
+
+  if p_range_end < p_range_start then
+    raise exception 'INVALID_PERIOD_RANGE';
+  end if;
+
+  return query
+  with opening as (
+    select
+      jl.account_id,
+      coalesce(sum(jl.debit), 0)::numeric(18,2) as debit,
+      coalesce(sum(jl.credit), 0)::numeric(18,2) as credit
+    from journal_lines jl
+    join journal_entries je on je.id = jl.journal_entry_id
+    where je.company_id = p_company_id
+      and is_ledger_truth_status(je.status)
+      and je.entry_date < p_range_start
+    group by jl.account_id
+  ),
+  period_act as (
+    select
+      jl.account_id,
+      coalesce(sum(jl.debit), 0)::numeric(18,2) as debit,
+      coalesce(sum(jl.credit), 0)::numeric(18,2) as credit
+    from journal_lines jl
+    join journal_entries je on je.id = jl.journal_entry_id
+    where je.company_id = p_company_id
+      and is_ledger_truth_status(je.status)
+      and je.entry_date >= p_range_start
+      and je.entry_date <= p_range_end
+    group by jl.account_id
+  )
+  select
+    a.id,
+    a.account_number,
+    a.account_name,
+    a.category,
+    a.normal_balance,
+    coalesce(o.debit, 0)::numeric(18,2),
+    coalesce(o.credit, 0)::numeric(18,2),
+    (case a.normal_balance
+      when 'debit'  then coalesce(o.debit, 0) - coalesce(o.credit, 0)
+      when 'credit' then coalesce(o.credit, 0) - coalesce(o.debit, 0)
+    end)::numeric(18,2),
+    coalesce(p.debit, 0)::numeric(18,2),
+    coalesce(p.credit, 0)::numeric(18,2),
+    (coalesce(o.debit, 0) + coalesce(p.debit, 0))::numeric(18,2),
+    (coalesce(o.credit, 0) + coalesce(p.credit, 0))::numeric(18,2),
+    (case a.normal_balance
+      when 'debit' then
+        (coalesce(o.debit, 0) + coalesce(p.debit, 0))
+        - (coalesce(o.credit, 0) + coalesce(p.credit, 0))
+      when 'credit' then
+        (coalesce(o.credit, 0) + coalesce(p.credit, 0))
+        - (coalesce(o.debit, 0) + coalesce(p.debit, 0))
+    end)::numeric(18,2)
+  from accounts a
+  left join opening o on o.account_id = a.id
+  left join period_act p on p.account_id = a.id
+  where a.company_id = p_company_id
+    and (
+      p_include_zero_balance
+      or coalesce(o.debit, 0) <> 0
+      or coalesce(o.credit, 0) <> 0
+      or coalesce(p.debit, 0) <> 0
+      or coalesce(p.credit, 0) <> 0
+    )
+  order by a.account_number;
+end;
+$$;
+
+revoke all on function get_trial_balance_for_range(uuid, date, date, boolean) from public;
+revoke all on function get_trial_balance_for_range(uuid, date, date, boolean) from authenticated;
+revoke all on function get_trial_balance_for_range(uuid, date, date, boolean) from anon;
+grant execute on function get_trial_balance_for_range(uuid, date, date, boolean) to service_role;
+
+-- [feature-spec-1.1.H2.md H2-4 / H2-12] Expense analysis — monthly
+-- buckets of P&L expense balances grouped by accounts.sub_category.
+create or replace function get_expense_analysis(
+  p_company_id uuid,
+  p_fiscal_year integer
+)
+returns table (
+  month_start date,
+  sub_category text,
+  amount numeric(18,2),
+  mom_delta numeric(18,2)
+)
+language plpgsql
+security invoker
+stable
+set search_path = public, pg_temp
+as $$
+declare
+  v_fy_start date;
+  v_fy_end date;
+begin
+  if p_company_id is null then
+    raise exception 'COMPANY_ID_REQUIRED';
+  end if;
+  if p_fiscal_year is null then
+    raise exception 'FISCAL_YEAR_REQUIRED';
+  end if;
+
+  select min(period_start), max(period_end)
+    into v_fy_start, v_fy_end
+    from accounting_periods
+   where company_id = p_company_id
+     and fiscal_year = p_fiscal_year;
+  if v_fy_end is null then
+    raise exception 'NO_PERIOD_FOR_FISCAL_YEAR';
+  end if;
+
+  return query
+  with months as (
+    select generate_series(
+      date_trunc('month', v_fy_start)::date,
+      date_trunc('month', v_fy_end)::date,
+      interval '1 month'
+    )::date as bucket_month
+  ),
+  month_bounds as (
+    select
+      bucket_month,
+      greatest(bucket_month, v_fy_start) as range_start,
+      least((bucket_month + interval '1 month' - interval '1 day')::date, v_fy_end) as range_end
+    from months
+  ),
+  monthly as (
+    select
+      mb.bucket_month,
+      coalesce(nullif(a.sub_category, ''), 'Uncategorized') as bucket_sub,
+      coalesce(sum(pnl.balance), 0)::numeric(18,2) as bucket_amount
+    from month_bounds mb
+    cross join lateral get_profit_and_loss(p_company_id, mb.range_start, mb.range_end) pnl
+    join accounts a on a.id = pnl.account_id
+    where pnl.category = 'expense'
+    group by mb.bucket_month, coalesce(nullif(a.sub_category, ''), 'Uncategorized')
+  ),
+  subcats as (
+    select distinct m.bucket_sub from monthly m
+  ),
+  densified as (
+    select
+      mb.bucket_month,
+      s.bucket_sub,
+      coalesce(m.bucket_amount, 0)::numeric(18,2) as bucket_amount
+    from month_bounds mb
+    cross join subcats s
+    left join monthly m
+      on m.bucket_month = mb.bucket_month
+     and m.bucket_sub = s.bucket_sub
+  )
+  select
+    d.bucket_month,
+    d.bucket_sub,
+    d.bucket_amount,
+    (d.bucket_amount - coalesce(
+      lag(d.bucket_amount) over (partition by d.bucket_sub order by d.bucket_month),
+      0
+    ))::numeric(18,2)
+  from densified d
+  order by d.bucket_sub, d.bucket_month;
+end;
+$$;
+
+revoke all on function get_expense_analysis(uuid, integer) from public;
+revoke all on function get_expense_analysis(uuid, integer) from authenticated;
+revoke all on function get_expense_analysis(uuid, integer) from anon;
+grant execute on function get_expense_analysis(uuid, integer) to service_role;
+
+-- [feature-spec-1.1.H2.md H2-5 / H2-13 / H2-14 / H2-15] Sales by customer
+-- from invoice line net on Sales Revenue (plus FZ 4300/4310/4320), net of
+-- credit-note line net via credit_notes.customer_id. G-37 status filter.
+-- H2-15: do not sum line_total (gross = net + VAT).
+create or replace function get_sales_by_customer(
+  p_company_id uuid,
+  p_period_start date,
+  p_period_end date
+)
+returns table (
+  customer_id uuid,
+  total_revenue numeric(18,2),
+  invoice_count integer,
+  average_invoice_value numeric(18,2)
+)
+language plpgsql
+security invoker
+stable
+set search_path = public, pg_temp
+as $$
+begin
+  if p_company_id is null or p_period_start is null or p_period_end is null then
+    raise exception 'PERIOD_RANGE_REQUIRED';
+  end if;
+
+  if p_period_end < p_period_start then
+    raise exception 'INVALID_PERIOD_RANGE';
+  end if;
+
+  return query
+  with sales_accounts as (
+    select a.id
+    from accounts a
+    join companies c on c.id = a.company_id
+    where a.company_id = p_company_id
+      and a.sub_category not in ('Investment Income', 'Other Income', 'FX & Other')
+      and (
+        a.sub_category = 'Sales Revenue'
+        or (
+          c.is_free_zone_entity
+          and a.account_number in ('4300', '4310', '4320')
+        )
+      )
+  ),
+  inv as (
+    select
+      i.customer_id,
+      coalesce(sum(line_net_amount(
+        il.quantity, il.unit_price, il.discount_percent, il.discount_amount
+      )), 0)::numeric(18,2) as revenue,
+      count(distinct i.id)::integer as invoice_count
+    from invoices i
+    join invoice_lines il on il.invoice_id = i.id
+    join sales_accounts sa on sa.id = il.income_account_id
+    where i.company_id = p_company_id
+      and i.status not in ('draft', 'void')
+      and i.invoice_date >= p_period_start
+      and i.invoice_date <= p_period_end
+    group by i.customer_id
+  ),
+  cn as (
+    select
+      n.customer_id,
+      coalesce(sum(line_net_amount(
+        nl.quantity, nl.unit_price, nl.discount_percent, nl.discount_amount
+      )), 0)::numeric(18,2) as credit
+    from credit_notes n
+    join credit_note_lines nl on nl.credit_note_id = n.id
+    join sales_accounts sa on sa.id = nl.income_account_id
+    where n.company_id = p_company_id
+      and n.status not in ('draft', 'void')
+      and n.credit_note_date >= p_period_start
+      and n.credit_note_date <= p_period_end
+    group by n.customer_id
+  )
+  select
+    coalesce(inv.customer_id, cn.customer_id),
+    (coalesce(inv.revenue, 0) - coalesce(cn.credit, 0))::numeric(18,2),
+    coalesce(inv.invoice_count, 0),
+    case
+      when coalesce(inv.invoice_count, 0) = 0 then null
+      else round(
+        (coalesce(inv.revenue, 0) - coalesce(cn.credit, 0)) / inv.invoice_count,
+        2
+      )::numeric(18,2)
+    end
+  from inv
+  full outer join cn on cn.customer_id = inv.customer_id
+  order by coalesce(inv.customer_id, cn.customer_id);
+end;
+$$;
+
+revoke all on function get_sales_by_customer(uuid, date, date) from public;
+revoke all on function get_sales_by_customer(uuid, date, date) from authenticated;
+revoke all on function get_sales_by_customer(uuid, date, date) from anon;
+grant execute on function get_sales_by_customer(uuid, date, date) to service_role;
 
 -- ============================================================================
 -- 9a2. Module 1.1.D AR reports (feature-spec-1_1_D.md section 5 / D-P12)

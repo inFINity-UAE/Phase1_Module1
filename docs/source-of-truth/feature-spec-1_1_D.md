@@ -994,7 +994,8 @@ needed beyond `paid_at`.
   Order §3. D computes and flags `vat_relief_eligible` (§4.5b) only.
 - **PDF/XLSX/CSV export mechanics** generally — Build Order §8
   (Extended Financial Reports, H-remainder), consistent with §5.4's
-  split.
+  split. Standing 2026-09-20: H2-7 closed CSV for H1 four + H2 report
+  routes only; D statement PDF and D report CSV remain deferred.
 - **Automated dunning/reminder delivery** — presentation/delivery
   category, same bucket as C §9.
 - **Multi-currency** payments or advances — not mentioned anywhere in

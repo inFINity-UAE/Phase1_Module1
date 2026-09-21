@@ -1400,7 +1400,9 @@ D, not layered on top of it.
   `2210` / `5800` / `5580` untouched.
 - **OCR / automated ingestion** of bills, POs, GRNs, or supplier
   statements — Module B (Build Order §5).
-- **PDF/XLSX/CSV export** — Build Order §8 (H-remainder).
+- **PDF/XLSX/CSV export** — Build Order §8 (H-remainder). Standing
+  2026-09-20: H2-7 closed CSV for H1 four + H2 report routes only; E
+  report CSV and PDF/XLSX remain deferred.
 - **Duplicate-bill hard-block** — E-8 stays alert-only. Match-payment
   override is in scope (E-25); do not extend that override to
   duplicates unless E-29+ says so.

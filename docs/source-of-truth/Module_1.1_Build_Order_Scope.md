@@ -1,8 +1,9 @@
 # inFINity — Module 1.1 Build Order & Scope Document
 
 Companion to `feature-spec.md` (Module 1.1.A), `feature-spec-1.1.H1.md`,
-`feature-spec-1.1.C.md`, `feature-spec-1_1_D.md`,
-`feature-spec-1_1_E.md`, and `feature-spec-1_1_F.md`. Module 1.1.A
+`feature-spec-1.1.H2.md`, `feature-spec-1.1.C.md`, `feature-spec-1_1_D.md`,
+`feature-spec-1_1_E.md`, `feature-spec-1_1_F.md`, and
+`feature-spec-1_1_G.md`. Module 1.1.A
 (Double-Entry Accounting Engine) is complete and signed off as of
 decision #63. Module 1.1.H1 (Core Financial Reports) is complete and
 signed off as of H1 decision #6 (2026-08-30). Module 1.1.C **C1 core**
@@ -14,6 +15,9 @@ intentional deferrals to F / H-remainder / later admin work. Module
 1.1.E (Accounts Payable) is complete as of E-1…E-28 (2026-09-13) —
 Bill entity is Option A (`bills` table); §7 deferrals remain; see §4.
 Module 1.1.F is built 2026-09-16 (F-1…F-44); §0 residuals remain; see §6.
+Module 1.1.G is built 2026-09-18 — `feature-spec-1_1_G.md`. Module
+1.1.H2 (Extended Financial Reports) is built 2026-09-20
+(H2-1…H2-15) — `feature-spec-1.1.H2.md`; remaining H-R items in §8.
 This document scopes what comes next, in what order, and why.
 
 **Source:** `inFINity Complete Phase-Wise Feature List — All Modules &
@@ -39,8 +43,8 @@ and so open questions get resolved before they're discovered mid-build.
 | 4 | Accounts Payable | E | 0, (3's mirror — pattern only) | ✅ **Done** (E-1…E-28, 2026-09-13) — `feature-spec-1_1_E.md`; §7 deferrals remain; full D-P13 suite not re-run on landing |
 | 5 | AI Document Processing & OCR | B | 0, 4 | Queued |
 | 6 | UAE VAT Compliance Engine | F | 0, 2, 4, 1 | ✅ **Done** (2026-09-16) — `feature-spec-1_1_F.md`; §0 residuals: 10k VD confirm, Box 2/CAS screenshot |
-| 7 | UAE Corporate Tax Add-On | G | 0, 1, 6 | Queued |
-| 8 | Extended Financial Reports | H (remainder — see §8) | 2, 3, 4, 6, 7 | Last |
+| 7 | UAE Corporate Tax Add-On | G | 0, 1, 6 | ✅ **Done** (2026-09-18) — `feature-spec-1_1_G.md` |
+| 8 | Extended Financial Reports | H (remainder — see §8) | 2, 3, 4, 6, 7 | ✅ **H2 done** (2026-09-20, H2-1…H2-15) — `feature-spec-1.1.H2.md`; H-R2/H-R4/H-R7/H-R8/PDF-XLSX/H-R14/H-R15 remain |
 
 **Verification posture (2026-09-10, Module D sign-off):** full
 `schema.sql` fresh-DB apply on Testing 1.1.A passed clean (+ COA seed +
@@ -59,23 +63,26 @@ Incremental `apply_*.sql` patches were verified then removed — fresh DB
 single-period P&L, General Ledger line listing, cross-report integrity
 sweep (H1-5 passed clean; surfaced and fixed Module 1.1.A YE aggregation
 bug #61). Nest routes: `GET /reports/trial-balance`, `/balance-sheet`,
-`/profit-and-loss`, `/general-ledger`. Deferred to step 8 / H remainder:
-prior-period comparison, GL pagination, cash flow, aged AR/AP, exports,
-scheduled delivery — see H1 Known open items table.
+`/profit-and-loss`, `/general-ledger`. Full Module H completed vs open
+(H-R1…H-R16) is in `feature-spec-1.1.H1.md` decision #7 (2026-09-19),
+standing table updated by #8 (2026-09-20).
+Aged AR/AP later completed under D/E (`GET /reports/aged-receivables`,
+`/aged-payables`). H2 (2026-09-20) closed a subset of the remainder
+(see §8); H1 TB/BS/P&L/GL contracts are unchanged.
 
 **Scope for this pass:** P&L Statement, Balance Sheet, Trial Balance,
 General Ledger Report — the four statements that are pure read-queries
 over what Module 1.1.A already has (`journal_lines`, `accounts`,
 `v_trial_balance`).
 
-**Explicitly deferred to step 8:** Statement of Cash Flows (needs
-categorization logic not yet designed — direct/indirect method), Aged
-Receivables/Payables (need D/E), Sales by customer/product/salesperson
-(needs C/D), Expense analysis trends, Executive summary, Comparative
-periods, Custom date range, Export (PDF/XLSX/CSV), Scheduled delivery,
-Accountant share link, Audit-ready pack. All of these either aggregate
-across not-yet-built modules or are presentation/delivery features that
-should wrap a stable reporting core rather than be built alongside it.
+**H1-era deferral (updated 2026-09-20):** the list that used to sit
+here is now split. Closed by H2 (`feature-spec-1.1.H2.md`): P&L
+comparison, range TB, GL pagination, expense MoM, sales by customer,
+executive summary, CSV export, FS audit pack. Still deferred (H2 §5):
+Statement of Cash Flows, BS UAE presentation layout, sales by
+product/salesperson, PDF/XLSX, scheduled email, accountant share
+link. Aged AR/AP shipped with D/E. Do not invent formulas from this
+list.
 
 **Why first, ahead of any new transactional module:** this is the
 strongest possible end-to-end validation that Module 1.1.A's engine
@@ -162,7 +169,7 @@ Authoritative detail: `feature-spec-1_1_D.md` §7. Carry-forward:
 |---|---|
 | `1070 → 1020` settlement/clearing entries (card/POS clearing) | Later / bank-reconciliation module — manual JE until then (D-12) |
 | VAT-201 return filing / bad-debt reclaim mechanics | Module F |
-| PDF / XLSX / CSV export mechanics (incl. statement PDF) | H-remainder (Build Order §8); D ships statement **data** only |
+| PDF / XLSX / CSV export mechanics (incl. statement PDF) | H2-7 closed CSV for H1 four + H2 report routes; D statement PDF and D/E/F report CSV remain deferred |
 | Automated dunning / reminder delivery | Post-C1 presentation (same bucket as C §9) |
 | Multi-currency payments or advances | Unscoped until raised explicitly |
 | Company-settings admin API (`weekend_days`, thresholds, `default_bank_account_id`) | Later company-admin module — D-13; D reads settings, does not write them (exception: narrow `public_holidays` admin per D-14) |
@@ -273,44 +280,58 @@ not just a standard test suite.
 
 ## 7. UAE Corporate Tax Add-On (G)
 
+**Status: ✅ Built 2026-09-18.** Spec: `feature-spec-1_1_G.md`. CT
+provision posting, SBR monitor, QFZP/free-zone income summary (G-24
+accounts `4300`/`4310`/`4320`), related-party log, return summary.
+Year-end close gates on CT provision unless Owner skip (G-22).
+
 **Why last of the compliance modules:** CT provision auto-posting needs
 an accurate, complete P&L across a full fiscal year (Module 1) and hooks
 directly into Module 0's existing year-end closing RPC
-(`create_year_end_closing_entry`, feature-spec.md §4.4/§6) — CT provision
-should almost certainly be inserted into that existing closing flow
-rather than becoming a second, parallel closing mechanism. It also
-benefits from F existing first, since "Free zone income classifier"
-overlaps conceptually with F's zero-rated/exempt VAT categorization work.
+(`create_year_end_closing_entry`, feature-spec.md §4.4/§6).
 
 **Depends on:** Module 0 (specifically the year-end closing RPC), Module
 1 (H-core, for the running P&L the threshold tracker needs), Module 6 (F,
 for the free-zone/exempt categorization pattern).
 
-**Note for scoping:** decide explicitly whether CT provision posting
-extends `create_year_end_closing_entry` (adding a CT line alongside the
-existing Retained-Earnings transfer) or is a wholly separate RPC that
-runs after it. Given Module 1.1.A's stated preference for DB-level
-enforcement of one-time-per-fiscal-year rules (decision #4, the
-`YEAR_END_ALREADY_CLOSED` token), a separate `create_ct_provision_entry`
-RPC with its own advisory-lock namespace (following the `ob:`/`ye:`
-convention from §6) is likely the better fit — don't extend the existing
-RPC and risk coupling CT logic into a function that predates CT's
-existence.
+Authoritative decisions: `feature-spec-1_1_G.md` (do not re-scope from
+this paragraph).
 
 ---
 
 ## 8. Extended Financial Reports (H, remainder)
 
-**Why last:** every deferred item from §1 needs a module that doesn't
-exist until this point — Statement of Cash Flows needs enough
-transaction volume/categorization from C–G to be meaningful; Aged
-Receivables/Payables need D/E directly; Sales by customer/salesperson
-needs C/D; Expense analysis needs a real transaction history across
-modules; Accountant share link and scheduled delivery are
-delivery-mechanism features that should wrap an already-stable reporting
-layer rather than be built speculatively early.
+**Status: ✅ H2 built 2026-09-20.** Spec: `feature-spec-1.1.H2.md`
+(H2-1…H2-15). H1 (`feature-spec-1.1.H1.md`) remains the rule set for
+period TB, as-of BS, single-period P&L, and unpaginated GL.
 
-**Depends on:** Modules 2, 3, 4, 6, 7 (effectively everything).
+**Delivered (H2):**
+
+| Item | Route / object | Decision |
+|---|---|---|
+| P&L comparison (prior or any two ranges) | `GET /reports/profit-and-loss-comparison` | H2-1 |
+| TB for a caller date range | `GET /reports/trial-balance-range` (`GET /reports/trial-balance` unchanged) | H2-2 |
+| GL pagination (`limit`/`offset`; running balance over full set) | `GET /reports/general-ledger` | H2-3 |
+| Expense analysis by COA `sub_category`, MoM | `GET /reports/expense-analysis` | H2-4 |
+| Sales by customer (Sales Revenue ∪ FZ 4300/4310/4320; CN net; **ex-VAT line net**) | `GET /reports/sales-by-customer` | H2-5 / H2-14 / H2-15 |
+| Executive summary (Nest composition of BS / P&L / aged AR / AP) | `GET /reports/executive-summary` | H2-6 |
+| CSV (`?format=csv`) on H1 four + H2 report routes | Nest interceptor | H2-7 |
+| FS audit pack (zip of TB/BS/P&L/GL CSVs for a `period_id`) | `GET /reports/audit-pack` | H2-8 |
+
+Guarded HTTP inventory is **218** routes.
+
+**Still deferred** (H2 §5 — not open H2 questions):
+
+- H-R2 BS UAE standard presentation layout (needs per-account current/non-current)
+- H-R4 Statement of Cash Flows (needs cash-movement categorization)
+- H-R7 / H-R8 sales by product / salesperson (no catalog / salesperson column)
+- PDF / XLSX (half of H-R13)
+- H-R14 scheduled email (no mailer)
+- H-R15 accountant share link (not membership JWT)
+
+**Depends on:** Modules 2, 3, 4, 6, 7 (C–G were unblocking dependencies; they are built).
+
+Do not implement remaining H-R items from this paragraph — they need their own spec the same way H2 was grounded against `schema.sql`.
 
 ---
 
@@ -332,15 +353,25 @@ layer rather than be built speculatively early.
 - ✅ **Module 1.1.F** — `feature-spec-1_1_F.md` built 2026-09-16
   (F-1…F-44). Residuals: 10k VD threshold advisor-confirm;
   EmaraTax screenshot for Box 2 + CAS box.
+- ✅ **Module 1.1.G** — `feature-spec-1_1_G.md` built 2026-09-18.
+- ✅ **Module 1.1.H2** — `feature-spec-1.1.H2.md` built 2026-09-20
+  (H2-1…H2-15). CSV + comparison P&L + range TB + GL pagination +
+  expense MoM + sales-by-customer + executive summary + audit pack.
+  Remaining H-R items: §8.
 
 **Next:**
 
 1. Confirm `vd_amount_threshold` with the tax advisor
    before go-live; screenshot Box 2 / CAS box before export mapping.
-2. **Post-E carry-forward** (not blocking): FTA gap-detection register (now F-16),
-   C §9 presentation features, D §7 items (1070→1020 settlement, PDF/export,
-   dunning, multi-currency, company-settings admin API), E §7 items
-   (vendor credits, recurring bills, inventory/landed costs, unattended GRNI
-   cron) — track in the owning module's feature-spec until explicitly scoped.
-3. Optional: re-run D-P13 full Jest + fresh-DB apply of `schema.sql` to sign
+2. **Post-H2 remainder** (not blocking H2): H-R2 UAE BS layout, H-R4
+   cash flow, H-R7/H-R8 product/salesperson sales, PDF/XLSX, H-R14
+   email, H-R15 share link — each needs its own spec.
+3. **Post-E / C carry-forward** (not blocking): C §9 presentation,
+   D §7 items (1070→1020 settlement, statement PDF, dunning,
+   multi-currency, company-settings admin API), E §7 items
+   (vendor credits, recurring bills, inventory/landed costs, unattended
+   GRNI cron) — track in the owning module's feature-spec until
+   explicitly scoped.
+4. Module B (OCR) remains queued — depends on E's Bill entity.
+5. Optional: re-run D-P13 full Jest + fresh-DB apply of `schema.sql` to sign
    E off at the same bar as D.

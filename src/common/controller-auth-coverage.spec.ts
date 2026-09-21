@@ -68,7 +68,7 @@ import { CtService } from '../ct/ct.service';
  * [feature-spec.md decisions #24/#27/#41; feature-spec-1.1.H1.md #1]
  * Controllers reject unauthenticated requests (401) and succeed for a
  * verified Bearer session with membership. Regression list covers all
- * 212 guarded HTTP routes across controllers.
+ * 218 guarded HTTP routes across controllers.
  *
  * Blind spot (C1-3): this spec registers controllers in isolation and mocks
  * CompanyMembershipGuard + CompanyMembersService — it does NOT import real
@@ -142,6 +142,30 @@ describe('Controller auth coverage (decision #24)', () => {
     {
       method: 'GET',
       path: `/reports/general-ledger?company_id=${companyId}`,
+    },
+    {
+      method: 'GET',
+      path: `/reports/trial-balance-range?company_id=${companyId}&range_start=2026-01-01&range_end=2026-01-31`,
+    },
+    {
+      method: 'GET',
+      path: `/reports/profit-and-loss-comparison?company_id=${companyId}&period_a_start=2026-01-01&period_a_end=2026-01-31`,
+    },
+    {
+      method: 'GET',
+      path: `/reports/expense-analysis?company_id=${companyId}&fiscal_year=2026`,
+    },
+    {
+      method: 'GET',
+      path: `/reports/sales-by-customer?company_id=${companyId}&period_start=2026-01-01&period_end=2026-01-31`,
+    },
+    {
+      method: 'GET',
+      path: `/reports/executive-summary?company_id=${companyId}&period_start=2026-01-01&period_end=2026-01-31`,
+    },
+    {
+      method: 'GET',
+      path: `/reports/audit-pack?company_id=${companyId}&period_id=${periodId}`,
     },
     {
       method: 'GET',
@@ -943,6 +967,47 @@ describe('Controller auth coverage (decision #24)', () => {
         net_profit: 0,
       }),
       getGeneralLedger: jest.fn().mockResolvedValue([]),
+      getTrialBalanceForRange: jest.fn().mockResolvedValue([]),
+      getProfitAndLossComparison: jest.fn().mockResolvedValue({
+        period_a: {
+          period_start: '2026-01-01',
+          period_end: '2026-01-31',
+          accounts: [],
+          total_income: 0,
+          total_expense: 0,
+          net_profit: 0,
+        },
+        period_b: {
+          period_start: '2025-12-01',
+          period_end: '2025-12-31',
+          accounts: [],
+          total_income: 0,
+          total_expense: 0,
+          net_profit: 0,
+        },
+        accounts: [],
+      }),
+      getExpenseAnalysis: jest.fn().mockResolvedValue([]),
+      getSalesByCustomer: jest.fn().mockResolvedValue([]),
+      getExecutiveSummary: jest.fn().mockResolvedValue({
+        period_start: '2026-01-01',
+        period_end: '2026-01-31',
+        as_of_date: '2026-01-31',
+        total_assets: 0,
+        total_liabilities: 0,
+        total_equity: 0,
+        is_balanced: true,
+        net_profit: 0,
+        total_ar_outstanding: 0,
+        total_ap_outstanding: 0,
+        drilldown: {
+          balance_sheet: { as_of_date: '2026-01-31' },
+          profit_and_loss: { period_start: '2026-01-01', period_end: '2026-01-31' },
+          aged_receivables: { as_of_date: '2026-01-31' },
+          aged_payables: { as_of_date: '2026-01-31' },
+        },
+      }),
+      getAuditPack: jest.fn().mockResolvedValue({}),
       getCustomerLedger: jest.fn().mockResolvedValue([]),
       getCustomerStatement: jest.fn().mockResolvedValue([]),
       getAgedReceivables: jest.fn().mockResolvedValue([]),
@@ -1189,7 +1254,7 @@ describe('Controller auth coverage (decision #24)', () => {
   }
 
   it('covers all guarded HTTP routes', () => {
-    expect(ALL_GUARDED_ROUTES).toHaveLength(212);
+    expect(ALL_GUARDED_ROUTES).toHaveLength(218);
   });
 
   it.each(ALL_GUARDED_ROUTES)(

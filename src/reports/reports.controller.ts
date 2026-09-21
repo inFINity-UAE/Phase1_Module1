@@ -1,28 +1,37 @@
-import { Controller, Get, Post, Query, Body, Param, ParseUUIDPipe, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Query, Body, Param, ParseUUIDPipe, UseGuards, UseInterceptors } from '@nestjs/common';
 import { RequireCompanyMembership } from '../auth/decorators/require-company-membership.decorator';
 import { CompanyMembershipGuard } from '../auth/guards/company-membership.guard';
 import { SupabaseAuthGuard } from '../auth/guards/supabase-auth.guard';
 import { AgedReceivablesQueryDto } from './dto/aged-receivables-query.dto';
+import { AuditPackQueryDto } from './dto/audit-pack-query.dto';
 import { BalanceSheetQueryDto } from './dto/balance-sheet-query.dto';
 import { CreditLimitCheckQueryDto } from './dto/credit-limit-check-query.dto';
 import { CustomerLedgerQueryDto } from './dto/customer-ledger-query.dto';
 import { CustomerPaymentHistoryQueryDto } from './dto/customer-payment-history-query.dto';
+import { ExpenseAnalysisQueryDto } from './dto/expense-analysis-query.dto';
+import { ExecutiveSummaryQueryDto } from './dto/executive-summary-query.dto';
 import { GeneralLedgerQueryDto } from './dto/general-ledger-query.dto';
+import { ProfitAndLossComparisonQueryDto } from './dto/profit-and-loss-comparison-query.dto';
 import { ProfitAndLossQueryDto } from './dto/profit-and-loss-query.dto';
+import { SalesByCustomerQueryDto } from './dto/sales-by-customer-query.dto';
 import { TrialBalanceQueryDto } from './dto/trial-balance-query.dto';
+import { TrialBalanceRangeQueryDto } from './dto/trial-balance-range-query.dto';
 import { AgedPayablesQueryDto } from './dto/aged-payables-query.dto';
 import { BillsDueQueryDto } from './dto/bills-due-query.dto';
 import { ReconcileSupplierStatementDto } from './dto/reconcile-supplier-statement.dto';
 import { SupplierLedgerQueryDto } from './dto/supplier-ledger-query.dto';
 import { InvoiceRegisterQueryDto, VatRegistrationThresholdQueryDto } from './dto/vat-reports-query.dto';
+import { ReportsCsvInterceptor } from './reports-csv.interceptor';
 import { ReportsService } from './reports.service';
 
 /**
- * [feature-spec-1.1.H1.md] + [feature-spec-1_1_D.md §5] + [feature-spec-1_1_E.md §5]
- * Thin read routes over Postgres report RPCs — no Nest-side aggregation.
+ * [feature-spec-1.1.H1.md] + [feature-spec-1.1.H2.md] + D/E/F report routes.
+ * Thin read routes over Postgres report RPCs — no Nest-side aggregation
+ * except H2-1 totals (summarizeProfitAndLoss twice) and H2-6 composition.
  */
 @Controller('reports')
 @UseGuards(SupabaseAuthGuard, CompanyMembershipGuard)
+@UseInterceptors(ReportsCsvInterceptor)
 export class ReportsController {
   constructor(private readonly reportsService: ReportsService) {}
 
@@ -32,6 +41,17 @@ export class ReportsController {
     return this.reportsService.getTrialBalance(
       query.company_id,
       query.period_id,
+      query.include_zero_balance ?? false,
+    );
+  }
+
+  @Get('trial-balance-range')
+  @RequireCompanyMembership({ type: 'query' })
+  getTrialBalanceForRange(@Query() query: TrialBalanceRangeQueryDto) {
+    return this.reportsService.getTrialBalanceForRange(
+      query.company_id,
+      query.range_start,
+      query.range_end,
       query.include_zero_balance ?? false,
     );
   }
@@ -55,6 +75,18 @@ export class ReportsController {
     );
   }
 
+  @Get('profit-and-loss-comparison')
+  @RequireCompanyMembership({ type: 'query' })
+  getProfitAndLossComparison(@Query() query: ProfitAndLossComparisonQueryDto) {
+    return this.reportsService.getProfitAndLossComparison(
+      query.company_id,
+      query.period_a_start,
+      query.period_a_end,
+      query.period_b_start,
+      query.period_b_end,
+    );
+  }
+
   @Get('general-ledger')
   @RequireCompanyMembership({ type: 'query' })
   getGeneralLedger(@Query() query: GeneralLedgerQueryDto) {
@@ -63,7 +95,41 @@ export class ReportsController {
       query.account_id,
       query.date_from,
       query.date_to,
+      query.limit,
+      query.offset,
     );
+  }
+
+  @Get('expense-analysis')
+  @RequireCompanyMembership({ type: 'query' })
+  getExpenseAnalysis(@Query() query: ExpenseAnalysisQueryDto) {
+    return this.reportsService.getExpenseAnalysis(query.company_id, query.fiscal_year);
+  }
+
+  @Get('sales-by-customer')
+  @RequireCompanyMembership({ type: 'query' })
+  getSalesByCustomer(@Query() query: SalesByCustomerQueryDto) {
+    return this.reportsService.getSalesByCustomer(
+      query.company_id,
+      query.period_start,
+      query.period_end,
+    );
+  }
+
+  @Get('executive-summary')
+  @RequireCompanyMembership({ type: 'query' })
+  getExecutiveSummary(@Query() query: ExecutiveSummaryQueryDto) {
+    return this.reportsService.getExecutiveSummary(
+      query.company_id,
+      query.period_start,
+      query.period_end,
+    );
+  }
+
+  @Get('audit-pack')
+  @RequireCompanyMembership({ type: 'query' })
+  getAuditPack(@Query() query: AuditPackQueryDto) {
+    return this.reportsService.getAuditPack(query.company_id, query.period_id);
   }
 
   /** [feature-spec-1_1_D.md §5.1] */

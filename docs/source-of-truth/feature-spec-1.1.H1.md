@@ -1,36 +1,80 @@
-# Module 1.1.H1 — Core Financial Reports (partial)
+# Module 1.1.H — Financial Reports
 ## Feature Specification (Source of Truth)
 
 Part of Module 1.1 · AI-Based Accounting Foundation, inFINity Phase 1 (MVP).
-This is the authoritative feature list for **Module 1.1.H1 only** — period
-Trial Balance, as-of Balance Sheet, single-period Profit & Loss, and
-General Ledger slices of Core Financial Reports (build-order step 1 /
-`Module_1.1_Build_Order_Scope.md` §1). Do not infer cash flow, aged AR/AP,
-exports, **prior-period comparison**, or other deferred H remainder from
-this document.
+
+**H1 core (this document’s original scope, decisions #1–#6)** is the
+authoritative rule set for period Trial Balance, as-of Balance Sheet,
+single-period Profit & Loss, and General Ledger
+(`Module_1.1_Build_Order_Scope.md` §1). Sections 1–7 below are those
+H1 rules — do not invent cash-flow formulas, sales-mix logic, or
+export layouts from them.
+
+**Full Module H inventory (decision #7, 2026-09-19; standing updated
+#8, 2026-09-20)** records what the product list asked for versus what
+exists in this API today. Completed items cite the owning spec.
+Remaining H-R items are listed below. H2 (`feature-spec-1.1.H2.md`)
+closed a subset on 2026-09-20 — do not re-open those as H1 work.
+
+There is **no UI** in this repository. “Completed” means HTTP + RPC
+data. PDF/XLSX layout, email, and share links are not built. CSV on
+the H1 four routes plus H2 report routes is built (H2-7).
 
 **How to use this document:** Sections 1–7 state the current, effective
-rules — read these as the standing spec, not a history. Section 8 is a
-chronological decision index for traceability; every rule above is sourced
-from a numbered, dated decision there. When a rule changed after it was
-first logged, the section below states the *current* rule only — the
-superseded version and why it changed are preserved in Section 8, not
-repeated inline.
+H1 rules. Section 8 is the chronological decision index. When a rule
+changed after it was first logged, the section below states the
+*current* rule only — the superseded version lives in Section 8.
 
 Module 1.1.A (`feature-spec.md`, `schema.sql`) remains the engine
-prerequisite. This module adds reporting reads only — no new tables,
-no transactional workflow changes.
+prerequisite. H1 adds reporting reads only — no new tables, no
+transactional workflow changes. Aged AR/AP reads were added later by
+D and E on `/reports/*`; they are not H1 decisions.
 
-### Known open items
+### Module H — completed
+
+| Deliverable | Status | Evidence |
+|---|---|---|
+| Profit & Loss for any date range (month / quarter / year / custom) | **Completed** (H1 #3) | `get_profit_and_loss` · `GET /reports/profit-and-loss?period_start=&period_end=` |
+| Balance Sheet at any date — assets, liabilities, equity (signed balances + `is_balanced`) | **Completed** (H1 #2) | `get_balance_sheet` · `GET /reports/balance-sheet?as_of_date=` |
+| Trial Balance — all accounts with opening and closing debit/credit | **Completed** (H1 #1) | `get_trial_balance_for_period` · `GET /reports/trial-balance?period_id=` |
+| General Ledger — transaction listing by account and date range (running balance; this is the drill-down surface) | **Completed** (H1 #5) | `get_general_ledger` · `GET /reports/general-ledger` |
+| Aged Receivables with per-customer rows (drill via customer ledger / statement data) | **Completed** (D §5.1–§5.2) | `GET /reports/aged-receivables`, `/customer-ledger`, `/customer-statement` |
+| Aged Payables with per-supplier rows (drill via supplier ledger / bills-due) | **Completed** (E §5.1–§5.2) | `GET /reports/aged-payables`, `/supplier-ledger`, `/bills-due` |
+| Custom date range on P&L and GL; BS as-of any date | **Completed** (H1 #2 / #3 / #5) | Arbitrary `period_start`/`period_end`, `date_from`/`date_to`, `as_of_date` |
+| Cross-report integrity (TB / BS / P&L / GL) | **Completed** (H1 #6) | `reports.h1-integrity-sweep.integration.spec.ts` |
+| P&L comparison (prior or any two ranges) | **Completed** (H2-1) | `get_profit_and_loss_comparison` · `GET /reports/profit-and-loss-comparison` |
+| Trial Balance for a caller date range | **Completed** (H2-2) | `get_trial_balance_for_range` · `GET /reports/trial-balance-range` (`GET /reports/trial-balance` stays `period_id`) |
+| General Ledger pagination (`limit`/`offset`; running balance over the full set) | **Completed** (H2-3) | `get_general_ledger` 6-arg · `GET /reports/general-ledger` |
+| Expense analysis by COA `sub_category`, month-over-month | **Completed** (H2-4) | `get_expense_analysis` · `GET /reports/expense-analysis` |
+| Sales by customer (Sales Revenue ∪ FZ 4300/4310/4320; CN net; ex-VAT line net) | **Completed** (H2-5 / H2-14 / H2-15) | `get_sales_by_customer` · `GET /reports/sales-by-customer` |
+| Executive summary (Nest composition of BS / P&L / aged AR / AP) | **Completed** (H2-6) | `GET /reports/executive-summary` |
+| CSV export (`?format=csv`) on H1 four + H2 report routes | **Completed** (H2-7) | Nest interceptor — not D/E/F reports |
+| Financial-statement audit pack (zip of TB/BS/P&L/GL CSVs for a `period_id`) | **Completed** (H2-8) | `GET /reports/audit-pack` |
+
+### Module H — remaining (not in H2)
+
+H2 (`feature-spec-1.1.H2.md`, H2-1…H2-15) closed H-R1, H-R3, H-R5,
+H-R6, H-R9, H-R10, H-R11, H-R12, CSV of H-R13, and H-R16. Do not
+implement the rows below from this table alone — they need their own
+spec against the Accounting Rules PDF and `schema.sql`.
+
+| # | Deliverable | Why remaining |
+|---|---|---|
+| H-R2 | Balance Sheet **UAE standard presentation layout** | H1 returns JSON by `category` (asset/liability/equity). No FTA/layout pack, no UI. Needs per-account current/non-current. |
+| H-R4 | Statement of Cash Flows — **direct and indirect**, auto from ledger | Never designed. Needs cash categorization not in H1, H2, or A. |
+| H-R7 | Sales by **product / service** | No product catalog (C follow-up in Build Order §2). Invoice lines have description / `is_service` only. |
+| H-R8 | Sales by **salesperson** | No salesperson / owner entity on invoices. |
+| H-R13 | Export **PDF and Excel (XLSX)** | CSV closed by H2-7 on H1 four + H2 report routes. PDF/XLSX still not built. F-9 VAT CSV and D statement **data** are separate. |
+| H-R14 | Scheduled delivery — auto-email PDF weekly / monthly / quarterly | Not built. No mailer. Recurring cron is ledger/VAT jobs, not report email. |
+| H-R15 | Accountant share link — read-only report access for an external firm | Not built. Auth is company membership JWT only. |
+
+Closed H1 engineering items (not product-list gaps):
 
 | Gap | Status | Detail |
 |---|---|---|
-| Prior-period comparison (P&L / statements) | Deferred → H2 | Build-order Extended Reports (H2) — not in this pass |
-| Cash flow / aged AR/AP / exports / scheduled delivery | Deferred → H remainder | Build-order step 8 |
-| General Ledger pagination | Deferred (#5) → H2/H remainder | Same as GET /accounts and GET /journal-entries (Module 1.1.A §4.5/§4.6) — unbounded this pass |
 | Cross-report integrity sweep | **Closed (#6)** | TB / BS / P&L / GL agree on multi-period + reverse + YE fixture |
-| `v_trial_balance` status/join alignment | **Closed (#60)** | Module 1.1.A decision #60 — view uses `is_ledger_truth_status` |
-| YE P&L aggregation vs reversals | **Closed (#61 / H1 #6)** | Module 1.1.A `create_year_end_closing_entry` now uses `is_ledger_truth_status` |
+| `v_trial_balance` status/join alignment | **Closed (A #60)** | View uses `is_ledger_truth_status` |
+| YE P&L aggregation vs reversals | **Closed (A #61 / H1 #6)** | `create_year_end_closing_entry` uses `is_ledger_truth_status` |
 
 ---
 
@@ -52,9 +96,12 @@ In scope for H1:
   fixture proving TB / BS / P&L / GL agree with each other and with
   `journal_lines` after reverse + year-end close
 
-Out of scope: every other report and every presentation/delivery feature
-listed under build-order §1 deferred / §8, including comparative periods
-and GL pagination (explicitly deferred in #5).
+Out of scope **for H1**: every other report and every presentation/delivery
+feature listed under build-order §1 deferred / §8, including comparative
+periods and GL pagination (explicitly deferred in #5). Standing #8:
+those two, plus range TB / expense MoM / sales-by-customer / executive
+summary / CSV / audit pack, shipped in H2 — they remain out of this
+document's H1 rule set.
 
 ---
 
@@ -375,3 +422,5 @@ topical section referenced.
 | 4 | 2026-08-30 | **`is_ledger_truth_status`:** all H1 reporting reads treat `posted`+`reversed` as ground truth; `draft`/`pending_approval`/`rejected` never contribute; TB updated from posted-only to match BS/P&L; `v_trial_balance` later aligned in Module 1.1.A **#60** | §2, §3–§5, §7 |
 | 5 | 2026-08-30 | **General Ledger** via `get_general_ledger` (line-level, SECURITY INVOKER, §5.1); running balance is true cumulative per account (date filters do **not** reset); pagination deferred (match §4.5/§4.6 list routes); Nest `GET /reports/general-ledger` with required `company_id`, optional filters, `assertAccountBelongsToCompany` | §5a, §5.5, §6.4, §7 |
 | 6 | 2026-08-30 | **H1-5 cross-report integrity sweep PASSED clean** — multi-period + reverse + YE fixture; TB/BS/P&L/GL agree; surfaced Module 1.1.A YE posted-only bug → fixed as **#61** (`is_ledger_truth_status`); module sign-off (same role as 1.1.A #59); deferred items tracked in Known open items → H2/H remainder | §7.1, Known open items |
+| 7 | 2026-09-19 | **Full Module H inventory.** H1 core (#1–#6) stays the rule set for TB/BS/P&L/GL. Aged AR/AP marked **completed** as D/E `/reports` reads (not new H1 RPCs). Product-list remainder catalogued as open H-R1…H-R16 (comparison, cash flow, sales mix, expense MoM, executive snapshot, two-period compare, TB free dates, PDF/XLSX/CSV, scheduled email, accountant share link, FS audit pack, GL pagination, BS presentation layout). No formulas invented. | Module H completed / open tables |
+| 8 | 2026-09-20 | **Standing inventory after H2.** H1 #1–#7 bodies unchanged. H2 (`feature-spec-1.1.H2.md`, H2-1…H2-15) closed H-R1, H-R3, H-R5, H-R6, H-R9, H-R10, H-R11, H-R12, CSV of H-R13, and H-R16. Remaining: H-R2 UAE BS layout, H-R4 cash flow, H-R7/H-R8 product/salesperson, PDF/XLSX, H-R14 email, H-R15 share link. Guarded HTTP inventory **218**. | Module H completed / remaining tables |

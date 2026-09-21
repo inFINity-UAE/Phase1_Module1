@@ -1566,7 +1566,9 @@ C income-account suggestion reads `vat_category` when set (F-19).
 - **E-invoicing / Peppol PINT AE / ASP** — Rules §2.6; not Module F.
 - **Corporate Tax / QFZP / SBR / free-zone income** — Module G.
 - **PDF/XLSX/CSV rendering mechanics generally** — H-remainder; F owns
-  the FTA-specific data shape (F-9).
+  the FTA-specific data shape (F-9). Standing 2026-09-20: H2-7 closed
+  CSV for H1 four + H2 report routes only; F VAT CSV/PDF/XLSX rendering
+  beyond F-9 remains deferred.
 - **A live payment-reminder/notification engine** — F-11.
 - **Multi-currency VAT.**
 - **Company-settings admin API/UI** — D-13/E-26.

@@ -5,13 +5,15 @@ import { BalanceSheetAccountRow } from './entities/balance-sheet.entity';
 import { CreditLimitCheck } from './entities/credit-limit-check.entity';
 import { CustomerLedgerRow } from './entities/customer-ledger-row.entity';
 import { CustomerPaymentHistory } from './entities/customer-payment-history.entity';
-import { GeneralLedgerRow } from './entities/general-ledger-row.entity';
 import { PeriodTrialBalanceRow } from './entities/period-trial-balance-row.entity';
 import { ProfitAndLossAccountRow } from './entities/profit-and-loss.entity';
 import { AgedPayablesRow } from './entities/aged-payables-row.entity';
 import { BillsDueRow } from './entities/bills-due-row.entity';
-import { ReportsRepository } from './reports.repository';
+import { GeneralLedgerRpcRow, ReportsRepository } from './reports.repository';
 import { SupplierLedgerRow } from './entities/supplier-ledger-row.entity';
+import { ProfitAndLossComparisonAccountRow } from './entities/pnl-comparison.entity';
+import { ExpenseAnalysisRow } from './entities/expense-analysis-row.entity';
+import { SalesByCustomerRow } from './entities/sales-by-customer-row.entity';
 
 
 function asMoney(value: unknown): number {
@@ -123,6 +125,44 @@ export class SupabaseReportsRepository implements ReportsRepository {
     }));
   }
 
+  /** [feature-spec-1.1.H2.md H2-2] Additive range TB. */
+  async getTrialBalanceForRange(
+    companyId: string,
+    rangeStart: string,
+    rangeEnd: string,
+    includeZeroBalance = false,
+  ): Promise<PeriodTrialBalanceRow[]> {
+    const { data, error } = await this.supabase.client.rpc(
+      'get_trial_balance_for_range',
+      {
+        p_company_id: companyId,
+        p_range_start: rangeStart,
+        p_range_end: rangeEnd,
+        p_include_zero_balance: includeZeroBalance,
+      },
+    );
+
+    if (error) {
+      throw error;
+    }
+
+    return ((data as Record<string, unknown>[]) ?? []).map((row) => ({
+      account_id: String(row.account_id),
+      account_number: String(row.account_number),
+      account_name: String(row.account_name),
+      category: String(row.category),
+      normal_balance: String(row.normal_balance),
+      opening_debit: asMoney(row.opening_debit),
+      opening_credit: asMoney(row.opening_credit),
+      opening_balance: asMoney(row.opening_balance),
+      period_debit: asMoney(row.period_debit),
+      period_credit: asMoney(row.period_credit),
+      closing_debit: asMoney(row.closing_debit),
+      closing_credit: asMoney(row.closing_credit),
+      closing_balance: asMoney(row.closing_balance),
+    }));
+  }
+
   /**
    * [feature-spec-1.1.H1.md decision #2] Balance Sheet RPC
    * (SECURITY INVOKER, service_role EXECUTE only — Module 1.1.A §5.1).
@@ -183,6 +223,45 @@ export class SupabaseReportsRepository implements ReportsRepository {
     }));
   }
 
+  /** [feature-spec-1.1.H2.md H2-1] P&L comparison RPC. */
+  async getProfitAndLossComparison(
+    companyId: string,
+    periodAStart: string,
+    periodAEnd: string,
+    periodBStart: string,
+    periodBEnd: string,
+  ): Promise<ProfitAndLossComparisonAccountRow[]> {
+    const { data, error } = await this.supabase.client.rpc(
+      'get_profit_and_loss_comparison',
+      {
+        p_company_id: companyId,
+        p_period_a_start: periodAStart,
+        p_period_a_end: periodAEnd,
+        p_period_b_start: periodBStart,
+        p_period_b_end: periodBEnd,
+      },
+    );
+
+    if (error) {
+      throw error;
+    }
+
+    return ((data as Record<string, unknown>[]) ?? []).map((row) => ({
+      account_id: String(row.account_id),
+      account_number: String(row.account_number),
+      account_name: String(row.account_name),
+      category: String(row.category),
+      normal_balance: String(row.normal_balance),
+      period_a_total_debit: asMoney(row.period_a_total_debit),
+      period_a_total_credit: asMoney(row.period_a_total_credit),
+      period_a_balance: asMoney(row.period_a_balance),
+      period_b_total_debit: asMoney(row.period_b_total_debit),
+      period_b_total_credit: asMoney(row.period_b_total_credit),
+      period_b_balance: asMoney(row.period_b_balance),
+      variance: asMoney(row.variance),
+    }));
+  }
+
   /**
    * [feature-spec-1.1.H1.md decision #5] General Ledger RPC
    * (SECURITY INVOKER, service_role EXECUTE only — Module 1.1.A §5.1).
@@ -192,12 +271,16 @@ export class SupabaseReportsRepository implements ReportsRepository {
     accountId?: string | null,
     dateFrom?: string | null,
     dateTo?: string | null,
-  ): Promise<GeneralLedgerRow[]> {
+    limit?: number | null,
+    offset?: number | null,
+  ): Promise<GeneralLedgerRpcRow[]> {
     const { data, error } = await this.supabase.client.rpc('get_general_ledger', {
       p_company_id: companyId,
       p_account_id: accountId ?? null,
       p_date_from: dateFrom ?? null,
       p_date_to: dateTo ?? null,
+      p_limit: limit ?? null,
+      p_offset: offset ?? 0,
     });
 
     if (error) {
@@ -220,6 +303,50 @@ export class SupabaseReportsRepository implements ReportsRepository {
       credit: asMoney(row.credit),
       line_balance: asMoney(row.line_balance),
       running_balance: asMoney(row.running_balance),
+      total_count: asInt(row.total_count),
+    }));
+  }
+
+  /** [feature-spec-1.1.H2.md H2-4] Expense analysis RPC. */
+  async getExpenseAnalysis(
+    companyId: string,
+    fiscalYear: number,
+  ): Promise<ExpenseAnalysisRow[]> {
+    const { data, error } = await this.supabase.client.rpc('get_expense_analysis', {
+      p_company_id: companyId,
+      p_fiscal_year: fiscalYear,
+    });
+    if (error) {
+      throw error;
+    }
+    return ((data as Record<string, unknown>[]) ?? []).map((row) => ({
+      month_start: String(row.month_start),
+      sub_category: String(row.sub_category),
+      amount: asMoney(row.amount),
+      mom_delta: asMoney(row.mom_delta),
+    }));
+  }
+
+  /** [feature-spec-1.1.H2.md H2-5 / H2-14] Sales by customer RPC. */
+  async getSalesByCustomer(
+    companyId: string,
+    periodStart: string,
+    periodEnd: string,
+  ): Promise<SalesByCustomerRow[]> {
+    const { data, error } = await this.supabase.client.rpc('get_sales_by_customer', {
+      p_company_id: companyId,
+      p_period_start: periodStart,
+      p_period_end: periodEnd,
+    });
+    if (error) {
+      throw error;
+    }
+    return ((data as Record<string, unknown>[]) ?? []).map((row) => ({
+      customer_id: String(row.customer_id),
+      total_revenue: asMoney(row.total_revenue),
+      invoice_count: asInt(row.invoice_count),
+      average_invoice_value:
+        row.average_invoice_value == null ? null : asMoney(row.average_invoice_value),
     }));
   }
 

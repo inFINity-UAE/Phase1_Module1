@@ -9,13 +9,25 @@ import { CustomerPaymentHistory } from './entities/customer-payment-history.enti
 import { AgedPayablesRow } from './entities/aged-payables-row.entity';
 import { BillsDueRow } from './entities/bills-due-row.entity';
 import { SupplierLedgerRow } from './entities/supplier-ledger-row.entity';
+import { ProfitAndLossComparisonAccountRow } from './entities/pnl-comparison.entity';
+import { ExpenseAnalysisRow } from './entities/expense-analysis-row.entity';
+import { SalesByCustomerRow } from './entities/sales-by-customer-row.entity';
 
 export const REPORTS_REPOSITORY = Symbol('REPORTS_REPOSITORY');
+
+export type GeneralLedgerRpcRow = GeneralLedgerRow & { total_count: number };
 
 export interface ReportsRepository {
   getTrialBalanceForPeriod(
     companyId: string,
     periodId: string,
+    includeZeroBalance?: boolean,
+  ): Promise<PeriodTrialBalanceRow[]>;
+
+  getTrialBalanceForRange(
+    companyId: string,
+    rangeStart: string,
+    rangeEnd: string,
     includeZeroBalance?: boolean,
   ): Promise<PeriodTrialBalanceRow[]>;
 
@@ -30,12 +42,33 @@ export interface ReportsRepository {
     periodEnd: string,
   ): Promise<ProfitAndLossAccountRow[]>;
 
+  getProfitAndLossComparison(
+    companyId: string,
+    periodAStart: string,
+    periodAEnd: string,
+    periodBStart: string,
+    periodBEnd: string,
+  ): Promise<ProfitAndLossComparisonAccountRow[]>;
+
   getGeneralLedger(
     companyId: string,
     accountId?: string | null,
     dateFrom?: string | null,
     dateTo?: string | null,
-  ): Promise<GeneralLedgerRow[]>;
+    limit?: number | null,
+    offset?: number | null,
+  ): Promise<GeneralLedgerRpcRow[]>;
+
+  getExpenseAnalysis(
+    companyId: string,
+    fiscalYear: number,
+  ): Promise<ExpenseAnalysisRow[]>;
+
+  getSalesByCustomer(
+    companyId: string,
+    periodStart: string,
+    periodEnd: string,
+  ): Promise<SalesByCustomerRow[]>;
 
   /** [feature-spec-1_1_D.md §5.1] */
   getCustomerLedger(
