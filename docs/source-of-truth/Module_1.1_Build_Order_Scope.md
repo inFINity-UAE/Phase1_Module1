@@ -360,7 +360,7 @@ Do not implement remaining H-R items from this paragraph — they need their own
   expense MoM + sales-by-customer + executive summary + audit pack.
   Remaining H-R items: §8.
 - ✅ **Module H spec merge** (2026-09-21) — H1 + H2 live in
-  `feature-spec-1.1.H.md`; former H1/H2 filenames are pointers.
+  `feature-spec-1.1.H.md`.
 
 **Next:**
 

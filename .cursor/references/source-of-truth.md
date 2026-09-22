@@ -31,7 +31,7 @@ These were true at inspection (2026-09-10), with later notes dated in-place. Pre
 5. **`INFINITY_ACCOUNTING_DOCUMENTATION.md`** (4 Sep 2026) says payments, write-off ledger, aged AR, customer statements are not built. D signed off 10 Sep 2026 — those **are** built (statement is **data** only, not PDF).
 6. **`feature-spec-1_1_D.md` intro** “Confirmed in-schema” block is **pre-build evidence** (no payments table yet, invoice statuses unwired). The status line at the top is the current one: D is built. Do not re-litigate the intro as live schema.
 7. **D §7** still calls E’s Bill entity an open question. **E-1** closed it as Option A (`bills` table).
-8. **Module H spec** is `feature-spec-1.1.H.md` (merged 2026-09-21, decision #9). H1 #1–#8 are Part I; H2-1…H2-15 are Part II. Aged AR/AP remain D/E `/reports`. Former `feature-spec-1.1.H1.md` / `feature-spec-1.1.H2.md` are pointers. Numbered H1 #1–#8 and H2-1…H2-15 bodies were not rewritten.
+8. **Module H spec** is `feature-spec-1.1.H.md` (merged 2026-09-21, #9; pointer files removed #10). H1 #1–#8 are Part I; H2-1…H2-15 are Part II. Aged AR/AP remain D/E `/reports`. Numbered H1 #1–#8 and H2-1…H2-15 bodies were not rewritten.
 9. **`schema.sql` header** says do not maintain `apply_*.sql`. Incremental Module D patches were verified at D-P13 then **removed** — structure lives only in `schema.sql`. H2 DDL was folded into `schema.sql` the same way.
 10. **D/E/F/G “H-remainder owns generic export”** numbered decisions still describe their own pass. Standing fact: H2-7 closed CSV for H1 four + H2 report routes only — not D statement PDF, not D/E/F report CSV, not PDF/XLSX.
 

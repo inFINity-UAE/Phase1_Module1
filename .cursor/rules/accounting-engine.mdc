@@ -11,7 +11,7 @@ SOURCE OF TRUTH — when they disagree, STOP and report the conflict (do not pic
 2. `/docs/source-of-truth/schema.sql` — live DB structure (tables, RPCs, triggers, RLS, grants)
 3. The **module feature spec for the code being changed** (not a later module's spec):
    - A — `feature-spec.md`
-   - H — `feature-spec-1.1.H.md` (H1 #1–#8 + H2-1…H2-15; built 2026-09-20; former H1/H2 files are pointers)
+   - H — `feature-spec-1.1.H.md` (H1 #1–#8 + H2-1…H2-15; built 2026-09-20)
    - C — `feature-spec-1.1.C.md`
    - D — `feature-spec-1_1_D.md`
    - E — `feature-spec-1_1_E.md` (built; §7 deferrals remain)

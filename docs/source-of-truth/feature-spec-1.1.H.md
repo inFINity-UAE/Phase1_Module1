@@ -13,7 +13,8 @@ No H2-numbered decisions remain open.
 **Merged 2026-09-21** from `feature-spec-1.1.H1.md` and
 `feature-spec-1.1.H2.md` (decision #9). Numbered decision *bodies* were
 not rewritten. IDs stay **#1–#8** (H1 core / inventory) and **H2-1…H2-15**
-(extended). The former filenames are pointers to this file.
+(extended). The former `feature-spec-1.1.H1.md` / `feature-spec-1.1.H2.md`
+files were removed (#10); this file is the only Module H spec.
 
 There is **no UI** in this repository. "Completed" means HTTP + RPC
 data. PDF/XLSX layout, email, and share links are not built. CSV on
@@ -435,6 +436,7 @@ topical section referenced.
 | 7 | 2026-09-19 | **Full Module H inventory.** H1 core (#1–#6) stays the rule set for TB/BS/P&L/GL. Aged AR/AP marked **completed** as D/E `/reports` reads (not new H1 RPCs). Product-list remainder catalogued as open H-R1…H-R16 (comparison, cash flow, sales mix, expense MoM, executive snapshot, two-period compare, TB free dates, PDF/XLSX/CSV, scheduled email, accountant share link, FS audit pack, GL pagination, BS presentation layout). No formulas invented. | Module H completed / open tables |
 | 8 | 2026-09-20 | **Standing inventory after H2.** H1 #1–#7 bodies unchanged. H2 (`feature-spec-1.1.H2.md`, H2-1…H2-15) closed H-R1, H-R3, H-R5, H-R6, H-R9, H-R10, H-R11, H-R12, CSV of H-R13, and H-R16. Remaining: H-R2 UAE BS layout, H-R4 cash flow, H-R7/H-R8 product/salesperson, PDF/XLSX, H-R14 email, H-R15 share link. Guarded HTTP inventory **218**. | Module H completed / remaining tables |
 | 9 | 2026-09-21 | **Merged H1 + H2 into this file.** Numbered H1 #1–#8 and H2-1…H2-15 bodies unchanged. Former `feature-spec-1.1.H1.md` / `feature-spec-1.1.H2.md` are pointers. | this document |
+| 10 | 2026-09-21 | **Pointer files removed.** `feature-spec-1.1.H1.md` and `feature-spec-1.1.H2.md` deleted; this file is the only Module H spec. #9 bodies unchanged. | this document |
 
 ---
 
