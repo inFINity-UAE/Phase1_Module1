@@ -1,7 +1,7 @@
 # inFINity — Module 1.1 Build Order & Scope Document
 
-Companion to `feature-spec.md` (Module 1.1.A), `feature-spec-1.1.H.md`
-(Module H: H1 core + H2 extended), `feature-spec-1.1.C.md`,
+Companion to `feature-spec.md` (Module 1.1.A), `feature-spec-1_1_H.md`
+(Module H: H1 core + H2 extended), `feature-spec-1_1_C.md`,
 `feature-spec-1_1_D.md`, `feature-spec-1_1_E.md`, `feature-spec-1_1_F.md`,
 and `feature-spec-1_1_G.md`. Module 1.1.A
 (Double-Entry Accounting Engine) is complete and signed off as of
@@ -17,7 +17,7 @@ Bill entity is Option A (`bills` table); §7 deferrals remain; see §4.
 Module 1.1.F is built 2026-09-16 (F-1…F-44); §0 residuals remain; see §6.
 Module 1.1.G is built 2026-09-18 — `feature-spec-1_1_G.md`. Module
 1.1.H2 (Extended Financial Reports) is built 2026-09-20
-(H2-1…H2-15). One spec: `feature-spec-1.1.H.md` (merged 2026-09-21);
+(H2-1…H2-15). One spec: `feature-spec-1_1_H.md` (merged 2026-09-21);
 remaining H-R items in §8.
 This document scopes what comes next, in what order, and why.
 
@@ -38,14 +38,14 @@ and so open questions get resolved before they're discovered mid-build.
 | # | Module | Feature-list ref | Depends on | Status |
 |---|---|---|---|---|
 | 0 | Double-Entry Accounting Engine | A | — | ✅ Done (#1–#63) — `feature-spec.md` |
-| 1 | Core Financial Reports | H (partial — see §1) | 0 | ✅ Done (H1 #1–#6, 2026-08-30) — `feature-spec-1.1.H.md` Part I |
-| 2 | Quotations & Tax Invoicing | C | 0 | ✅ **C1 core done** (Batch 1–2, 2026-09-01) — `feature-spec-1.1.C.md`; §9 presentation + FTA gap register still deferred (→ post-C1/F); payment/`written_off` ledger closed by D (2026-09-10) |
+| 1 | Core Financial Reports | H (partial — see §1) | 0 | ✅ Done (H1 #1–#6, 2026-08-30) — `feature-spec-1_1_H.md` Part I |
+| 2 | Quotations & Tax Invoicing | C | 0 | ✅ **C1 core done** (Batch 1–2, 2026-09-01) — `feature-spec-1_1_C.md`; §9 presentation + FTA gap register still deferred (→ post-C1/F); payment/`written_off` ledger closed by D (2026-09-10) |
 | 3 | Accounts Receivable | D | 0, 2 | ✅ **Done** (D-1…D-17, 2026-09-10) — `feature-spec-1_1_D.md`; §7 deferrals → F / H-remainder / later admin |
 | 4 | Accounts Payable | E | 0, (3's mirror — pattern only) | ✅ **Done** (E-1…E-28, 2026-09-13) — `feature-spec-1_1_E.md`; §7 deferrals remain; full D-P13 suite not re-run on landing |
 | 5 | AI Document Processing & OCR | B | 0, 4 | Queued |
 | 6 | UAE VAT Compliance Engine | F | 0, 2, 4, 1 | ✅ **Done** (2026-09-16) — `feature-spec-1_1_F.md`; §0 residuals: 10k VD confirm, Box 2/CAS screenshot |
 | 7 | UAE Corporate Tax Add-On | G | 0, 1, 6 | ✅ **Done** (2026-09-18) — `feature-spec-1_1_G.md` |
-| 8 | Extended Financial Reports | H (remainder — see §8) | 2, 3, 4, 6, 7 | ✅ **H2 done** (2026-09-20, H2-1…H2-15) — `feature-spec-1.1.H.md` Part II; H-R2/H-R4/H-R7/H-R8/PDF-XLSX/H-R14/H-R15 remain |
+| 8 | Extended Financial Reports | H (remainder — see §8) | 2, 3, 4, 6, 7 | ✅ **H2 done** (2026-09-20, H2-1…H2-15) — `feature-spec-1_1_H.md` Part II; H-R2/H-R4/H-R7/H-R8/PDF-XLSX/H-R14/H-R15 remain |
 
 **Verification posture (2026-09-10, Module D sign-off):** full
 `schema.sql` fresh-DB apply on Testing 1.1.A passed clean (+ COA seed +
@@ -59,13 +59,13 @@ Incremental `apply_*.sql` patches were verified then removed — fresh DB
 
 ## 1. Core Financial Reports (H, partial)
 
-**Status: ✅ Complete (2026-08-30).** Spec: `feature-spec-1.1.H.md` Part I
+**Status: ✅ Complete (2026-08-30).** Spec: `feature-spec-1_1_H.md` Part I
 (decisions #1–#6). Delivered: period Trial Balance, as-of Balance Sheet,
 single-period P&L, General Ledger line listing, cross-report integrity
 sweep (H1-5 passed clean; surfaced and fixed Module 1.1.A YE aggregation
 bug #61). Nest routes: `GET /reports/trial-balance`, `/balance-sheet`,
 `/profit-and-loss`, `/general-ledger`. Full Module H completed vs open
-(H-R1…H-R16) is in `feature-spec-1.1.H.md` decision #7 (2026-09-19),
+(H-R1…H-R16) is in `feature-spec-1_1_H.md` decision #7 (2026-09-19),
 standing table updated by #8 (2026-09-20).
 Aged AR/AP later completed under D/E (`GET /reports/aged-receivables`,
 `/aged-payables`). H2 (2026-09-20) closed a subset of the remainder
@@ -77,7 +77,7 @@ over what Module 1.1.A already has (`journal_lines`, `accounts`,
 `v_trial_balance`).
 
 **H1-era deferral (updated 2026-09-20):** the list that used to sit
-here is now split. Closed by H2 (`feature-spec-1.1.H.md` Part II): P&L
+here is now split. Closed by H2 (`feature-spec-1_1_H.md` Part II): P&L
 comparison, range TB, GL pagination, expense MoM, sales by customer,
 executive summary, CSV export, FS audit pack. Still deferred (H2 §5):
 Statement of Cash Flows, BS UAE presentation layout, sales by
@@ -101,7 +101,7 @@ each one inventing its own ad hoc balance-checking along the way.
 
 ## 2. Quotations & Tax Invoicing (C)
 
-**Status: ✅ C1 core complete (2026-09-01).** Spec: `feature-spec-1.1.C.md`
+**Status: ✅ C1 core complete (2026-09-01).** Spec: `feature-spec-1_1_C.md`
 (decisions #1–#23). **Batch 1 (2026-08-31):** C1-1 customers, C1-2
 quotations, C1-3 tax invoices, C1-4 credit notes, C1-5 quotation→invoice
 convert. **Batch 2 (2026-09-01):** invoice/credit-note ledger posting at
@@ -109,7 +109,7 @@ Issue, void auto-reversals, quotation `Expired` + invoice `Overdue`
 scheduled transitions (shared 01:00 UTC cron with recurring generation).
 Fresh-DB discipline: `schema.sql` top-to-bottom + `seed_finalized_coa_demo_company_0002.sql`.
 
-**Still open within / after C1** (authoritative list: feature-spec-1.1.C.md §10):
+**Still open within / after C1** (authoritative list: feature-spec-1_1_C.md §10):
 
 | Gap | Owner |
 |---|---|
@@ -302,7 +302,7 @@ this paragraph).
 
 ## 8. Extended Financial Reports (H, remainder)
 
-**Status: ✅ H2 built 2026-09-20.** Spec: `feature-spec-1.1.H.md` Part II
+**Status: ✅ H2 built 2026-09-20.** Spec: `feature-spec-1_1_H.md` Part II
 (H2-1…H2-15). Part I remains the rule set for
 period TB, as-of BS, single-period P&L, and unpaginated GL.
 
@@ -340,9 +340,9 @@ Do not implement remaining H-R items from this paragraph — they need their own
 
 **Completed since this doc was first written:**
 
-- ✅ **Module 1.1.H1** — `feature-spec-1.1.H.md` Part I written, built, and
+- ✅ **Module 1.1.H1** — `feature-spec-1_1_H.md` Part I written, built, and
   signed off (#1–#6, 2026-08-30).
-- ✅ **Module 1.1.C C1 core** — `feature-spec-1.1.C.md` written; Batch 1
+- ✅ **Module 1.1.C C1 core** — `feature-spec-1_1_C.md` written; Batch 1
   (C1-1…C1-5) landed 2026-08-31; Batch 2 (ledger + scheduler) landed
   2026-09-01; fresh-DB apply verified 2026-09-01.
 - ✅ **Module 1.1.D** — `feature-spec-1_1_D.md` written and built
@@ -355,12 +355,12 @@ Do not implement remaining H-R items from this paragraph — they need their own
   (F-1…F-44). Residuals: 10k VD threshold advisor-confirm;
   EmaraTax screenshot for Box 2 + CAS box.
 - ✅ **Module 1.1.G** — `feature-spec-1_1_G.md` built 2026-09-18.
-- ✅ **Module 1.1.H2** — `feature-spec-1.1.H.md` Part II built 2026-09-20
+- ✅ **Module 1.1.H2** — `feature-spec-1_1_H.md` Part II built 2026-09-20
   (H2-1…H2-15). CSV + comparison P&L + range TB + GL pagination +
   expense MoM + sales-by-customer + executive summary + audit pack.
   Remaining H-R items: §8.
 - ✅ **Module H spec merge** (2026-09-21) — H1 + H2 live in
-  `feature-spec-1.1.H.md`.
+  `feature-spec-1_1_H.md`.
 
 **Next:**
 

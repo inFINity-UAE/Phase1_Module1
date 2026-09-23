@@ -24,7 +24,7 @@ import { WriteOffInvoiceDto } from './dto/write-off-invoice.dto';
 import { SetDebtorNotifiedDto } from './dto/set-debtor-notified.dto';
 import { InvoicesService } from './invoices.service';
 
-/** [feature-spec-1.1.C.md §1.3] Invoice header CRUD + status transitions. */
+/** [feature-spec-1_1_C.md §1.3] Invoice header CRUD + status transitions. */
 @Controller('invoices')
 @UseGuards(SupabaseAuthGuard, CompanyMembershipGuard)
 export class InvoicesController {

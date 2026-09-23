@@ -26,7 +26,7 @@ const USER_ID = INTEGRATION_USER_ID;
 const CONCURRENCY = 8;
 
 (hasSupabase ? describe : describe.skip)(
-  'Quotations (feature-spec-1.1.C.md §1.2)',
+  'Quotations (feature-spec-1_1_C.md §1.2)',
   () => {
     jest.setTimeout(180_000);
 

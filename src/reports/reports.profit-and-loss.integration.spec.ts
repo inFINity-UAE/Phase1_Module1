@@ -77,7 +77,7 @@ type PnLBody = {
 };
 
 /**
- * [feature-spec-1.1.H.md decision #3] Profit & Loss HTTP + RPC.
+ * [feature-spec-1_1_H.md decision #3] Profit & Loss HTTP + RPC.
  */
 (hasSupabase ? describe : describe.skip)(
   'GET /reports/profit-and-loss (H1 decision #3)',

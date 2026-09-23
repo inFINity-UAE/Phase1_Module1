@@ -10,7 +10,7 @@ export type BalanceSheetAccountRow = {
 };
 
 /**
- * [feature-spec-1.1.H.md decision #2] Balance Sheet response with
+ * [feature-spec-1_1_H.md decision #2] Balance Sheet response with
  * account rows plus A = L + E sanity totals.
  */
 export type BalanceSheetReport = {

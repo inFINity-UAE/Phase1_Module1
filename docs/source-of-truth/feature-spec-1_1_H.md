@@ -456,7 +456,7 @@ H2-numbered decisions remain open.
 **Grounding used for H2-9…H2-13:** `docs/source-of-truth/schema.sql`
 (accounts, invoices, invoice_status, invoice_lines, credit_notes,
 H1 report RPCs, G-37 `summarize_free_zone_income`),
-`seed_finalized_coa_demo_company_0002.sql`, `feature-spec-1.1.C.md`,
+`seed_finalized_coa_demo_company_0002.sql`, `feature-spec-1_1_C.md`,
 `feature-spec-1_1_D.md` §5, `feature-spec-1_1_G.md` G-24/G-37,
 `src/reports/reports.controller.ts`,
 `src/common/controller-auth-coverage.spec.ts` (212 guarded routes at

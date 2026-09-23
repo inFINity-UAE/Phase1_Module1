@@ -6,7 +6,7 @@ import { CreateCreditNoteLineRequestDto } from './dto/create-credit-note-line-re
 import { UpdateCreditNoteLineDto } from './dto/update-credit-note-line.dto';
 import { CreditNotesService } from './credit-notes.service';
 
-/** [feature-spec-1.1.C.md §1.4] Credit note line CRUD while parent is draft. */
+/** [feature-spec-1_1_C.md §1.4] Credit note line CRUD while parent is draft. */
 @Controller('credit-note-lines')
 @UseGuards(SupabaseAuthGuard, CompanyMembershipGuard)
 export class CreditNoteLinesController {

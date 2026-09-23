@@ -2,7 +2,7 @@ import { IsOptional, IsString, MinLength } from 'class-validator';
 import { IsPostgresUuid } from '../../common/validators/is-postgres-uuid';
 
 /**
- * [feature-spec-1.1.C.md §1.1] Customer create — `trn` set at creation only
+ * [feature-spec-1_1_C.md §1.1] Customer create — `trn` set at creation only
  * (decision #17); not re-enterable via PATCH.
  */
 export class CreateCustomerDto {

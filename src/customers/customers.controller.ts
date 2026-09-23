@@ -17,7 +17,7 @@ import { CreateCustomerDto } from './dto/create-customer.dto';
 import { UpdateCustomerDto } from './dto/update-customer.dto';
 
 /**
- * [feature-spec-1.1.C.md §1.1] Customer CRUD — session + company membership
+ * [feature-spec-1_1_C.md §1.1] Customer CRUD — session + company membership
  * on every route (feature-spec.md decision #41).
  */
 @Controller('customers')

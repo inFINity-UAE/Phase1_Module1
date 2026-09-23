@@ -28,7 +28,7 @@ const PAST_INVOICE_DATE = '2026-06-01';
 const FUTURE_DUE_INVOICE_DATE = '2026-08-01';
 
 (hasSupabase ? describe : describe.skip)(
-  'Invoices mark_overdue_invoices (feature-spec-1.1.C.md §2.2 / §8)',
+  'Invoices mark_overdue_invoices (feature-spec-1_1_C.md §2.2 / §8)',
   () => {
     jest.setTimeout(180_000);
 

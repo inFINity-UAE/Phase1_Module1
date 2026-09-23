@@ -529,7 +529,7 @@ cancellation (reversed original still summed). `GET /accounts/:id/trial-balance`
 
 **Fixed (#60):** qualify lines in an inner subquery filtered by
 `is_ledger_truth_status(status)` (`posted` ∪ `reversed`, same helper as
-H1 reports — feature-spec-1.1.H.md #4), then LEFT JOIN that set to
+H1 reports — feature-spec-1_1_H.md #4), then LEFT JOIN that set to
 `accounts` so empty / draft-only accounts still appear as 0/0/0.
 `security_invoker = true` retained on `CREATE OR REPLACE VIEW`.
 *(Decision #60)*
@@ -759,7 +759,7 @@ to keep applying to any future fixed-company test setup.)*
 | Excel TC1–TC14 | **14 PASS / 0 PARTIAL / 0 FAIL** (incl. #55/#56/#57 deltas) |
 | `v_trial_balance` | `security_invoker=true` confirmed live; status filter uses `is_ledger_truth_status` (#60) |
 | Recurring schedule | Nest `@Cron` EVERY_DAY_AT_1AM → `runDueGenerations` per company (#62); due claim via `generate_due_recurring_entry` / `rjt:` (#63) |
-| Module 1.1.C | customers C1-1 + quotations C1-2 + invoices C1-3 + credit notes C1-4 + quotation convert C1-5 (see feature-spec-1.1.C.md) |
+| Module 1.1.C | customers C1-1 + quotations C1-2 + invoices C1-3 + credit notes C1-4 + quotation convert C1-5 (see feature-spec-1_1_C.md) |
 | Nest ledger-truth audit | #64 — grep of Nest `posted`-only filters: one bug fixed (`getProfitAndLossBalancesForFiscalYear`); remaining hits classified (period-edit guard, test counters — not aggregation) |
 
 **§7.2 drift correction:** The post-#63 row still said **42/42** auth and **~42 suites** — that was already stale *before* C1-1/C1-2 (H1-era **42** routes never picked up **+5** customers or **+12** quotations). Authoritative recount above supersedes all prior §7.2 suite/auth totals; do not increment from the old 42 baseline.

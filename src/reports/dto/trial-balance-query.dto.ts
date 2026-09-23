@@ -3,7 +3,7 @@ import { Transform } from 'class-transformer';
 import { ReportFormatQuery } from './report-format';
 
 /**
- * [feature-spec-1.1.H.md decision #1] Period Trial Balance query.
+ * [feature-spec-1_1_H.md decision #1] Period Trial Balance query.
  * company_id + period_id required; include_zero_balance defaults false.
  */
 export class TrialBalanceQueryDto extends ReportFormatQuery {

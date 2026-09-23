@@ -6,7 +6,7 @@ import { CreateInvoiceLineRequestDto } from './dto/create-invoice-line-request.d
 import { UpdateInvoiceLineDto } from './dto/update-invoice-line.dto';
 import { InvoicesService } from './invoices.service';
 
-/** [feature-spec-1.1.C.md §1.3] Invoice line CRUD while parent is draft. */
+/** [feature-spec-1_1_C.md §1.3] Invoice line CRUD while parent is draft. */
 @Controller('invoice-lines')
 @UseGuards(SupabaseAuthGuard, CompanyMembershipGuard)
 export class InvoiceLinesController {

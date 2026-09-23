@@ -21,7 +21,7 @@ import { UpdateCreditNoteDto } from './dto/update-credit-note.dto';
 import { VoidCreditNoteDto } from './dto/void-credit-note.dto';
 import { CreditNotesService } from './credit-notes.service';
 
-/** [feature-spec-1.1.C.md §1.4] Credit note header CRUD + status transitions. */
+/** [feature-spec-1_1_C.md §1.4] Credit note header CRUD + status transitions. */
 @Controller('credit-notes')
 @UseGuards(SupabaseAuthGuard, CompanyMembershipGuard)
 export class CreditNotesController {

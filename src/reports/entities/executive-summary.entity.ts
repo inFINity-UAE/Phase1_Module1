@@ -1,4 +1,4 @@
-/** [feature-spec-1.1.H.md H2-6] Totals already computed by H1 / D / E reports. */
+/** [feature-spec-1_1_H.md H2-6] Totals already computed by H1 / D / E reports. */
 export type ExecutiveSummaryReport = {
   period_start: string;
   period_end: string;

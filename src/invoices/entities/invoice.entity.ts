@@ -2,7 +2,7 @@ import { InvoiceStatus } from '../common/enums/invoice-status.enum';
 import { InvoiceType } from '../common/enums/invoice-type.enum';
 import { PaymentTermsType } from '../common/enums/payment-terms-type.enum';
 
-/** Row shape for `invoices` — [feature-spec-1.1.C.md §1.3]. */
+/** Row shape for `invoices` — [feature-spec-1_1_C.md §1.3]. */
 export class Invoice {
   id!: string;
   company_id!: string;

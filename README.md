@@ -137,7 +137,7 @@ by `CompanyMembershipGuard` + explicit `company_id` filters (see `feature-spec.m
 
 1. `docs/source-of-truth/Accounting Rules - inFINity.pdf`
 2. `docs/source-of-truth/schema.sql`
-3. The owning module feature spec (`feature-spec.md` for A; also `feature-spec-1.1.H.md`, `feature-spec-1.1.C.md`, `feature-spec-1_1_D.md`, `feature-spec-1_1_E.md`, `feature-spec-1_1_F.md`, `feature-spec-1_1_G.md`)
+3. The owning module feature spec (`feature-spec.md` for A; also `feature-spec-1_1_H.md`, `feature-spec-1_1_C.md`, `feature-spec-1_1_D.md`, `feature-spec-1_1_E.md`, `feature-spec-1_1_F.md`, `feature-spec-1_1_G.md`)
 
 Accounting rules, schema, and feature spec **must agree** — do not invent business
 logic not stated there (see `.cursor/rules/accounting-engine.mdc`).

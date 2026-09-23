@@ -29,7 +29,7 @@ const USER_ID = INTEGRATION_USER_ID;
 const QUOTATION_DATE = '2026-04-01';
 
 (hasSupabase ? describe : describe.skip)(
-  'Quotation convert to invoice (feature-spec-1.1.C.md §4 decision #9)',
+  'Quotation convert to invoice (feature-spec-1_1_C.md §4 decision #9)',
   () => {
     jest.setTimeout(180_000);
 

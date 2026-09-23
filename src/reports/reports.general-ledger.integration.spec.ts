@@ -70,7 +70,7 @@ function money(n: unknown): number {
 }
 
 /**
- * [feature-spec-1.1.H.md decision #5] General Ledger — line-level listing
+ * [feature-spec-1_1_H.md decision #5] General Ledger — line-level listing
  * with true cumulative running balance (date filters do not reset).
  */
 (hasSupabase ? describe : describe.skip)(

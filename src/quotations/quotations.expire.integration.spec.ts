@@ -25,7 +25,7 @@ const PAST_VALID_UNTIL = '2020-01-01';
 const FUTURE_VALID_UNTIL = '2099-12-31';
 
 (hasSupabase ? describe : describe.skip)(
-  'Quotations expire_due_quotations (feature-spec-1.1.C.md §2.1 / §8)',
+  'Quotations expire_due_quotations (feature-spec-1_1_C.md §2.1 / §8)',
   () => {
     jest.setTimeout(180_000);
 

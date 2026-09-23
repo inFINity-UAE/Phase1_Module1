@@ -130,7 +130,7 @@ export class QuotationsService {
     return this.transition(id, QuotationStatus.Declined);
   }
 
-  /** [feature-spec-1.1.C.md §4 decision #9] Accepted quotation → Draft invoice via RPC. */
+  /** [feature-spec-1_1_C.md §4 decision #9] Accepted quotation → Draft invoice via RPC. */
   async convert(id: string, createdBy: string): Promise<InvoiceWithLines> {
     await this.findOne(id);
 

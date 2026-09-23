@@ -6,7 +6,7 @@ This is the scope document for Module 1.1.F only — do not infer scope from
 Module 1.1.A/C/D/E/H1 or Module G.
 
 **Status: ✅ Built 2026-09-16.** This spec follows the same numbered-decision
-discipline `feature-spec.md` (A), `feature-spec-1.1.C.md` (C),
+discipline `feature-spec.md` (A), `feature-spec-1_1_C.md` (C),
 `feature-spec-1_1_D.md` (D), and `feature-spec-1_1_E.md` (E) used:
 decisions are numbered (F-1…); once written, nothing is silently edited —
 append F-45+. F-33 / F-36 / F-37 are closed by F-38…F-41. Residual before

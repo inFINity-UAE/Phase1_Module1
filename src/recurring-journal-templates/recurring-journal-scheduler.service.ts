@@ -34,7 +34,7 @@ type CompanySweepSummary = {
 
 /**
  * [feature-spec.md decision #62] Unattended daily trigger for due recurring
- * templates, [feature-spec-1.1.C.md §8 decision #20] quotation expiration,
+ * templates, [feature-spec-1_1_C.md §8 decision #20] quotation expiration,
  * [decision #21] invoice overdue marking, [feature-spec-1_1_D.md §4.5b]
  * VAT-relief flags, and [§4.5a / D-10 / D-15] ECL provisioning at
  * period_end + 5 business days.
@@ -109,7 +109,7 @@ export class RecurringJournalSchedulerService {
     };
   }
 
-  /** [feature-spec-1.1.C.md §8 decision #20] valid_until → Expired. */
+  /** [feature-spec-1_1_C.md §8 decision #20] valid_until → Expired. */
   async runScheduledExpirations(): Promise<{
     companies_evaluated: number;
     quotations_expired: number;
@@ -133,7 +133,7 @@ export class RecurringJournalSchedulerService {
     };
   }
 
-  /** [feature-spec-1.1.C.md §2.2 / §8 decision #21] due_date → Overdue. */
+  /** [feature-spec-1_1_C.md §2.2 / §8 decision #21] due_date → Overdue. */
   async runScheduledOverdueMarking(): Promise<{
     companies_evaluated: number;
     invoices_marked_overdue: number;

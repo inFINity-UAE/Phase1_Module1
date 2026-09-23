@@ -12,8 +12,8 @@ alwaysApply: true
 | Module | Spec | Status (Build Order, 2026-09-20) |
 |---|---|---|
 | A ledger | `feature-spec.md` | Built |
-| H reports | `feature-spec-1.1.H.md` | Built (H1 #1–#8 + H2-1…H2-15, 2026-09-20); remaining H-R2/H-R4/H-R7/H-R8/PDF-XLSX/H-R14/H-R15 |
-| C sales docs | `feature-spec-1.1.C.md` | C1 core built; §9 presentation deferred |
+| H reports | `feature-spec-1_1_H.md` | Built (H1 #1–#8 + H2-1…H2-15, 2026-09-20); remaining H-R2/H-R4/H-R7/H-R8/PDF-XLSX/H-R14/H-R15 |
+| C sales docs | `feature-spec-1_1_C.md` | C1 core built; §9 presentation deferred |
 | D AR | `feature-spec-1_1_D.md` | Built; §7 deferrals remain |
 | E AP | `feature-spec-1_1_E.md` | Built 2026-09-13; §7 deferrals remain |
 | F VAT | `feature-spec-1_1_F.md` | Built 2026-09-16; §0 residuals remain (10k VD confirm, Box 2/CAS screenshot) |

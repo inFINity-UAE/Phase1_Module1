@@ -1,4 +1,4 @@
-/** [feature-spec-1.1.C.md §2.1] Quotation lifecycle statuses. */
+/** [feature-spec-1_1_C.md §2.1] Quotation lifecycle statuses. */
 export enum QuotationStatus {
   Draft = 'draft',
   Sent = 'sent',

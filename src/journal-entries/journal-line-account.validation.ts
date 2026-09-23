@@ -17,7 +17,7 @@ export type JournalLineAccountRow = {
 };
 
 /**
- * [feature-spec.md §4.8 / decision #35 company-match half; feature-spec-1.1.H.md #5]
+ * [feature-spec.md §4.8 / decision #35 company-match half; feature-spec-1_1_H.md #5]
  * Report filter paths: account must exist and belong to company_id.
  * Does NOT require is_active — historical GL may include inactive accounts.
  */

@@ -20,7 +20,7 @@ import { CreateQuotationDto } from './dto/create-quotation.dto';
 import { UpdateQuotationDto } from './dto/update-quotation.dto';
 import { QuotationsService } from './quotations.service';
 
-/** [feature-spec-1.1.C.md §1.2] Quotation header CRUD + status transitions. */
+/** [feature-spec-1_1_C.md §1.2] Quotation header CRUD + status transitions. */
 @Controller('quotations')
 @UseGuards(SupabaseAuthGuard, CompanyMembershipGuard)
 export class QuotationsController {

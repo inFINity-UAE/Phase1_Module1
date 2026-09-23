@@ -1,4 +1,4 @@
-/** Row shape for `invoice_lines` — [feature-spec-1.1.C.md §1.3]. */
+/** Row shape for `invoice_lines` — [feature-spec-1_1_C.md §1.3]. */
 export class InvoiceLine {
   id!: string;
   invoice_id!: string;

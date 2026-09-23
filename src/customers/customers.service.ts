@@ -17,7 +17,7 @@ export class CustomersService {
     private readonly customersRepository: CustomersRepository,
   ) {}
 
-  /** [feature-spec-1.1.C.md §1.1] Create customer for a company. */
+  /** [feature-spec-1_1_C.md §1.1] Create customer for a company. */
   async create(dto: CreateCustomerDto): Promise<Customer> {
     try {
       return await this.customersRepository.insert(dto);
@@ -50,7 +50,7 @@ export class CustomersService {
   }
 
   /**
-   * [feature-spec-1.1.C.md decision #17] Metadata-only update — `trn` and
+   * [feature-spec-1_1_C.md decision #17] Metadata-only update — `trn` and
    * `company_id` are not patchable after creation.
    */
   async update(id: string, dto: UpdateCustomerDto): Promise<Customer> {
@@ -82,7 +82,7 @@ export class CustomersService {
   }
 
   /**
-   * [feature-spec-1.1.C.md §1.1] Soft deactivate — never hard-delete.
+   * [feature-spec-1_1_C.md §1.1] Soft deactivate — never hard-delete.
    * Future quotation/invoice modules must reject new documents referencing
    * `is_active = false` customers; existing documents are untouched.
    */

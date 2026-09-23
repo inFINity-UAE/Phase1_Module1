@@ -133,7 +133,7 @@ type GlRow = {
 };
 
 /**
- * [feature-spec-1.1.H.md decision #6] Cross-report integrity sweep —
+ * [feature-spec-1_1_H.md decision #6] Cross-report integrity sweep —
  * Module 1.1.A lifecycle (multi-period posts, reverse, year-end) then
  * assert TB / BS / P&L / GL agree with each other and with journal_lines.
  * Extends the TC11 (YE) + TC12 (reversal) patterns into one shared fixture.

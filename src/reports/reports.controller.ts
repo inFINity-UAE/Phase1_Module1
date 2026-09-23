@@ -25,7 +25,7 @@ import { ReportsCsvInterceptor } from './reports-csv.interceptor';
 import { ReportsService } from './reports.service';
 
 /**
- * [feature-spec-1.1.H.md] + D/E/F report routes.
+ * [feature-spec-1_1_H.md] + D/E/F report routes.
  * Thin read routes over Postgres report RPCs — no Nest-side aggregation
  * except H2-1 totals (summarizeProfitAndLoss twice) and H2-6 composition.
  */

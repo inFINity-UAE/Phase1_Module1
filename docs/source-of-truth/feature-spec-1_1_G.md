@@ -8,7 +8,7 @@ Module 1.1.A/C/D/E/F/H1.
 **Status: ✅ Ratified 2026-09-18.** Build Order §7 lists G as sequenced
 seventh — after A (Module 0), H-core (Module 1), and F (Module 6), all
 three done. This spec follows the same numbered-decision discipline
-`feature-spec.md` (A), `feature-spec-1.1.C.md` (C),
+`feature-spec.md` (A), `feature-spec-1_1_C.md` (C),
 `feature-spec-1_1_D.md` (D), `feature-spec-1_1_E.md` (E), and
 `feature-spec-1_1_F.md` (F) used: decisions are numbered (G-1…); once
 written, nothing is silently edited — append G-N+. G-1…G-12 were the

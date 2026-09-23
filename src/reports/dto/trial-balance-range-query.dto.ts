@@ -2,7 +2,7 @@ import { IsBoolean, IsDateString, IsOptional, IsUUID } from 'class-validator';
 import { Transform } from 'class-transformer';
 import { ReportFormatQuery } from './report-format';
 
-/** [feature-spec-1.1.H.md H2-2] Additive range TB — period_id route unchanged. */
+/** [feature-spec-1_1_H.md H2-2] Additive range TB — period_id route unchanged. */
 export class TrialBalanceRangeQueryDto extends ReportFormatQuery {
   @IsUUID()
   company_id!: string;

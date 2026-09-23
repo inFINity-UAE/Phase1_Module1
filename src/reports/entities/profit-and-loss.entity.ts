@@ -10,7 +10,7 @@ export type ProfitAndLossAccountRow = {
 };
 
 /**
- * [feature-spec-1.1.H.md decision #3] Single-period P&L response.
+ * [feature-spec-1_1_H.md decision #3] Single-period P&L response.
  * net_profit = total_income - total_expense (YE lockstep).
  */
 export type ProfitAndLossReport = {

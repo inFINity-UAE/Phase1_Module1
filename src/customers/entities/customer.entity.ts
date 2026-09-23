@@ -1,4 +1,4 @@
-/** Row shape for `customers` — [feature-spec-1.1.C.md §1.1]. */
+/** Row shape for `customers` — [feature-spec-1_1_C.md §1.1]. */
 export class Customer {
   id!: string;
   company_id!: string;

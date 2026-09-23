@@ -1,4 +1,4 @@
-/** [feature-spec-1.1.C.md §5 decision #10] Payment terms — due_date derived at Issue. */
+/** [feature-spec-1_1_C.md §5 decision #10] Payment terms — due_date derived at Issue. */
 export enum PaymentTermsType {
   Net7 = 'net_7',
   Net15 = 'net_15',

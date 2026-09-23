@@ -6,7 +6,7 @@ import { CreateQuotationLineRequestDto } from './dto/create-quotation-line-reque
 import { UpdateQuotationLineDto } from './dto/update-quotation-line.dto';
 import { QuotationsService } from './quotations.service';
 
-/** [feature-spec-1.1.C.md §1.2] Quotation line CRUD while parent is draft. */
+/** [feature-spec-1_1_C.md §1.2] Quotation line CRUD while parent is draft. */
 @Controller('quotation-lines')
 @UseGuards(SupabaseAuthGuard, CompanyMembershipGuard)
 export class QuotationLinesController {

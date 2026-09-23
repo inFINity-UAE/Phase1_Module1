@@ -104,7 +104,7 @@ export class CreditNotesService {
   }
 
   /**
-   * [feature-spec-1.1.C.md §1.4 / §7] Draft → Issued: numbering and atomic
+   * [feature-spec-1_1_C.md §1.4 / §7] Draft → Issued: numbering and atomic
    * credit-note ledger posting via issue_credit_note RPC.
    */
   async issue(id: string): Promise<CreditNoteIssueResult> {
@@ -124,7 +124,7 @@ export class CreditNotesService {
   }
 
   /**
-   * [feature-spec-1.1.C.md §2.2 / §7] Void requires void_reason and atomically
+   * [feature-spec-1_1_C.md §2.2 / §7] Void requires void_reason and atomically
    * reverses journal_entry_id via void_credit_note RPC when posting exists.
    * Decision #14 applies to Issue (partial posting); void uses reverse_journal_entry
    * for the whole document — all-or-nothing, same as invoice void (B3).

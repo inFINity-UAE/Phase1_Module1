@@ -31,7 +31,7 @@ const CREDIT_NOTE_DATE = '2026-07-01';
 const INVOICE_DATE = '2026-06-15';
 
 (hasSupabase ? describe : describe.skip)(
-  'Credit notes (feature-spec-1.1.C.md §1.4 C1-4)',
+  'Credit notes (feature-spec-1_1_C.md §1.4 C1-4)',
   () => {
     jest.setTimeout(180_000);
 

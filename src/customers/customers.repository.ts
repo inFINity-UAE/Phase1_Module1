@@ -3,7 +3,7 @@ import { Customer } from './entities/customer.entity';
 
 export const CUSTOMERS_REPOSITORY = Symbol('CUSTOMERS_REPOSITORY');
 
-/** Writable columns for PATCH /customers/:id — [feature-spec-1.1.C.md decision #17]. */
+/** Writable columns for PATCH /customers/:id — [feature-spec-1_1_C.md decision #17]. */
 export interface UpdateCustomerRecord {
   customer_name?: string;
   email?: string | null;

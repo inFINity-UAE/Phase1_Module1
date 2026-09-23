@@ -30,7 +30,7 @@ const USER_ID = INTEGRATION_USER_ID;
 const INVOICE_DATE = '2026-06-01';
 
 (hasSupabase ? describe : describe.skip)(
-  'Invoices (feature-spec-1.1.C.md §1.3 C1-3)',
+  'Invoices (feature-spec-1_1_C.md §1.3 C1-3)',
   () => {
     jest.setTimeout(180_000);
 

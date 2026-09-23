@@ -1042,7 +1042,7 @@ D-14 Cabinet Resolution holiday seed, D-15 calendar month-end.
 ## 9. Decision Log Index
 
 Chronological index for traceability — full text of each entry is in §2.
-Same discipline as `feature-spec-1.1.C.md` §11: never silently edit an
+Same discipline as `feature-spec-1_1_C.md` §11: never silently edit an
 existing row; append D-18+ if a decision must change.
 
 | # | Date | Summary | Detail in |

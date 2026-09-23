@@ -34,7 +34,7 @@ function uniqueTrn(): string {
 }
 
 (hasSupabase ? describe : describe.skip)(
-  'Customers (feature-spec-1.1.C.md §1.1)',
+  'Customers (feature-spec-1_1_C.md §1.1)',
   () => {
     jest.setTimeout(180_000);
 

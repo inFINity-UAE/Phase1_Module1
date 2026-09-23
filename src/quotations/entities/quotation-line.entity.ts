@@ -1,4 +1,4 @@
-/** Row shape for `quotation_lines` — [feature-spec-1.1.C.md §1.2]. */
+/** Row shape for `quotation_lines` — [feature-spec-1_1_C.md §1.2]. */
 export class QuotationLine {
   id!: string;
   quotation_id!: string;

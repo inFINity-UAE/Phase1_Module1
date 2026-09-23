@@ -1,7 +1,7 @@
 import { IsDateString, IsOptional, IsUUID } from 'class-validator';
 import { ReportFormatQuery } from './report-format';
 
-/** [feature-spec-1.1.H.md H2-1] period_b optional → prior same-length range. */
+/** [feature-spec-1_1_H.md H2-1] period_b optional → prior same-length range. */
 export class ProfitAndLossComparisonQueryDto extends ReportFormatQuery {
   @IsUUID()
   company_id!: string;

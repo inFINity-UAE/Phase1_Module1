@@ -130,7 +130,7 @@ export class InvoicesService {
   }
 
   /**
-   * [feature-spec-1.1.C.md §2.2 / §7] Draft → Issued: numbering, due_date,
+   * [feature-spec-1_1_C.md §2.2 / §7] Draft → Issued: numbering, due_date,
    * invoice_type, and atomic sales-invoice ledger posting via issue_invoice RPC.
    * [feature-spec-1_1_D.md §5.3 / D-4] Credit-limit alert returned, never blocks.
    */
@@ -165,7 +165,7 @@ export class InvoicesService {
   }
 
   /**
-   * [feature-spec-1.1.C.md §2.2 / §7] Void requires void_reason and atomically
+   * [feature-spec-1_1_C.md §2.2 / §7] Void requires void_reason and atomically
    * reverses journal_entry_id via void_invoice RPC when posting exists.
    */
   async void(id: string, dto: VoidInvoiceDto, createdBy: string): Promise<InvoiceVoidResult> {

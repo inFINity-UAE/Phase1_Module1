@@ -1,6 +1,6 @@
 import { QuotationStatus } from '../common/enums/quotation-status.enum';
 
-/** Row shape for `quotations` — [feature-spec-1.1.C.md §1.2]. */
+/** Row shape for `quotations` — [feature-spec-1_1_C.md §1.2]. */
 export class Quotation {
   id!: string;
   company_id!: string;

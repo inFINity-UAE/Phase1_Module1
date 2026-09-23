@@ -1,7 +1,7 @@
 import { IsOptional, IsString, MinLength } from 'class-validator';
 
 /**
- * [feature-spec-1.1.C.md decision #17] Metadata-only PATCH — `trn` and
+ * [feature-spec-1_1_C.md decision #17] Metadata-only PATCH — `trn` and
  * `company_id` are intentionally excluded (immutable after create).
  */
 export class UpdateCustomerDto {
