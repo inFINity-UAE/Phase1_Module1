@@ -63,12 +63,18 @@ import {
 import { VatService } from '../vat/vat.service';
 import { CtController } from '../ct/ct.controller';
 import { CtService } from '../ct/ct.service';
+import { DocumentBatchesController } from '../document-ocr/document-batches.controller';
+import { DocumentBatchesService } from '../document-ocr/document-batches.service';
+import { DocumentExtractionsController } from '../document-ocr/document-extractions.controller';
+import { DocumentIngestionService } from '../document-ocr/document-ingestion.service';
+import { DocumentPromotionService } from '../document-ocr/document-promotion.service';
+import { BillExtractionRepository } from '../document-ocr/bill-extraction.repository';
 
 /**
  * [feature-spec.md decisions #24/#27/#41; feature-spec-1_1_H.md #1]
  * Controllers reject unauthenticated requests (401) and succeed for a
  * verified Bearer session with membership. Regression list covers all
- * 218 guarded HTTP routes across controllers.
+ * 225 guarded HTTP routes across controllers.
  *
  * Blind spot (C1-3): this spec registers controllers in isolation and mocks
  * CompanyMembershipGuard + CompanyMembersService — it does NOT import real
@@ -108,6 +114,7 @@ describe('Controller auth coverage (decision #24)', () => {
   const goodsReceiptId = '1e1e1e1e-1e1e-1e1e-1e1e-1e1e1e1e1e1e';
   const goodsReceiptLineId = '1f1f1f1f-1f1f-1f1f-1f1f-1f1f1f1f1f1f';
   const billId = '20202020-2020-2020-2020-202020202020';
+  const documentBatchId = '30303030-3030-3030-3030-303030303030';
   const billLineId = '21212121-2121-2121-2121-212121212121';
   const supplierPaymentId = '22222222-2222-2222-2222-222222222221';
   const supplierPaymentAppId = '23232323-2323-2323-2323-232323232323';
@@ -771,6 +778,28 @@ describe('Controller auth coverage (decision #24)', () => {
     },
     { method: 'PATCH', path: `/journal-lines/${journalLineId}`, body: { debit: 1 } },
     { method: 'DELETE', path: `/journal-lines/${journalLineId}` },
+    {
+      method: 'POST',
+      path: '/document-batches',
+      body: {
+        company_id: companyId,
+        documents: [{ file_name: 'invoice.pdf', file_url: 'https://example.com/invoice.pdf' }],
+      },
+    },
+    { method: 'GET', path: `/document-batches/${documentBatchId}?company_id=${companyId}` },
+    { method: 'POST', path: '/document-extractions', body: { company_id: companyId } },
+    { method: 'GET', path: `/document-extractions?company_id=${companyId}` },
+    { method: 'GET', path: `/document-extractions/${documentBatchId}?company_id=${companyId}` },
+    {
+      method: 'POST',
+      path: `/document-extractions/${documentBatchId}/approve`,
+      body: { company_id: companyId },
+    },
+    {
+      method: 'POST',
+      path: `/document-extractions/${documentBatchId}/reject`,
+      body: { company_id: companyId, reason: 'Not an invoice' },
+    },
   ];
 
   beforeAll(async () => {
@@ -1159,6 +1188,8 @@ describe('Controller auth coverage (decision #24)', () => {
         BadDebtReliefClaimsController,
         VatVoluntaryDisclosuresController,
         CtController,
+        DocumentBatchesController,
+        DocumentExtractionsController,
       ],
       providers: [
         SupabaseAuthGuard,
@@ -1176,6 +1207,36 @@ describe('Controller auth coverage (decision #24)', () => {
         { provide: AuditLogService, useValue: auditLogService },
         { provide: ReportsService, useValue: reportsService },
         { provide: VatService, useValue: vatService },
+        {
+          provide: DocumentBatchesService,
+          useValue: {
+            create: jest.fn().mockResolvedValue({ batch_id: documentBatchId }),
+            status: jest.fn().mockResolvedValue({ batch_id: documentBatchId }),
+          },
+        },
+        {
+          provide: DocumentIngestionService,
+          useValue: { ingest: jest.fn().mockResolvedValue({ id: documentBatchId }) },
+        },
+        {
+          provide: DocumentPromotionService,
+          useValue: {
+            promote: jest.fn().mockResolvedValue({ id: documentBatchId, bill_id: billId }),
+            reject: jest.fn().mockResolvedValue({ id: documentBatchId }),
+          },
+        },
+        {
+          provide: BillExtractionRepository,
+          useValue: {
+            listForCompany: jest.fn().mockResolvedValue([]),
+            findById: jest.fn().mockResolvedValue({
+              id: documentBatchId,
+              company_id: companyId,
+              bill_id: null,
+              extracted_snapshot: { review: { hard_blocks: [], soft_flags: [], status: 'open' } },
+            }),
+          },
+        },
         {
           provide: CtService,
           useValue: {
@@ -1254,7 +1315,7 @@ describe('Controller auth coverage (decision #24)', () => {
   }
 
   it('covers all guarded HTTP routes', () => {
-    expect(ALL_GUARDED_ROUTES).toHaveLength(218);
+    expect(ALL_GUARDED_ROUTES).toHaveLength(225);
   });
 
   it.each(ALL_GUARDED_ROUTES)(

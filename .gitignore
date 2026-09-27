@@ -21,3 +21,8 @@ jest-summary.json
 
 # Generated / working accounting overview (not source of truth)
 INFINITY_ACCOUNTING_DOCUMENTATION.md
+
+# Veryfi spike: local sample invoices and raw OCR dumps (may contain vendor data)
+*.veryfi_response.json
+test-data/*
+!test-data/.gitkeep

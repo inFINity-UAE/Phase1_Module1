@@ -163,6 +163,8 @@ scripts/
   verify-reset-health.mjs       Post-reset DB + COA probe
   trigger-execute-empirical-test.mjs   PGlite grant/trigger experiment
   generate_coa_seed.py            Regenerate seed SQL from Excel
+  veryfi_spike.py                 Module B confidence-field sandbox spike
+test-data/                 Local sample invoices for the Veryfi spike (gitignored)
 ```
 
 ---
@@ -174,6 +176,38 @@ python scripts/generate_coa_seed.py
 ```
 
 Output targets `docs/source-of-truth/seed_finalized_coa_demo_company_0002.sql`.
+
+---
+
+## Veryfi confidence spike (Module B, optional)
+
+One-off check for `feature-spec-1_1_B.md` §0.2 / §3: whether this Veryfi plan
+returns a per-field confidence signal, and whether vendor, invoice number,
+date, line items, VAT, and total come back populated. It does not change
+extraction behavior.
+
+Put a few sample invoices (PDF, JPG, or PNG) in `test-data/`. That folder's
+contents are gitignored. Fill these three values in `.env` or `.env.local`
+(same files as §2; the script reads `.env` first, then fills any blank from
+`.env.local`):
+
+```env
+VERYFI_CLIENT_ID=
+VERYFI_USERNAME=
+VERYFI_API_KEY=
+```
+
+`VERYFI_CLIENT_SECRET` is not required. `VERYFI_WEBHOOK_SECRET` is for the
+app webhook, not this spike.
+
+```bash
+pip install requests
+python scripts/veryfi_spike.py test-data/invoice1.pdf test-data/invoice2.jpg
+```
+
+Each file prints a required-field check and a confidence-signal scan, and
+writes `<filename>.veryfi_response.json` in the current directory. Do not
+commit those JSON files.
 
 ---
 

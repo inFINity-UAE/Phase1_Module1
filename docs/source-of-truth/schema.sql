@@ -4901,6 +4901,48 @@ create table bill_lines (
   )
 );
 
+-- [feature-spec-1_1_B.md §0.3] Pre-bill OCR staging. Additive. bills/bill_lines unchanged.
+-- Postgres rejects a subquery inside CHECK (SQLSTATE 0A000). The same
+-- predicate lives in this immutable function so the constraint can call it.
+create or replace function bill_extraction_field_origin_ok(p_origin jsonb)
+returns boolean
+language sql
+immutable
+as $$
+  select jsonb_typeof(p_origin) = 'object'
+    and not exists (
+      select 1 from jsonb_each_text(p_origin) o
+      where o.value not in ('extracted', 'human_confirmed', 'human_edited')
+    );
+$$;
+revoke all on function bill_extraction_field_origin_ok(jsonb) from public;
+revoke all on function bill_extraction_field_origin_ok(jsonb) from authenticated;
+revoke all on function bill_extraction_field_origin_ok(jsonb) from anon;
+grant execute on function bill_extraction_field_origin_ok(jsonb) to service_role;
+
+create table bill_extraction_meta (
+  id                     uuid primary key default gen_random_uuid(),
+  company_id             uuid not null references companies(id),
+  bill_id                uuid unique references bills(id) on delete cascade,
+  source_file_name       text not null,
+  source_file_url        text not null,   -- Supabase Storage path, same pattern as journal_attachments.file_url
+  source_file_size_bytes bigint,
+  source_mime_type       text,
+  veryfi_document_id     text not null,
+  extracted_snapshot     jsonb not null default '{}'::jsonb,
+  field_origin           jsonb not null default '{}'::jsonb,
+  created_at             timestamptz not null default now(),
+  updated_at             timestamptz not null default now(),
+  constraint bill_extraction_meta_origin_check check (
+    bill_extraction_field_origin_ok(field_origin)
+  )
+);
+
+create unique index bill_extraction_meta_company_veryfi_unique
+  on bill_extraction_meta (company_id, veryfi_document_id);
+create index idx_bill_extraction_meta_company
+  on bill_extraction_meta (company_id);
+
 create table three_way_match_results (
   id                  uuid primary key default gen_random_uuid(),
   bill_id             uuid not null references bills(id),
@@ -9172,6 +9214,7 @@ alter table goods_receipts enable row level security;
 alter table goods_receipt_lines enable row level security;
 alter table bills enable row level security;
 alter table bill_lines enable row level security;
+alter table bill_extraction_meta enable row level security;
 alter table three_way_match_results enable row level security;
 alter table supplier_payments enable row level security;
 alter table supplier_payment_applications enable row level security;
@@ -9297,6 +9340,8 @@ create policy company_isolation_bills on bills
   using (company_id = (select current_setting('app.current_company_id', true))::uuid);
 create policy company_isolation_bill_lines on bill_lines
   using (bill_id in (select id from bills where company_id = (select current_setting('app.current_company_id', true))::uuid));
+create policy company_isolation_bill_extraction_meta on bill_extraction_meta
+  using (company_id = (select current_setting('app.current_company_id', true))::uuid);
 create policy company_isolation_three_way_match_results on three_way_match_results
   using (bill_id in (select id from bills where company_id = (select current_setting('app.current_company_id', true))::uuid));
 create policy company_isolation_supplier_payments on supplier_payments
