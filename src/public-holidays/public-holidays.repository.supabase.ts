@@ -15,9 +15,7 @@ export class SupabasePublicHolidaysRepository implements PublicHolidaysRepositor
       .or(`company_id.eq.${companyId},company_id.is.null`)
       .order('holiday_date', { ascending: true });
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
     return (data ?? []) as PublicHoliday[];
   }
 
@@ -28,9 +26,7 @@ export class SupabasePublicHolidaysRepository implements PublicHolidaysRepositor
       .eq('id', id)
       .maybeSingle();
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
     return (data as PublicHoliday | null) ?? null;
   }
 
@@ -52,9 +48,7 @@ export class SupabasePublicHolidaysRepository implements PublicHolidaysRepositor
       .select('*')
       .single();
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
     return data as PublicHoliday;
   }
 
@@ -70,17 +64,13 @@ export class SupabasePublicHolidaysRepository implements PublicHolidaysRepositor
       .select('*')
       .single();
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
     return data as PublicHoliday;
   }
 
   async delete(id: string): Promise<void> {
     const { error } = await this.supabase.client.from('public_holidays').delete().eq('id', id);
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
   }
 }

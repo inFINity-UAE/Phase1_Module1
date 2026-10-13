@@ -28,9 +28,7 @@ export class SupabasePaymentsRepository implements PaymentsRepository {
       .select()
       .single();
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return data as Payment;
   }
@@ -42,9 +40,7 @@ export class SupabasePaymentsRepository implements PaymentsRepository {
       .eq('company_id', companyId)
       .order('payment_date', { ascending: false });
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return (data ?? []) as Payment[];
   }
@@ -56,12 +52,8 @@ export class SupabasePaymentsRepository implements PaymentsRepository {
       .eq('id', id)
       .maybeSingle();
 
-    if (paymentError) {
-      throw paymentError;
-    }
-    if (!payment) {
-      return null;
-    }
+    if (paymentError) throw paymentError;
+    if (!payment) return null;
 
     const { data: applications, error: appError } = await this.supabase.client
       .from('payment_applications')
@@ -69,9 +61,7 @@ export class SupabasePaymentsRepository implements PaymentsRepository {
       .eq('payment_id', id)
       .order('applied_at');
 
-    if (appError) {
-      throw appError;
-    }
+    if (appError) throw appError;
 
     return {
       payment: payment as Payment,
@@ -87,18 +77,14 @@ export class SupabasePaymentsRepository implements PaymentsRepository {
       .select()
       .single();
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return data as Payment;
   }
 
   async deletePayment(id: string): Promise<void> {
     const { error } = await this.supabase.client.from('payments').delete().eq('id', id);
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
   }
 
   async insertApplication(params: {
@@ -118,9 +104,7 @@ export class SupabasePaymentsRepository implements PaymentsRepository {
       .select()
       .single();
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return data as PaymentApplication;
   }
@@ -130,9 +114,7 @@ export class SupabasePaymentsRepository implements PaymentsRepository {
       .from('payment_applications')
       .delete()
       .eq('id', id);
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
   }
 
   async findApplicationById(id: string): Promise<PaymentApplication | null> {
@@ -142,9 +124,7 @@ export class SupabasePaymentsRepository implements PaymentsRepository {
       .eq('id', id)
       .maybeSingle();
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return (data as PaymentApplication | null) ?? null;
   }
@@ -156,9 +136,7 @@ export class SupabasePaymentsRepository implements PaymentsRepository {
       .eq('id', id)
       .maybeSingle();
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return (data?.payment_id as string | undefined) ?? null;
   }
@@ -170,9 +148,7 @@ export class SupabasePaymentsRepository implements PaymentsRepository {
       .eq('id', customerId)
       .maybeSingle();
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return (data?.company_id as string | undefined) ?? null;
   }
@@ -184,12 +160,8 @@ export class SupabasePaymentsRepository implements PaymentsRepository {
       .eq('id', customerId)
       .maybeSingle();
 
-    if (error) {
-      throw error;
-    }
-    if (!data) {
-      return null;
-    }
+    if (error) throw error;
+    if (!data) return null;
 
     return Boolean(data.is_active);
   }
@@ -203,9 +175,7 @@ export class SupabasePaymentsRepository implements PaymentsRepository {
       p_created_by: createdBy,
     });
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     const result = data as { journal_entry_id: string; entry_type: string };
     return {
@@ -226,9 +196,7 @@ export class SupabasePaymentsRepository implements PaymentsRepository {
       },
     );
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     const result = data as { journal_entry_id: string };
     return { journal_entry_id: result.journal_entry_id };

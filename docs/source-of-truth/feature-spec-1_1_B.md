@@ -202,39 +202,33 @@ guessing.
    to the standard rate. If lines are mixed and don't each individually
    snap, the whole document stays in review — no partial application.
 
-## 0.4 B2 (bank statement import) — confirmed deferred to next phase
+## 0.4 B2 (bank statement import) — dependency corrected 2026-10-07
 
-**Resolved (owner decision, this conversation): B2 is out of scope for
-this build entirely, not just the posting side.** The bank reconciliation
-engine is planned for the next phase, not this one, so there's no point
-prototyping B2's extraction now either — it would sit unused until the
-reconciliation engine it depends on exists. This section is kept as
-context for that future phase, not as an active recommendation:
+**B-0.4 still stands for what it decided:** do not prototype a second
+posting path, and do not invent a match. The sentence that blocked the
+next section — "no bank reconciliation module exists in the build order,
+not built, not queued, not numbered" — is no longer true.
+`Module_1_2_Build_Order_Scope.md` is that module. It is scoped and
+queued. It is not built, and its staging table is not in `schema.sql`.
 
-Module D's own deferral list (`feature-spec-1_1_D.md` §7, carried into
-Build Order §3) already states that `1070 → 1020` clearing entries are
-"**Later / bank-reconciliation module — manual JE until then**." No bank
-reconciliation module exists in the build order — not built, not queued,
-not numbered. "PDF bank statement import: extracts transactions from UAE
-bank statement PDFs" needs somewhere structural for an extracted
-transaction to land: a staging table, a match against existing
-`journal_lines`/payments, a reconciled/unreconciled state. None of that
-exists today, and per the phase decision above, it isn't being built in
-this phase either.
+Schema check (same pass as Module 1.2 §0.1):
 
-This was the exact problem Build Order §5 used to justify sequencing B
-*after* E ("building OCR before Accounts Payable's Bill entity exists
-means building against a guess") — same reasoning, and now resolved the
-same way: **defer the whole sub-module, not just part of it.**
+- `bill_extraction_meta` is the bill-file table. It is the wrong landing
+  place for a bank line (`bill_id`, supplier invoice fields).
+- There is no `bank_accounts` table and no bank-statement line table.
+- `payments` / `supplier_payments` already post cash (D-12). A bank line
+  that repeats those postings would double-count. That rule is Module 1.2
+  Q1 and is still open.
+- `1070 → 1020` card/POS clearing is still D-12's deferral. B2 does not
+  post it.
+- `supplier_statement_lines` and `reconcile_supplier_statement` are
+  supplier statements, not bank statements.
 
-- B2 (Part II below) is retained in this document only as a placeholder
-  for the next phase — Veryfi's Bank Statement API details are noted for
-  when that phase starts, but no work against it happens now.
-- The **entire scope of B2 stays out of this build** until the bank
-  reconciliation module is scoped with its own spec, the same way B itself
-  was held out of scope until E existed.
-- §6–§7 below are kept as reference for that future phase, not as
-  in-scope work for this build.
+**What B2 is now:** PDF in, text out, no ledger write. The structured
+line list (date, description, debit, credit, balance) waits until
+Module 1.2 A1 has a staging table in `schema.sql`. Until then §6 stores
+the file and the OCR text only, and §7 stays unvalidated. Part III (email
+capture) does not depend on this table.
 
 ---
 
@@ -476,33 +470,56 @@ time.
 
 ---
 
-# Part II — B2: Bank Statement Import (deferred to next phase — see §0.4)
+# Part II — B2: Bank Statement Import
 
-## 6. Scope — not built this phase
+## 6. Scope — file and text now; lines when 1.2 A1 exists
 
-**Deferred in full, not just the posting side.** Kept here only as
-reference for when the bank reconciliation engine is scoped:
+Owner instruction 2026-10-07: the missing reconciliation module was the
+block. Module 1.2 is that scope. B2 still must not post.
 
-Calling Veryfi's Bank Statement API (`/api/v8/partner/bank-statements`,
-async-capable) against PDF statements would return a structured
-transaction list (date, description, debit, credit, balance) — Veryfi's
-endpoint returns this generically; it isn't UAE-bank-specific, so
-"auto-identifies columns regardless of format" would mostly be Veryfi's
-existing normalization, not new work, when this is picked up.
+**Specified, not built.** No bank-statement table and no route exist yet.
+The behavior below is the contract for that route when it is added:
 
-**Out of scope for this phase entirely:** extraction, posting, matching,
-everything. There is no partial B2 in this build.
+**In this pass:**
+
+- One PDF bank statement per request. Same size cap as the OCR.space
+  free plan used by B1 (about 1 MB, first 3 pages). JPG/PNG are not this
+  endpoint.
+- Store the file the same way as `journal_attachments.file_url` (Supabase
+  Storage path) and keep the OCR text.
+- OCR provider is OCR.space, synchronous, English. Veryfi's bank-statement
+  API is not called. Veryfi is parked (owner: not enough credits).
+- OCR.space returns page text, not date / description / debit / credit /
+  balance. Do not parse those fields out of the text. A guessed line
+  would be an invented bank transaction.
+- Do not insert `journal_entries`, `journal_lines`, `payments`,
+  `supplier_payments`, or `bills`. Do not call `1070 → 1020` settlement.
+- Do not write `bill_extraction_meta`. That row becomes a bill.
+
+**Not in this pass — blocked on Module 1.2, not on a missing module name:**
+
+- A staging row per bank line (source, import batch, dedupe key). That
+  table is Module 1.2 §1. It is not in `schema.sql`. Adding it here
+  would invent columns ahead of Q1 (match an existing D/E payment versus
+  post a new journal).
+- Matching, outstanding cheques, outstanding deposits, reconciliation
+  lock, and the FTA reconciliation statement. Those are Module 1.2 §2.
+  Cheque number / date / post-dated flag are not on `payments` or
+  `supplier_payments` (Module 1.2 §0.1).
+- Per-bank column maps for the seven UAE banks (§7).
+
+When 1.2 A1's staging table is in `schema.sql`, B2's only extra step is
+to insert extracted lines into that table. It still does not match or
+post. Matching stays in Module 1.2 B1.
 
 ## 7. Per-bank validation — open, not assumed
 
 The feature list names seven formats: Emirates NBD, FAB, ADCB, Mashreq,
-RAK Bank, DIB, CBD. Veryfi's Bank Statement model is generic across banks
-and currencies rather than pre-trained per named UAE bank. **Before
-committing to "supports these seven,"** run one real (anonymized)
-statement per bank through the endpoint and check column-mapping accuracy
-— don't list a bank as supported on the strength of Veryfi supporting
-bank statements in general. This is the same posture as the Arabic spike
-in §0.2: a general capability claim isn't a per-format accuracy guarantee.
+RAK Bank, DIB, CBD. No statement from any of the seven has been run
+through OCR.space. **Do not list a bank as supported** until one real
+anonymized statement from that bank has been checked for date,
+description, debit, credit, and balance. OCR.space returning English
+words from a PDF is not that check.
 
 ---
 
@@ -577,7 +594,8 @@ rather than from scratch.
 | B-0.2 | Veryfi capability contract vs. feature-list claims (confidence-field, Arabic accuracy) | Checked against Veryfi docs 2026-09-21. **Confidence-field spike done and resolved this conversation** — plan returns document-level `ocr_score` only, no per-field confidence (§3). Arabic sample spike still pending, deferred with §3.4. |
 | B-0.3 | B1 landing target: `bill_extraction_meta` staging table (new, additive) feeds `bills` once E's constraints are satisfiable | **Resolved — checked against live schema.** Original assumption (extraction lands directly as a draft `bills` row) was wrong. Table is in `schema.sql`. |
 | B-0.3.2 | VAT amount → VAT rate + category derivation for `bill_lines.vat_rate`/`vat_category` | **Resolved — owner rejected the original rate-only-snap approach and specified the correct derivation** (per-line ratio → standard rate/`standard_rated`, or 0/null-category, or stays in staging; no tolerance beyond `numeric(5,2)`; header VAT only applies uniformly when it snaps to standard). See §0.3.2. |
-| B-0.4 | B2 (bank statement import) deferred to next phase, in full | **Resolved — owner confirmed bank reconciliation engine is next-phase, not this one** |
+| B-0.4 | B2 (bank statement import) deferred to next phase, in full | **Resolved — owner confirmed bank reconciliation engine is next-phase, not this one.** The "no module is queued" fact inside §0.4 was later wrong; see B-0.4a. The "do not post from B2" rule is unchanged. |
+| B-0.4a | 2026-10-07 — Module 1.2 is the bank-reconciliation scope. B2 may store a PDF and OCR text. It may not post, match, or invent bank lines from raw text. Structured lines wait for the Module 1.2 §1 staging table. | **Resolved — owner instruction this date.** Q1 (match vs re-post) stays open in `Module_1_2_Build_Order_Scope.md`. |
 | B-5.1 | Duplicate-detection match key and tolerances (exact-match rule + ±3-day/±AED 1 heuristic rule) | **Resolved — owner confirmed both rules and tolerances** |
 | B-5.2 | Auto-categorisation: blank + forced manual selection for new/unclear vendors, no suspense posting | **Resolved — owner confirmed** |
 | B-9 | Email capture: per-customer inbound forwarding address, no OAuth/inbox access | **Resolved — owner rejected OAuth (Gmail/Outlook access is a hard ask for many customers); forwarding address chosen instead.** Address format, inline-body detection, and spoofing/validation remain open (§9). |

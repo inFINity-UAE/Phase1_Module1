@@ -51,9 +51,7 @@ export class SupabaseJournalEntriesRepository implements JournalEntriesRepositor
       p_company_id: companyId,
     });
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return Number(data);
   }
@@ -93,18 +91,14 @@ export class SupabaseJournalEntriesRepository implements JournalEntriesRepositor
     // [feature-spec.md decisions #35 / #39] Shared by insert_journal_entry_draft,
     // insertLine, createOpeningBalanceEntry, and updateLine (when account_id changes).
     const uniqueIds = [...new Set(accountIds.filter(Boolean))];
-    if (uniqueIds.length === 0) {
-      return;
-    }
+    if (uniqueIds.length === 0) return;
 
     const { data, error } = await this.supabase.client
       .from('accounts')
       .select('id, company_id, is_active, account_number')
       .in('id', uniqueIds);
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     assertAccountsUsableForCompany(companyId, uniqueIds, data ?? []);
   }
@@ -115,9 +109,7 @@ export class SupabaseJournalEntriesRepository implements JournalEntriesRepositor
     entryDate?: string,
   ): Promise<void> {
     // [feature-spec.md §7.26 finding #1] Shared by insert_journal_entry_draft paths.
-    if (!periodId) {
-      return;
-    }
+    if (!periodId) return;
 
     const { data, error } = await this.supabase.client
       .from('accounting_periods')
@@ -125,9 +117,7 @@ export class SupabaseJournalEntriesRepository implements JournalEntriesRepositor
       .eq('id', periodId)
       .maybeSingle();
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     assertPeriodUsableForCompany(companyId, periodId, data ?? null);
 
@@ -141,9 +131,7 @@ export class SupabaseJournalEntriesRepository implements JournalEntriesRepositor
     templateId: string | null | undefined,
   ): Promise<void> {
     // [§7.30 audit] Same-company check for recurring_template_id on draft creates.
-    if (!templateId) {
-      return;
-    }
+    if (!templateId) return;
 
     const { data, error } = await this.supabase.client
       .from('recurring_journal_templates')
@@ -151,9 +139,7 @@ export class SupabaseJournalEntriesRepository implements JournalEntriesRepositor
       .eq('id', templateId)
       .maybeSingle();
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     assertRecurringTemplateUsableForCompany(companyId, templateId, data ?? null);
   }
@@ -198,9 +184,7 @@ export class SupabaseJournalEntriesRepository implements JournalEntriesRepositor
       p_attachments: params.p_attachments ?? [],
     });
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return this.parseJournalPayload(data);
   }
@@ -212,13 +196,9 @@ export class SupabaseJournalEntriesRepository implements JournalEntriesRepositor
       .eq('id', id)
       .maybeSingle();
 
-    if (entryError) {
-      throw entryError;
-    }
+    if (entryError) throw entryError;
 
-    if (!entry) {
-      return null;
-    }
+    if (!entry) return null;
 
     const { data: lines, error: linesError } = await this.supabase.client
       .from('journal_lines')
@@ -226,9 +206,7 @@ export class SupabaseJournalEntriesRepository implements JournalEntriesRepositor
       .eq('journal_entry_id', id)
       .order('line_number');
 
-    if (linesError) {
-      throw linesError;
-    }
+    if (linesError) throw linesError;
 
     const attachments = await this.findAttachmentsByEntryId(id);
 
@@ -262,9 +240,7 @@ export class SupabaseJournalEntriesRepository implements JournalEntriesRepositor
 
     const { data, error } = await query;
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return (data ?? []) as JournalEntry[];
   }
@@ -311,12 +287,8 @@ export class SupabaseJournalEntriesRepository implements JournalEntriesRepositor
       .eq('status', JournalEntryStatus.Draft)
       .select('id');
 
-    if (updateError) {
-      throw updateError;
-    }
-    if (!updatedRows?.length) {
-      throw new Error('JOURNAL_ENTRY_HEADER_NOT_DRAFT');
-    }
+    if (updateError) throw updateError;
+    if (!updatedRows?.length) throw new Error('JOURNAL_ENTRY_HEADER_NOT_DRAFT');
 
     if (patch.attachments !== undefined) {
       const { error: deleteError } = await this.supabase.client
@@ -324,9 +296,7 @@ export class SupabaseJournalEntriesRepository implements JournalEntriesRepositor
         .delete()
         .eq('journal_entry_id', id);
 
-      if (deleteError) {
-        throw deleteError;
-      }
+      if (deleteError) throw deleteError;
 
       if (patch.attachments.length > 0) {
         const { error: insertError } = await this.supabase.client
@@ -341,16 +311,12 @@ export class SupabaseJournalEntriesRepository implements JournalEntriesRepositor
             })),
           );
 
-        if (insertError) {
-          throw insertError;
-        }
+        if (insertError) throw insertError;
       }
     }
 
     const refreshed = await this.findByIdWithDetails(id);
-    if (!refreshed) {
-      throw new Error(`Journal entry ${id} not found after header update`);
-    }
+    if (!refreshed) throw new Error(`Journal entry ${id} not found after header update`);
     return refreshed;
   }
 
@@ -361,9 +327,7 @@ export class SupabaseJournalEntriesRepository implements JournalEntriesRepositor
       .eq('journal_entry_id', entryId)
       .order('uploaded_at');
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return (data ?? []) as JournalAttachment[];
   }
@@ -380,13 +344,9 @@ export class SupabaseJournalEntriesRepository implements JournalEntriesRepositor
       .eq('id', id)
       .maybeSingle();
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
-    if (!data) {
-      return null;
-    }
+    if (!data) return null;
 
     const { journal_entries: parent, ...line } = data as JournalLine & {
       journal_entries: { company_id: string };
@@ -405,9 +365,7 @@ export class SupabaseJournalEntriesRepository implements JournalEntriesRepositor
       .eq('id', id)
       .maybeSingle();
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return data as AccountingPeriod | null;
   }
@@ -426,9 +384,7 @@ export class SupabaseJournalEntriesRepository implements JournalEntriesRepositor
       .limit(1)
       .maybeSingle();
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return data as AccountingPeriod | null;
   }
@@ -447,9 +403,7 @@ export class SupabaseJournalEntriesRepository implements JournalEntriesRepositor
       .limit(1)
       .maybeSingle();
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return data as AccountingPeriod | null;
   }
@@ -457,46 +411,21 @@ export class SupabaseJournalEntriesRepository implements JournalEntriesRepositor
   /**
    * [Product decision 2026-08-21] One opening_balance per company per fiscal year.
    */
-  async hasOpeningBalanceForFiscalYear(
-    companyId: string,
-    fiscalYear: number,
-  ): Promise<boolean> {
-    const { data: periods, error: periodError } = await this.supabase.client
-      .from('accounting_periods')
-      .select('id')
-      .eq('company_id', companyId)
-      .eq('fiscal_year', fiscalYear);
-
-    if (periodError) {
-      throw periodError;
-    }
-
-    const periodIds = (periods ?? []).map((period) => period.id);
-    if (!periodIds.length) {
-      return false;
-    }
-
-    const { data: entries, error: entryError } = await this.supabase.client
-      .from('journal_entries')
-      .select('id')
-      .eq('company_id', companyId)
-      .eq('entry_type', JournalEntryType.OpeningBalance)
-      .in('period_id', periodIds)
-      .limit(1);
-
-    if (entryError) {
-      throw entryError;
-    }
-
-    return (entries?.length ?? 0) > 0;
+  hasOpeningBalanceForFiscalYear(companyId: string, fiscalYear: number): Promise<boolean> {
+    return this.hasEntryTypeForFiscalYear(companyId, fiscalYear, JournalEntryType.OpeningBalance);
   }
 
   /**
    * [Product decision 2026-08-21] One year_end_closing per company per fiscal year.
    */
-  async hasYearEndClosingForFiscalYear(
+  hasYearEndClosingForFiscalYear(companyId: string, fiscalYear: number): Promise<boolean> {
+    return this.hasEntryTypeForFiscalYear(companyId, fiscalYear, JournalEntryType.YearEndClosing);
+  }
+
+  private async hasEntryTypeForFiscalYear(
     companyId: string,
     fiscalYear: number,
+    entryType: JournalEntryType,
   ): Promise<boolean> {
     const { data: periods, error: periodError } = await this.supabase.client
       .from('accounting_periods')
@@ -504,26 +433,20 @@ export class SupabaseJournalEntriesRepository implements JournalEntriesRepositor
       .eq('company_id', companyId)
       .eq('fiscal_year', fiscalYear);
 
-    if (periodError) {
-      throw periodError;
-    }
+    if (periodError) throw periodError;
 
     const periodIds = (periods ?? []).map((period) => period.id);
-    if (!periodIds.length) {
-      return false;
-    }
+    if (!periodIds.length) return false;
 
     const { data: entries, error: entryError } = await this.supabase.client
       .from('journal_entries')
       .select('id')
       .eq('company_id', companyId)
-      .eq('entry_type', JournalEntryType.YearEndClosing)
+      .eq('entry_type', entryType)
       .in('period_id', periodIds)
       .limit(1);
 
-    if (entryError) {
-      throw entryError;
-    }
+    if (entryError) throw entryError;
 
     return (entries?.length ?? 0) > 0;
   }
@@ -541,9 +464,7 @@ export class SupabaseJournalEntriesRepository implements JournalEntriesRepositor
       .limit(1)
       .maybeSingle();
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return data as AccountingPeriod | null;
   }
@@ -557,9 +478,7 @@ export class SupabaseJournalEntriesRepository implements JournalEntriesRepositor
       .eq('is_system_account', true)
       .maybeSingle();
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return data as { id: string } | null;
   }
@@ -579,13 +498,9 @@ export class SupabaseJournalEntriesRepository implements JournalEntriesRepositor
       .eq('company_id', companyId)
       .eq('fiscal_year', fiscalYear);
 
-    if (periodError) {
-      throw periodError;
-    }
+    if (periodError) throw periodError;
 
-    if (!periods?.length) {
-      return [];
-    }
+    if (!periods?.length) return [];
 
     let periodStart = periods[0].period_start as string;
     let periodEnd = periods[0].period_end as string;
@@ -606,9 +521,7 @@ export class SupabaseJournalEntriesRepository implements JournalEntriesRepositor
       p_period_end: periodEnd,
     });
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return ((data as Record<string, unknown>[]) ?? []).map((row) => ({
       account_id: String(row.account_id),
@@ -632,9 +545,7 @@ export class SupabaseJournalEntriesRepository implements JournalEntriesRepositor
         .select('id, company_id, is_active, account_number, category')
         .in('id', uniqueIds);
 
-      if (error) {
-        throw error;
-      }
+      if (error) throw error;
 
       // [feature-spec.md decisions #39 / #57] Same-company + active (#35) and
       // balance-sheet categories only; RPC repeats category check as DB backstop.
@@ -651,9 +562,7 @@ export class SupabaseJournalEntriesRepository implements JournalEntriesRepositor
       p_reference_number: dto.reference_number ?? null,
     });
 
-    if (error) {
-      throw this.mapJournalRpcError(error);
-    }
+    if (error) throw this.mapJournalRpcError(error);
 
     return this.parseJournalPayload(data);
   }
@@ -671,9 +580,7 @@ export class SupabaseJournalEntriesRepository implements JournalEntriesRepositor
       p_skip_reason: dto.skip_reason ?? null,
     });
 
-    if (error) {
-      throw this.mapJournalRpcError(error);
-    }
+    if (error) throw this.mapJournalRpcError(error);
 
     return this.parseJournalPayload(data);
   }
@@ -697,9 +604,7 @@ export class SupabaseJournalEntriesRepository implements JournalEntriesRepositor
     ] as const;
 
     for (const token of tokens) {
-      if (message.includes(token)) {
-        return new Error(token);
-      }
+      if (message.includes(token)) return new Error(token);
     }
 
     return error as Error;
@@ -715,9 +620,7 @@ export class SupabaseJournalEntriesRepository implements JournalEntriesRepositor
   async deleteEntry(id: string): Promise<void> {
     const { error } = await this.supabase.client.from('journal_entries').delete().eq('id', id);
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
   }
 
   async getAccountTrialBalance(
@@ -731,13 +634,9 @@ export class SupabaseJournalEntriesRepository implements JournalEntriesRepositor
       .eq('account_id', accountId)
       .maybeSingle();
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
-    if (!data) {
-      return null;
-    }
+    if (!data) return null;
 
     return {
       account_id: data.account_id,
@@ -754,9 +653,7 @@ export class SupabaseJournalEntriesRepository implements JournalEntriesRepositor
       .eq('company_id', companyId)
       .maybeSingle();
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return data as CompanySettings | null;
   }
@@ -773,9 +670,7 @@ export class SupabaseJournalEntriesRepository implements JournalEntriesRepositor
       .select()
       .single();
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return data as JournalEntry;
   }
@@ -796,9 +691,7 @@ export class SupabaseJournalEntriesRepository implements JournalEntriesRepositor
       .select()
       .single();
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return data as JournalEntry;
   }
@@ -823,9 +716,7 @@ export class SupabaseJournalEntriesRepository implements JournalEntriesRepositor
       .select()
       .single();
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return data as JournalEntry;
   }
@@ -856,9 +747,7 @@ export class SupabaseJournalEntriesRepository implements JournalEntriesRepositor
       .select()
       .single();
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return data as JournalEntry;
   }
@@ -873,9 +762,7 @@ export class SupabaseJournalEntriesRepository implements JournalEntriesRepositor
     createdBy: string,
   ): Promise<JournalEntryReversalResult> {
     const originalDetails = await this.findByIdWithDetails(originalId);
-    if (!originalDetails) {
-      throw new Error(`Journal entry ${originalId} not found`);
-    }
+    if (!originalDetails) throw new Error(`Journal entry ${originalId} not found`);
 
     const { data, error } = await this.supabase.client.rpc('reverse_journal_entry', {
       p_original_id: originalId,
@@ -884,9 +771,7 @@ export class SupabaseJournalEntriesRepository implements JournalEntriesRepositor
     });
 
     if (error) {
-      if (error.message?.includes('NO_NEXT_OPEN_PERIOD')) {
-        throw new Error('NO_NEXT_OPEN_PERIOD');
-      }
+      if (error.message?.includes('NO_NEXT_OPEN_PERIOD')) throw new Error('NO_NEXT_OPEN_PERIOD');
       throw error;
     }
 
@@ -920,9 +805,7 @@ export class SupabaseJournalEntriesRepository implements JournalEntriesRepositor
       .eq('id', dto.journal_entry_id)
       .maybeSingle();
 
-    if (parentError) {
-      throw parentError;
-    }
+    if (parentError) throw parentError;
     if (!parent) {
       throw new BadRequestException(
         `Journal entry ${dto.journal_entry_id} was not found — cannot add lines`,
@@ -945,9 +828,7 @@ export class SupabaseJournalEntriesRepository implements JournalEntriesRepositor
       .select()
       .single();
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return data as JournalLine;
   }
@@ -969,9 +850,7 @@ export class SupabaseJournalEntriesRepository implements JournalEntriesRepositor
         .eq('id', id)
         .maybeSingle();
 
-      if (lineError) {
-        throw lineError;
-      }
+      if (lineError) throw lineError;
       if (!line) {
         throw new BadRequestException(
           `Journal line ${id} was not found — cannot update`,
@@ -984,9 +863,7 @@ export class SupabaseJournalEntriesRepository implements JournalEntriesRepositor
         .eq('id', line.journal_entry_id as string)
         .maybeSingle();
 
-      if (parentError) {
-        throw parentError;
-      }
+      if (parentError) throw parentError;
       if (!parent) {
         throw new BadRequestException(
           `Journal entry ${line.journal_entry_id as string} was not found — cannot update lines`,
@@ -1005,9 +882,7 @@ export class SupabaseJournalEntriesRepository implements JournalEntriesRepositor
       .select()
       .single();
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return data as JournalLine;
   }
@@ -1018,9 +893,7 @@ export class SupabaseJournalEntriesRepository implements JournalEntriesRepositor
       .delete()
       .eq('id', id);
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
   }
 
   /** [Rules §3.1] Sum total_debit and total_credit across v_trial_balance for a company. */
@@ -1030,9 +903,7 @@ export class SupabaseJournalEntriesRepository implements JournalEntriesRepositor
       .select('total_debit, total_credit')
       .eq('company_id', companyId);
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     const rows = data ?? [];
     return {
@@ -1073,9 +944,7 @@ export class SupabaseJournalEntriesRepository implements JournalEntriesRepositor
       },
     );
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     const payload = data as {
       skipped: boolean;
@@ -1128,9 +997,7 @@ export class SupabaseJournalEntriesRepository implements JournalEntriesRepositor
       p_created_by: createdBy,
     });
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return data;
   }

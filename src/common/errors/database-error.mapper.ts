@@ -19,9 +19,7 @@ export function mapDatabaseError(error: PostgrestError): never {
   const { code, message } = error;
 
   // PL/pgSQL RAISE EXCEPTION (enforce_account_number_category, max depth, system account, etc.)
-  if (code === 'P0001') {
-    throw new BadRequestException(message);
-  }
+  if (code === 'P0001') throw new BadRequestException(message);
 
   // FK violation — account referenced by journal_lines or child accounts
   if (code === '23503') {
@@ -34,9 +32,7 @@ export function mapDatabaseError(error: PostgrestError): never {
   }
 
   // Unique violation (duplicate account_number per company, if enforced)
-  if (code === '23505') {
-    throw new ConflictException(message);
-  }
+  if (code === '23505') throw new ConflictException(message);
 
   // Exclusion constraint — [feature-spec.md decision #38] overlapping periods
   if (code === '23P01') {

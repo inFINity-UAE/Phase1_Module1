@@ -44,14 +44,10 @@ export class AccountsService {
   async findOne(id: string): Promise<Account> {
     try {
       const account = await this.accountsRepository.findById(id);
-      if (!account) {
-        throw new NotFoundException(`Account ${id} not found`);
-      }
+      if (!account) throw new NotFoundException(`Account ${id} not found`);
       return account;
     } catch (error) {
-      if (error instanceof NotFoundException) {
-        throw error;
-      }
+      if (error instanceof NotFoundException) throw error;
       handleDatabaseError(error);
     }
   }
@@ -77,9 +73,7 @@ export class AccountsService {
       dto.account_name !== undefined ||
       dto.sub_category !== undefined ||
       dto.description !== undefined;
-    if (!hasPatch) {
-      throw new BadRequestException('No updatable fields provided');
-    }
+    if (!hasPatch) throw new BadRequestException('No updatable fields provided');
 
     try {
       return await this.accountsRepository.update(id, {
@@ -138,9 +132,7 @@ export class AccountsService {
       }
       return row;
     } catch (error) {
-      if (error instanceof NotFoundException) {
-        throw error;
-      }
+      if (error instanceof NotFoundException) throw error;
       handleDatabaseError(error);
     }
   }

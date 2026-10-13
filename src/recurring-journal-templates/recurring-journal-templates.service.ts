@@ -68,14 +68,10 @@ export class RecurringJournalTemplatesService {
   async findOne(id: string): Promise<RecurringJournalTemplateWithLines> {
     try {
       const result = await this.templatesRepository.findByIdWithLines(id);
-      if (!result) {
-        throw new NotFoundException(`Recurring journal template ${id} not found`);
-      }
+      if (!result) throw new NotFoundException(`Recurring journal template ${id} not found`);
       return result;
     } catch (error) {
-      if (error instanceof NotFoundException) {
-        throw error;
-      }
+      if (error instanceof NotFoundException) throw error;
       handleDatabaseError(error);
     }
   }

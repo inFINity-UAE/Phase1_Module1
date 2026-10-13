@@ -29,9 +29,7 @@ export class SupabasePurchaseOrdersRepository implements PurchaseOrdersRepositor
       .select()
       .single();
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return data as PurchaseOrder;
   }
@@ -43,9 +41,7 @@ export class SupabasePurchaseOrdersRepository implements PurchaseOrdersRepositor
       .eq('company_id', companyId)
       .order('po_date', { ascending: false });
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return (data ?? []) as PurchaseOrder[];
   }
@@ -57,12 +53,8 @@ export class SupabasePurchaseOrdersRepository implements PurchaseOrdersRepositor
       .eq('id', id)
       .maybeSingle();
 
-    if (headerError) {
-      throw headerError;
-    }
-    if (!purchaseOrder) {
-      return null;
-    }
+    if (headerError) throw headerError;
+    if (!purchaseOrder) return null;
 
     const { data: lines, error: linesError } = await this.supabase.client
       .from('purchase_order_lines')
@@ -70,9 +62,7 @@ export class SupabasePurchaseOrdersRepository implements PurchaseOrdersRepositor
       .eq('po_id', id)
       .order('line_number');
 
-    if (linesError) {
-      throw linesError;
-    }
+    if (linesError) throw linesError;
 
     return {
       purchase_order: purchaseOrder as PurchaseOrder,
@@ -88,18 +78,14 @@ export class SupabasePurchaseOrdersRepository implements PurchaseOrdersRepositor
       .select()
       .single();
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return data as PurchaseOrder;
   }
 
   async deleteHeader(id: string): Promise<void> {
     const { error } = await this.supabase.client.from('purchase_orders').delete().eq('id', id);
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
   }
 
   async insertLine(poId: string, dto: CreatePurchaseOrderLineDto): Promise<PurchaseOrderLine> {
@@ -116,9 +102,7 @@ export class SupabasePurchaseOrdersRepository implements PurchaseOrdersRepositor
       .select()
       .single();
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return data as PurchaseOrderLine;
   }
@@ -131,18 +115,14 @@ export class SupabasePurchaseOrdersRepository implements PurchaseOrdersRepositor
       .select()
       .single();
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return data as PurchaseOrderLine;
   }
 
   async deleteLine(id: string): Promise<void> {
     const { error } = await this.supabase.client.from('purchase_order_lines').delete().eq('id', id);
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
   }
 
   async findLineById(lineId: string): Promise<PurchaseOrderLine | null> {
@@ -152,9 +132,7 @@ export class SupabasePurchaseOrdersRepository implements PurchaseOrdersRepositor
       .eq('id', lineId)
       .maybeSingle();
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return (data as PurchaseOrderLine | null) ?? null;
   }
@@ -166,12 +144,8 @@ export class SupabasePurchaseOrdersRepository implements PurchaseOrdersRepositor
       .eq('id', supplierId)
       .maybeSingle();
 
-    if (error) {
-      throw error;
-    }
-    if (!data) {
-      return null;
-    }
+    if (error) throw error;
+    if (!data) return null;
     return Boolean(data.is_active);
   }
 
@@ -182,9 +156,7 @@ export class SupabasePurchaseOrdersRepository implements PurchaseOrdersRepositor
       .eq('id', supplierId)
       .maybeSingle();
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
     return (data?.company_id as string | undefined) ?? null;
   }
 }

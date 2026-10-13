@@ -5,9 +5,7 @@ import { AuthenticatedUser } from '../authenticated-user';
 export const CurrentUser = createParamDecorator(
   (_data: unknown, context: ExecutionContext): AuthenticatedUser => {
     const request = context.switchToHttp().getRequest<{ user?: AuthenticatedUser }>();
-    if (!request.user?.id) {
-      throw new Error('CurrentUser used without SupabaseAuthGuard');
-    }
+    if (!request.user?.id) throw new Error('CurrentUser used without SupabaseAuthGuard');
     return request.user;
   },
 );

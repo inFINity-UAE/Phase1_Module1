@@ -15,9 +15,7 @@ export class SupabaseCreditNotesRepository implements CreditNotesRepository {
 
   async insertHeader(params: InsertCreditNoteParams): Promise<CreditNote> {
     const invoice = await this.findInvoiceForCredit(params.original_invoice_id);
-    if (!invoice) {
-      throw new Error('INVOICE_NOT_FOUND');
-    }
+    if (!invoice) throw new Error('INVOICE_NOT_FOUND');
 
     const { data, error } = await this.supabase.client
       .from('credit_notes')
@@ -32,9 +30,7 @@ export class SupabaseCreditNotesRepository implements CreditNotesRepository {
       .select()
       .single();
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return data as CreditNote;
   }
@@ -46,9 +42,7 @@ export class SupabaseCreditNotesRepository implements CreditNotesRepository {
       .eq('company_id', companyId)
       .order('credit_note_date', { ascending: false });
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return (data ?? []) as CreditNote[];
   }
@@ -60,12 +54,8 @@ export class SupabaseCreditNotesRepository implements CreditNotesRepository {
       .eq('id', id)
       .maybeSingle();
 
-    if (headerError) {
-      throw headerError;
-    }
-    if (!creditNote) {
-      return null;
-    }
+    if (headerError) throw headerError;
+    if (!creditNote) return null;
 
     const { data: lines, error: linesError } = await this.supabase.client
       .from('credit_note_lines')
@@ -73,9 +63,7 @@ export class SupabaseCreditNotesRepository implements CreditNotesRepository {
       .eq('credit_note_id', id)
       .order('line_number');
 
-    if (linesError) {
-      throw linesError;
-    }
+    if (linesError) throw linesError;
 
     return {
       credit_note: creditNote as CreditNote,
@@ -91,9 +79,7 @@ export class SupabaseCreditNotesRepository implements CreditNotesRepository {
       .select()
       .single();
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return data as CreditNote;
   }
@@ -118,18 +104,14 @@ export class SupabaseCreditNotesRepository implements CreditNotesRepository {
       .select()
       .single();
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return data as CreditNote;
   }
 
   async deleteHeader(id: string): Promise<void> {
     const { error } = await this.supabase.client.from('credit_notes').delete().eq('id', id);
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
   }
 
   async insertLine(creditNoteId: string, dto: CreateCreditNoteLineDto): Promise<CreditNoteLine> {
@@ -161,9 +143,7 @@ export class SupabaseCreditNotesRepository implements CreditNotesRepository {
       .select()
       .single();
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return data as CreditNoteLine;
   }
@@ -176,18 +156,14 @@ export class SupabaseCreditNotesRepository implements CreditNotesRepository {
       .select()
       .single();
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return data as CreditNoteLine;
   }
 
   async deleteLine(id: string): Promise<void> {
     const { error } = await this.supabase.client.from('credit_note_lines').delete().eq('id', id);
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
   }
 
   async findCreditNoteIdByLineId(lineId: string): Promise<string | null> {
@@ -197,9 +173,7 @@ export class SupabaseCreditNotesRepository implements CreditNotesRepository {
       .eq('id', lineId)
       .maybeSingle();
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return (data?.credit_note_id as string | undefined) ?? null;
   }
@@ -215,12 +189,8 @@ export class SupabaseCreditNotesRepository implements CreditNotesRepository {
       .eq('id', originalInvoiceId)
       .maybeSingle();
 
-    if (error) {
-      throw error;
-    }
-    if (!data) {
-      return null;
-    }
+    if (error) throw error;
+    if (!data) return null;
 
     return data as { company_id: string; customer_id: string; status: string };
   }
@@ -230,9 +200,7 @@ export class SupabaseCreditNotesRepository implements CreditNotesRepository {
       p_credit_note_id: id,
     });
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return data as CreditNote;
   }
@@ -251,9 +219,7 @@ export class SupabaseCreditNotesRepository implements CreditNotesRepository {
       p_created_by: createdBy,
     });
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     const result = data as {
       credit_note: CreditNote;

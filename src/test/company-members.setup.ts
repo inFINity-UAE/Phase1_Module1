@@ -20,12 +20,8 @@ export async function ensureAuthUser(
   email: string,
 ): Promise<void> {
   const { data, error } = await supabase.client.auth.admin.getUserById(userId);
-  if (!error && data.user) {
-    return;
-  }
-  if (error && !/User not found|user_not_found/i.test(error.message)) {
-    throw error;
-  }
+  if (!error && data.user) return;
+  if (error && !/User not found|user_not_found/i.test(error.message)) throw error;
 
   const { error: createError } = await supabase.client.auth.admin.createUser({
     id: userId,
@@ -38,9 +34,7 @@ export async function ensureAuthUser(
     // Race or prior partial seed — re-check before failing the suite.
     const { data: retry, error: retryError } =
       await supabase.client.auth.admin.getUserById(userId);
-    if (retryError || !retry.user) {
-      throw createError;
-    }
+    if (retryError || !retry.user) throw createError;
   }
 }
 
@@ -63,9 +57,7 @@ export async function ensureCompanyMember(
     { onConflict: 'company_id,user_id' },
   );
 
-  if (error) {
-    throw error;
-  }
+  if (error) throw error;
 }
 
 export function actor(userId: string, role: CompanyRole): ActorContext {

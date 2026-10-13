@@ -49,9 +49,7 @@ export class AccountingPeriodsService {
         fiscal_year: dto.fiscal_year,
       });
     } catch (error) {
-      if (error instanceof ConflictException || error instanceof BadRequestException) {
-        throw error;
-      }
+      if (error instanceof ConflictException || error instanceof BadRequestException) throw error;
       handleDatabaseError(error);
     }
   }
@@ -62,9 +60,7 @@ export class AccountingPeriodsService {
    * AccountsController.findAll (AuthenticatedUser has no company_id).
    */
   async findAll(companyId: string): Promise<AccountingPeriod[]> {
-    if (!companyId) {
-      throw new BadRequestException('company_id query parameter is required');
-    }
+    if (!companyId) throw new BadRequestException('company_id query parameter is required');
 
     try {
       return await this.periodsRepository.findByCompanyId(companyId);
@@ -76,14 +72,10 @@ export class AccountingPeriodsService {
   async findOne(id: string): Promise<AccountingPeriod> {
     try {
       const period = await this.periodsRepository.findById(id);
-      if (!period) {
-        throw new NotFoundException(`Accounting period ${id} not found`);
-      }
+      if (!period) throw new NotFoundException(`Accounting period ${id} not found`);
       return period;
     } catch (error) {
-      if (error instanceof NotFoundException) {
-        throw error;
-      }
+      if (error instanceof NotFoundException) throw error;
       handleDatabaseError(error);
     }
   }
@@ -107,9 +99,7 @@ export class AccountingPeriodsService {
       dto.period_start !== undefined ||
       dto.period_end !== undefined ||
       dto.fiscal_year !== undefined;
-    if (!hasPatch) {
-      throw new BadRequestException('No updatable fields provided');
-    }
+    if (!hasPatch) throw new BadRequestException('No updatable fields provided');
 
     try {
       const hasPosted = await this.periodsRepository.hasPostedJournalActivity(id);

@@ -23,6 +23,8 @@ export interface ExtractionSnapshot {
   net_amount: number | null;
   total_amount: number | null;
   ocr_score: number | null;
+  /** Raw text from the OCR provider. OCR.space returns text, not structured fields. */
+  ocr_text: string | null;
   uploaded_by: string | null;
   review: {
     status: 'open' | 'rejected' | 'cleared';
@@ -61,6 +63,7 @@ export function emptySnapshot(): ExtractionSnapshot {
     net_amount: null,
     total_amount: null,
     ocr_score: null,
+    ocr_text: null,
     uploaded_by: null,
     review: { status: 'open', hard_blocks: [], soft_flags: [], rejection_reason: null },
   };

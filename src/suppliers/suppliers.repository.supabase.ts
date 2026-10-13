@@ -28,9 +28,7 @@ export class SupabaseSuppliersRepository implements SuppliersRepository {
       .select()
       .single();
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return data as Supplier;
   }
@@ -42,9 +40,7 @@ export class SupabaseSuppliersRepository implements SuppliersRepository {
       .eq('company_id', companyId)
       .order('supplier_name');
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return (data ?? []) as Supplier[];
   }
@@ -56,9 +52,7 @@ export class SupabaseSuppliersRepository implements SuppliersRepository {
       .eq('id', id)
       .maybeSingle();
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return data as Supplier | null;
   }
@@ -71,9 +65,7 @@ export class SupabaseSuppliersRepository implements SuppliersRepository {
       .select()
       .single();
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return data as Supplier;
   }
@@ -86,9 +78,7 @@ export class SupabaseSuppliersRepository implements SuppliersRepository {
       .select()
       .single();
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return data as Supplier;
   }

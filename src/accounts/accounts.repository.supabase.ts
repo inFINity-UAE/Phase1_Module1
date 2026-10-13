@@ -39,9 +39,7 @@ export class SupabaseAccountsRepository implements AccountsRepository {
       .select()
       .single();
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return data as Account;
   }
@@ -55,9 +53,7 @@ export class SupabaseAccountsRepository implements AccountsRepository {
 
     const { data, error } = await query.order('account_number');
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return (data ?? []) as Account[];
   }
@@ -69,9 +65,7 @@ export class SupabaseAccountsRepository implements AccountsRepository {
       .eq('id', id)
       .maybeSingle();
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return data as Account | null;
   }
@@ -84,9 +78,7 @@ export class SupabaseAccountsRepository implements AccountsRepository {
       .select()
       .single();
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return data as Account;
   }
@@ -99,9 +91,7 @@ export class SupabaseAccountsRepository implements AccountsRepository {
       .select()
       .single();
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return data as Account;
   }
@@ -112,8 +102,6 @@ export class SupabaseAccountsRepository implements AccountsRepository {
       .delete()
       .eq('id', id);
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
   }
 }

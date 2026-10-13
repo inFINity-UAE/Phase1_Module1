@@ -54,14 +54,10 @@ export class GoodsReceiptsService {
   async findOne(id: string): Promise<GoodsReceiptWithLines> {
     try {
       const result = await this.goodsReceiptsRepository.findByIdWithLines(id);
-      if (!result) {
-        throw new NotFoundException(`Goods receipt ${id} not found`);
-      }
+      if (!result) throw new NotFoundException(`Goods receipt ${id} not found`);
       return result;
     } catch (error) {
-      if (error instanceof NotFoundException) {
-        throw error;
-      }
+      if (error instanceof NotFoundException) throw error;
       handleDatabaseError(error);
     }
   }
@@ -78,9 +74,7 @@ export class GoodsReceiptsService {
       dto.supplier_id !== undefined ||
       dto.purchase_order_id !== undefined ||
       dto.receipt_date !== undefined;
-    if (!hasPatch) {
-      throw new BadRequestException('No updatable fields provided');
-    }
+    if (!hasPatch) throw new BadRequestException('No updatable fields provided');
 
     try {
       await this.goodsReceiptsRepository.updateHeader(id, dto);
@@ -145,9 +139,7 @@ export class GoodsReceiptsService {
 
   private async assertPurchaseOrderUsable(poId: string, companyId: string): Promise<void> {
     const poCompanyId = await this.goodsReceiptsRepository.findPurchaseOrderCompanyId(poId);
-    if (!poCompanyId) {
-      throw new NotFoundException(`Purchase order ${poId} not found`);
-    }
+    if (!poCompanyId) throw new NotFoundException(`Purchase order ${poId} not found`);
     if (poCompanyId !== companyId) {
       throw new BadRequestException(`Purchase order ${poId} does not belong to this company`);
     }

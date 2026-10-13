@@ -65,9 +65,7 @@ export class PaymentsService {
   async findOne(id: string): Promise<PaymentWithApplications> {
     try {
       const row = await this.paymentsRepository.findByIdWithApplications(id);
-      if (!row) {
-        throw new NotFoundException(`Payment ${id} not found`);
-      }
+      if (!row) throw new NotFoundException(`Payment ${id} not found`);
       return row;
     } catch (error) {
       handleDatabaseError(error);
@@ -129,9 +127,7 @@ export class PaymentsService {
 
   async deleteApplication(id: string): Promise<void> {
     const paymentId = await this.paymentsRepository.findPaymentIdByApplicationId(id);
-    if (!paymentId) {
-      throw new NotFoundException(`Payment application ${id} not found`);
-    }
+    if (!paymentId) throw new NotFoundException(`Payment application ${id} not found`);
 
     try {
       await this.paymentsRepository.deleteApplication(id);
@@ -146,9 +142,7 @@ export class PaymentsService {
     createdBy: string,
   ): Promise<{ application: PaymentApplication; journal_entry_id: string }> {
     const application = await this.paymentsRepository.findApplicationById(applicationId);
-    if (!application) {
-      throw new NotFoundException(`Payment application ${applicationId} not found`);
-    }
+    if (!application) throw new NotFoundException(`Payment application ${applicationId} not found`);
 
     try {
       const posted = await this.paymentsRepository.postAdvanceApplicationJournal(
@@ -171,15 +165,11 @@ export class PaymentsService {
 
   private async assertCustomerUsable(customerId: string, companyId: string): Promise<void> {
     const customerCompanyId = await this.paymentsRepository.findCustomerCompanyId(customerId);
-    if (customerCompanyId == null) {
-      throw new NotFoundException(`Customer ${customerId} not found`);
-    }
+    if (customerCompanyId == null) throw new NotFoundException(`Customer ${customerId} not found`);
     if (customerCompanyId !== companyId) {
       throw new BadRequestException('Customer does not belong to this company');
     }
     const active = await this.paymentsRepository.findCustomerActive(customerId);
-    if (active === false) {
-      throw new BadRequestException('Customer is inactive');
-    }
+    if (active === false) throw new BadRequestException('Customer is inactive');
   }
 }

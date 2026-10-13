@@ -66,15 +66,11 @@ export function resolveApprovalThreshold(
   entryType: JournalEntryType,
   settings: CompanySettings | null,
 ): number | null {
-  if (entryType === JournalEntryType.EclProvision) {
-    return null;
-  }
+  if (entryType === JournalEntryType.EclProvision) return null;
   if (entryType === JournalEntryType.WriteOff) {
     return settings != null ? Number(settings.write_off_approval_threshold) : 5000;
   }
-  if (settings?.journal_approval_threshold == null) {
-    return null;
-  }
+  if (settings?.journal_approval_threshold == null) return null;
   return Number(settings.journal_approval_threshold);
 }
 
@@ -457,13 +453,9 @@ export class JournalEntriesService {
   ): Promise<void> {
     const period = await this.accountingPeriodsRepository.findById(periodId);
 
-    if (!period) {
-      throw new BadRequestException(`Accounting period ${periodId} not found`);
-    }
+    if (!period) throw new BadRequestException(`Accounting period ${periodId} not found`);
 
-    if (period.status === PeriodStatus.Open) {
-      return;
-    }
+    if (period.status === PeriodStatus.Open) return;
 
     if (
       period.status === PeriodStatus.SoftClosed ||
@@ -561,9 +553,7 @@ export class JournalEntriesService {
     companyId: string,
     filters?: { status?: string; period_id?: string },
   ): Promise<JournalEntry[]> {
-    if (!companyId) {
-      throw new BadRequestException('company_id query parameter is required');
-    }
+    if (!companyId) throw new BadRequestException('company_id query parameter is required');
 
     try {
       return await this.journalEntriesRepository.findByCompany(companyId, filters);
@@ -575,14 +565,10 @@ export class JournalEntriesService {
   async findOne(id: string): Promise<JournalEntryWithDetails> {
     try {
       const result = await this.journalEntriesRepository.findByIdWithDetails(id);
-      if (!result) {
-        throw new NotFoundException(`Journal entry ${id} not found`);
-      }
+      if (!result) throw new NotFoundException(`Journal entry ${id} not found`);
       return result;
     } catch (error) {
-      if (error instanceof NotFoundException) {
-        throw error;
-      }
+      if (error instanceof NotFoundException) throw error;
       handleDatabaseError(error);
     }
   }
@@ -621,9 +607,7 @@ export class JournalEntriesService {
       dto.reference_number !== undefined ||
       dto.entry_date !== undefined ||
       dto.attachments !== undefined;
-    if (!hasPatch) {
-      throw new BadRequestException('No updatable header fields provided');
-    }
+    if (!hasPatch) throw new BadRequestException('No updatable header fields provided');
 
     if (dto.entry_date !== undefined) {
       const period = await this.accountingPeriodsRepository.findById(
@@ -701,9 +685,7 @@ export class JournalEntriesService {
     // [feature-spec.md #34/#56] Posted-parent DELETE → POSTED_LINE_DELETE_BLOCKED;
     // Nest writes audit_log.delete_blocked in a separate request, then 400.
     const context = await this.journalEntriesRepository.findLineWithCompany(id);
-    if (!context) {
-      throw new NotFoundException(`Journal line ${id} not found`);
-    }
+    if (!context) throw new NotFoundException(`Journal line ${id} not found`);
 
     try {
       await this.journalEntriesRepository.deleteLine(id);
@@ -728,9 +710,7 @@ export class JournalEntriesService {
    */
   async deleteEntry(id: string, actorId: string): Promise<void> {
     const existing = await this.journalEntriesRepository.findByIdWithDetails(id);
-    if (!existing) {
-      throw new NotFoundException(`Journal entry ${id} not found`);
-    }
+    if (!existing) throw new NotFoundException(`Journal entry ${id} not found`);
 
     try {
       await this.journalEntriesRepository.deleteEntry(id);
@@ -764,9 +744,7 @@ export class JournalEntriesService {
       clientMessage: string;
     },
   ): Promise<void> {
-    if (!this.isBlockedDeleteToken(error, params.token)) {
-      return;
-    }
+    if (!this.isBlockedDeleteToken(error, params.token)) return;
 
     await this.auditLogService.recordBlockedDelete({
       company_id: params.company_id,
@@ -784,9 +762,7 @@ export class JournalEntriesService {
     if (isPostgrestError(error) && error.code === 'P0001') {
       return (error.message ?? '').includes(token);
     }
-    if (error instanceof Error) {
-      return error.message.includes(token);
-    }
+    if (error instanceof Error) return error.message.includes(token);
     return false;
   }
 

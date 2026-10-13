@@ -28,9 +28,7 @@ function errorMessage(error: unknown): string {
  * auth/network retry. Matches AuthApiError messages and PostgREST PGRST303.
  */
 export function isTransientJwtClockSkewError(error: unknown): boolean {
-  if (/JWT issued at future/i.test(errorMessage(error))) {
-    return true;
-  }
+  if (/JWT issued at future/i.test(errorMessage(error))) return true;
   if (typeof error === 'object' && error !== null && 'code' in error) {
     return String((error as { code: unknown }).code) === 'PGRST303';
   }
@@ -39,18 +37,14 @@ export function isTransientJwtClockSkewError(error: unknown): boolean {
 
 /** Body/text detector used by the fetch wrapper (HTTP layer). */
 export function isTransientJwtClockSkewPayload(text: string): boolean {
-  if (/JWT issued at future/i.test(text)) {
-    return true;
-  }
+  if (/JWT issued at future/i.test(text)) return true;
   try {
     const json = JSON.parse(text) as {
       code?: unknown;
       message?: unknown;
       msg?: unknown;
     };
-    if (json.code === 'PGRST303') {
-      return true;
-    }
+    if (json.code === 'PGRST303') return true;
     const msg = String(json.message ?? json.msg ?? '');
     return /JWT issued at future/i.test(msg);
   } catch {
@@ -61,9 +55,7 @@ export function isTransientJwtClockSkewPayload(text: string): boolean {
 async function responseIsTransientJwtClockSkew(
   response: Response,
 ): Promise<boolean> {
-  if (response.ok) {
-    return false;
-  }
+  if (response.ok) return false;
   try {
     const text = await response.clone().text();
     return isTransientJwtClockSkewPayload(text);

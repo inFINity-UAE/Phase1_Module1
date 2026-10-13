@@ -94,21 +94,15 @@ export class DocumentBatchesService {
   async handleVeryfiWebhook(secret: string | undefined, body: unknown): Promise<{ ok: true }> {
     this.assertWebhookSecret(secret);
     const veryfiId = veryfiDocumentIdFromPayload(body);
-    if (!veryfiId) {
-      throw new NotFoundException('VERYFI_DOCUMENT_ID_MISSING');
-    }
+    if (!veryfiId) throw new NotFoundException('VERYFI_DOCUMENT_ID_MISSING');
     const jobId = await this.queue.jobIdForVeryfiDocument(veryfiId);
-    if (!jobId) {
-      throw new NotFoundException('VERYFI_DOCUMENT_NOT_TRACKED');
-    }
+    if (!jobId) throw new NotFoundException('VERYFI_DOCUMENT_NOT_TRACKED');
     const phase = veryfiPhaseFromPayload(body);
     await this.queue.setPhase(jobId, phase, phase === 'failed' ? 'veryfi_failed' : undefined);
     return { ok: true };
   }
 
   private requireRedis(): void {
-    if (!this.queue.isConfigured()) {
-      throw new ServiceUnavailableException('REDIS_NOT_CONFIGURED');
-    }
+    if (!this.queue.isConfigured()) throw new ServiceUnavailableException('REDIS_NOT_CONFIGURED');
   }
 }

@@ -21,9 +21,7 @@ export class CompanyMembersService {
    */
   async resolveRole(userId: string, companyId: string): Promise<CompanyRole> {
     const role = await this.companyMembersRepository.findRole(userId, companyId);
-    if (!role) {
-      throw new ForbiddenException('User is not a member of this company');
-    }
+    if (!role) throw new ForbiddenException('User is not a member of this company');
     return role;
   }
 
@@ -200,9 +198,7 @@ export class CompanyMembersService {
       }
     }
 
-    if (!companyId) {
-      throw new NotFoundException(`${resource} ${resourceId} not found`);
-    }
+    if (!companyId) throw new NotFoundException(`${resource} ${resourceId} not found`);
     return companyId;
   }
 }

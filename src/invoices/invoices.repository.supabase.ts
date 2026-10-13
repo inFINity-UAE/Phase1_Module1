@@ -30,9 +30,7 @@ export class SupabaseInvoicesRepository implements InvoicesRepository {
       .select()
       .single();
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return data as Invoice;
   }
@@ -44,9 +42,7 @@ export class SupabaseInvoicesRepository implements InvoicesRepository {
       .eq('company_id', companyId)
       .order('invoice_date', { ascending: false });
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return (data ?? []) as Invoice[];
   }
@@ -58,12 +54,8 @@ export class SupabaseInvoicesRepository implements InvoicesRepository {
       .eq('id', id)
       .maybeSingle();
 
-    if (invoiceError) {
-      throw invoiceError;
-    }
-    if (!invoice) {
-      return null;
-    }
+    if (invoiceError) throw invoiceError;
+    if (!invoice) return null;
 
     const { data: lines, error: linesError } = await this.supabase.client
       .from('invoice_lines')
@@ -71,9 +63,7 @@ export class SupabaseInvoicesRepository implements InvoicesRepository {
       .eq('invoice_id', id)
       .order('line_number');
 
-    if (linesError) {
-      throw linesError;
-    }
+    if (linesError) throw linesError;
 
     return {
       invoice: invoice as Invoice,
@@ -89,9 +79,7 @@ export class SupabaseInvoicesRepository implements InvoicesRepository {
       .select()
       .single();
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return data as Invoice;
   }
@@ -116,18 +104,14 @@ export class SupabaseInvoicesRepository implements InvoicesRepository {
       .select()
       .single();
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return data as Invoice;
   }
 
   async deleteHeader(id: string): Promise<void> {
     const { error } = await this.supabase.client.from('invoices').delete().eq('id', id);
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
   }
 
   async insertLine(invoiceId: string, dto: CreateInvoiceLineDto): Promise<InvoiceLine> {
@@ -150,9 +134,7 @@ export class SupabaseInvoicesRepository implements InvoicesRepository {
       .select()
       .single();
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return data as InvoiceLine;
   }
@@ -165,18 +147,14 @@ export class SupabaseInvoicesRepository implements InvoicesRepository {
       .select()
       .single();
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return data as InvoiceLine;
   }
 
   async deleteLine(id: string): Promise<void> {
     const { error } = await this.supabase.client.from('invoice_lines').delete().eq('id', id);
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
   }
 
   async findInvoiceIdByLineId(lineId: string): Promise<string | null> {
@@ -186,9 +164,7 @@ export class SupabaseInvoicesRepository implements InvoicesRepository {
       .eq('id', lineId)
       .maybeSingle();
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return (data?.invoice_id as string | undefined) ?? null;
   }
@@ -200,12 +176,8 @@ export class SupabaseInvoicesRepository implements InvoicesRepository {
       .eq('id', customerId)
       .maybeSingle();
 
-    if (error) {
-      throw error;
-    }
-    if (!data) {
-      return null;
-    }
+    if (error) throw error;
+    if (!data) return null;
     return Boolean(data.is_active);
   }
 
@@ -216,9 +188,7 @@ export class SupabaseInvoicesRepository implements InvoicesRepository {
       .eq('id', customerId)
       .maybeSingle();
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
     return (data?.company_id as string | undefined) ?? null;
   }
 
@@ -228,9 +198,7 @@ export class SupabaseInvoicesRepository implements InvoicesRepository {
       p_invoice_type_override: invoiceTypeOverride ?? null,
     });
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return data as Invoice;
   }
@@ -249,9 +217,7 @@ export class SupabaseInvoicesRepository implements InvoicesRepository {
       p_created_by: createdBy,
     });
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     const result = data as {
       invoice: Invoice;
@@ -269,9 +235,7 @@ export class SupabaseInvoicesRepository implements InvoicesRepository {
       p_company_id: companyId,
     });
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return data as number;
   }
@@ -282,9 +246,7 @@ export class SupabaseInvoicesRepository implements InvoicesRepository {
       ...(asOfDate ? { p_as_of_date: asOfDate } : {}),
     });
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return data as number;
   }
@@ -295,9 +257,7 @@ export class SupabaseInvoicesRepository implements InvoicesRepository {
       .select('company_id')
       .in('status', ['issued', 'sent', 'viewed']);
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     const ids = new Set<string>();
     for (const row of data ?? []) {
@@ -312,9 +272,7 @@ export class SupabaseInvoicesRepository implements InvoicesRepository {
       .select('company_id')
       .eq('vat_relief_eligible', false);
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     const ids = new Set<string>();
     for (const row of data ?? []) {
@@ -336,9 +294,7 @@ export class SupabaseInvoicesRepository implements InvoicesRepository {
       p_debtor_notified_at: debtorNotifiedAt,
     });
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     const result = data as { journal_entry_id: string };
     return { journal_entry_id: result.journal_entry_id };
@@ -352,9 +308,7 @@ export class SupabaseInvoicesRepository implements InvoicesRepository {
       .select('id')
       .maybeSingle();
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
     return Boolean(data);
   }
 }

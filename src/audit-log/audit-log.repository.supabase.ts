@@ -13,9 +13,7 @@ function toStartOfDay(isoDate: string): string {
 }
 
 function toEndOfDay(isoDate: string): string {
-  if (isoDate.length > 10) {
-    return isoDate;
-  }
+  if (isoDate.length > 10) return isoDate;
 
   const date = new Date(`${isoDate}T00:00:00.000Z`);
   date.setUTCDate(date.getUTCDate() + 1);
@@ -56,9 +54,7 @@ export class SupabaseAuditLogRepository implements AuditLogRepository {
 
     const { data, error } = await request;
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return (data ?? []) as AuditLogEntry[];
   }
@@ -85,9 +81,7 @@ export class SupabaseAuditLogRepository implements AuditLogRepository {
       .select('*')
       .single();
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return data as AuditLogEntry;
   }

@@ -67,14 +67,10 @@ export class QuotationsService {
   async findOne(id: string): Promise<QuotationWithLines> {
     try {
       const result = await this.quotationsRepository.findByIdWithLines(id);
-      if (!result) {
-        throw new NotFoundException(`Quotation ${id} not found`);
-      }
+      if (!result) throw new NotFoundException(`Quotation ${id} not found`);
       return result;
     } catch (error) {
-      if (error instanceof NotFoundException) {
-        throw error;
-      }
+      if (error instanceof NotFoundException) throw error;
       handleDatabaseError(error);
     }
   }
@@ -92,9 +88,7 @@ export class QuotationsService {
       dto.quotation_date !== undefined ||
       dto.valid_until !== undefined ||
       dto.notes !== undefined;
-    if (!hasPatch) {
-      throw new BadRequestException('No updatable fields provided');
-    }
+    if (!hasPatch) throw new BadRequestException('No updatable fields provided');
 
     try {
       await this.quotationsRepository.updateHeader(id, dto);
@@ -205,9 +199,7 @@ export class QuotationsService {
   private async assertCustomerUsable(customerId: string, companyId: string): Promise<void> {
     const customerCompanyId =
       await this.quotationsRepository.findCustomerCompanyId(customerId);
-    if (!customerCompanyId) {
-      throw new NotFoundException(`Customer ${customerId} not found`);
-    }
+    if (!customerCompanyId) throw new NotFoundException(`Customer ${customerId} not found`);
     if (customerCompanyId !== companyId) {
       throw new BadRequestException(`Customer ${customerId} does not belong to this company`);
     }
@@ -222,9 +214,7 @@ export class QuotationsService {
 
   private async requireQuotationIdForLine(lineId: string): Promise<string> {
     const quotationId = await this.quotationsRepository.findQuotationIdByLineId(lineId);
-    if (!quotationId) {
-      throw new NotFoundException(`Quotation line ${lineId} not found`);
-    }
+    if (!quotationId) throw new NotFoundException(`Quotation line ${lineId} not found`);
     return quotationId;
   }
 }

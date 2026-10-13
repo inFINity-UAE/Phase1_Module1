@@ -44,9 +44,7 @@ export class VatService {
   async findOne(id: string) {
     try {
       const period = await this.vatRepository.findReturn(id);
-      if (!period) {
-        throw new NotFoundException(`VAT return ${id} not found`);
-      }
+      if (!period) throw new NotFoundException(`VAT return ${id} not found`);
       const warning = await this.vatRepository.rpc('vat_return_penalty_warning', {
         p_period_id: id,
       });
@@ -364,8 +362,6 @@ export class VatService {
   }
 
   private assertOwner(role: CompanyRole | undefined, action: string): void {
-    if (role !== CompanyRole.Owner) {
-      throw new ForbiddenException(`Only Owner can ${action}`);
-    }
+    if (role !== CompanyRole.Owner) throw new ForbiddenException(`Only Owner can ${action}`);
   }
 }

@@ -63,9 +63,7 @@ export class VeryfiDocumentsClient {
   }
 
   private async readId(response: Response): Promise<{ id: string }> {
-    if (!response.ok) {
-      throw new Error(`VERYFI_SUBMIT_FAILED:${response.status}`);
-    }
+    if (!response.ok) throw new Error(`VERYFI_SUBMIT_FAILED:${response.status}`);
     const json = (await response.json()) as { id?: string | number };
     if (json.id === undefined || json.id === null || json.id === '') {
       throw new Error('VERYFI_SUBMIT_NO_ID');

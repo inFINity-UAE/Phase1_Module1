@@ -38,9 +38,7 @@ export class SupabaseSupplierPaymentsRepository implements SupplierPaymentsRepos
       .select()
       .single();
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
     return data as SupplierPayment;
   }
 
@@ -50,9 +48,7 @@ export class SupabaseSupplierPaymentsRepository implements SupplierPaymentsRepos
       .select('*')
       .eq('company_id', companyId)
       .order('payment_date', { ascending: false });
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
     return (data ?? []) as SupplierPayment[];
   }
 
@@ -64,21 +60,15 @@ export class SupabaseSupplierPaymentsRepository implements SupplierPaymentsRepos
       .select('*')
       .eq('id', id)
       .maybeSingle();
-    if (paymentError) {
-      throw paymentError;
-    }
-    if (!payment) {
-      return null;
-    }
+    if (paymentError) throw paymentError;
+    if (!payment) return null;
 
     const { data: applications, error: appError } = await this.supabase.client
       .from('supplier_payment_applications')
       .select('*')
       .eq('supplier_payment_id', id)
       .order('applied_at');
-    if (appError) {
-      throw appError;
-    }
+    if (appError) throw appError;
 
     return {
       payment: payment as SupplierPayment,
@@ -93,17 +83,13 @@ export class SupabaseSupplierPaymentsRepository implements SupplierPaymentsRepos
       .eq('id', id)
       .select()
       .single();
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
     return data as SupplierPayment;
   }
 
   async deletePayment(id: string): Promise<void> {
     const { error } = await this.supabase.client.from('supplier_payments').delete().eq('id', id);
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
   }
 
   async insertApplication(params: {
@@ -122,9 +108,7 @@ export class SupabaseSupplierPaymentsRepository implements SupplierPaymentsRepos
       })
       .select()
       .single();
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
     return data as SupplierPaymentApplication;
   }
 
@@ -133,9 +117,7 @@ export class SupabaseSupplierPaymentsRepository implements SupplierPaymentsRepos
       .from('supplier_payment_applications')
       .delete()
       .eq('id', id);
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
   }
 
   async findApplicationById(id: string): Promise<SupplierPaymentApplication | null> {
@@ -144,9 +126,7 @@ export class SupabaseSupplierPaymentsRepository implements SupplierPaymentsRepos
       .select('*')
       .eq('id', id)
       .maybeSingle();
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
     return (data as SupplierPaymentApplication | null) ?? null;
   }
 
@@ -156,9 +136,7 @@ export class SupabaseSupplierPaymentsRepository implements SupplierPaymentsRepos
       .select('company_id')
       .eq('id', supplierId)
       .maybeSingle();
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
     return (data?.company_id as string | undefined) ?? null;
   }
 
@@ -168,12 +146,8 @@ export class SupabaseSupplierPaymentsRepository implements SupplierPaymentsRepos
       .select('is_active')
       .eq('id', supplierId)
       .maybeSingle();
-    if (error) {
-      throw error;
-    }
-    if (!data) {
-      return null;
-    }
+    if (error) throw error;
+    if (!data) return null;
     return Boolean(data.is_active);
   }
 
@@ -185,9 +159,7 @@ export class SupabaseSupplierPaymentsRepository implements SupplierPaymentsRepos
       'create_supplier_payment_journal_entry',
       { p_payment_id: paymentId, p_created_by: createdBy },
     );
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
     return { journal_entry_id: (data as { journal_entry_id: string }).journal_entry_id };
   }
 
@@ -199,9 +171,7 @@ export class SupabaseSupplierPaymentsRepository implements SupplierPaymentsRepos
       'create_supplier_advance_application_journal_entry',
       { p_application_id: applicationId, p_created_by: createdBy },
     );
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
     return { journal_entry_id: (data as { journal_entry_id: string }).journal_entry_id };
   }
 
@@ -224,9 +194,7 @@ export class SupabaseSupplierPaymentsRepository implements SupplierPaymentsRepos
       })
       .select()
       .single();
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
     return data as SupplierPaymentRun;
   }
 
@@ -245,9 +213,7 @@ export class SupabaseSupplierPaymentsRepository implements SupplierPaymentsRepos
       })
       .select()
       .single();
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
     return data as SupplierPaymentRunItem;
   }
 
@@ -257,9 +223,7 @@ export class SupabaseSupplierPaymentsRepository implements SupplierPaymentsRepos
       .select('*')
       .eq('company_id', companyId)
       .order('run_date', { ascending: false });
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
     return (data ?? []) as SupplierPaymentRun[];
   }
 
@@ -269,19 +233,13 @@ export class SupabaseSupplierPaymentsRepository implements SupplierPaymentsRepos
       .select('*')
       .eq('id', id)
       .maybeSingle();
-    if (runError) {
-      throw runError;
-    }
-    if (!run) {
-      return null;
-    }
+    if (runError) throw runError;
+    if (!run) return null;
     const { data: items, error: itemsError } = await this.supabase.client
       .from('supplier_payment_run_items')
       .select('*')
       .eq('run_id', id);
-    if (itemsError) {
-      throw itemsError;
-    }
+    if (itemsError) throw itemsError;
     return {
       run: run as SupplierPaymentRun,
       items: (items ?? []) as SupplierPaymentRunItem[],
@@ -303,17 +261,13 @@ export class SupabaseSupplierPaymentsRepository implements SupplierPaymentsRepos
       .eq('id', id)
       .select()
       .single();
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
     return data as SupplierPaymentRun;
   }
 
   async deleteRun(id: string): Promise<void> {
     const { error } = await this.supabase.client.from('supplier_payment_runs').delete().eq('id', id);
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
   }
 
   async executeRun(runId: string, createdBy: string): Promise<unknown> {
@@ -321,9 +275,7 @@ export class SupabaseSupplierPaymentsRepository implements SupplierPaymentsRepos
       p_run_id: runId,
       p_created_by: createdBy,
     });
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
     return data;
   }
 
@@ -342,9 +294,7 @@ export class SupabaseSupplierPaymentsRepository implements SupplierPaymentsRepos
       })
       .select()
       .single();
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
     return data as SupplierStatementLine;
   }
 
@@ -354,9 +304,7 @@ export class SupabaseSupplierPaymentsRepository implements SupplierPaymentsRepos
       .select('*')
       .eq('company_id', companyId)
       .order('line_date', { ascending: false });
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
     return (data ?? []) as SupplierStatementLine[];
   }
 
@@ -370,9 +318,7 @@ export class SupabaseSupplierPaymentsRepository implements SupplierPaymentsRepos
       .eq('id', id)
       .select()
       .single();
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
     return data as SupplierStatementLine;
   }
 
@@ -382,9 +328,7 @@ export class SupabaseSupplierPaymentsRepository implements SupplierPaymentsRepos
       .select('*')
       .eq('id', id)
       .maybeSingle();
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
     return data as SupplierStatementLine | null;
   }
 
@@ -402,9 +346,7 @@ export class SupabaseSupplierPaymentsRepository implements SupplierPaymentsRepos
       .eq('id', id)
       .select()
       .single();
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
     return data as SupplierStatementLine;
   }
 
@@ -413,8 +355,6 @@ export class SupabaseSupplierPaymentsRepository implements SupplierPaymentsRepos
       .from('supplier_statement_lines')
       .delete()
       .eq('id', id);
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
   }
 }

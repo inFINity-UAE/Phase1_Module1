@@ -39,14 +39,10 @@ export class SuppliersService {
   async findOne(id: string): Promise<Supplier> {
     try {
       const supplier = await this.suppliersRepository.findById(id);
-      if (!supplier) {
-        throw new NotFoundException(`Supplier ${id} not found`);
-      }
+      if (!supplier) throw new NotFoundException(`Supplier ${id} not found`);
       return supplier;
     } catch (error) {
-      if (error instanceof NotFoundException) {
-        throw error;
-      }
+      if (error instanceof NotFoundException) throw error;
       handleDatabaseError(error);
     }
   }
@@ -67,9 +63,7 @@ export class SuppliersService {
       dto.custom_days !== undefined ||
       dto.bank_name !== undefined ||
       dto.iban !== undefined;
-    if (!hasPatch) {
-      throw new BadRequestException('No updatable fields provided');
-    }
+    if (!hasPatch) throw new BadRequestException('No updatable fields provided');
 
     const paymentTerms = dto.default_payment_terms ?? current.default_payment_terms;
     const customDays = dto.custom_days !== undefined ? dto.custom_days : current.custom_days;

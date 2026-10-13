@@ -347,9 +347,7 @@ export class ReportsService {
         offset ?? 0,
       );
       const rows = stripTotalCount(rpcRows);
-      if (limit == null) {
-        return rows;
-      }
+      if (limit == null) return rows;
       let totalCount = rpcRows[0]?.total_count ?? 0;
       if (rows.length === 0 && (offset ?? 0) > 0) {
         const probe = await this.reportsRepository.getGeneralLedger(
@@ -483,9 +481,7 @@ export class ReportsService {
     customerId: string,
   ): Promise<void> {
     const customer = await this.reportsRepository.findCustomerCompanyRow(customerId);
-    if (!customer) {
-      throw new NotFoundException(`Customer ${customerId} not found`);
-    }
+    if (!customer) throw new NotFoundException(`Customer ${customerId} not found`);
     if (customer.company_id !== companyId) {
       throw new BadRequestException(
         `Customer ${customerId} does not belong to company ${companyId}`,
@@ -589,9 +585,7 @@ export class ReportsService {
     supplierId: string,
   ): Promise<void> {
     const supplier = await this.reportsRepository.findSupplierCompanyRow(supplierId);
-    if (!supplier) {
-      throw new NotFoundException(`Supplier ${supplierId} not found`);
-    }
+    if (!supplier) throw new NotFoundException(`Supplier ${supplierId} not found`);
     if (supplier.company_id !== companyId) {
       throw new BadRequestException(
         `Supplier ${supplierId} does not belong to company ${companyId}`,

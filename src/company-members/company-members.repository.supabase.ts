@@ -16,9 +16,7 @@ export class SupabaseCompanyMembersRepository implements CompanyMembersRepositor
       .eq('user_id', userId)
       .maybeSingle();
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return (data?.role as CompanyRole | undefined) ?? null;
   }
@@ -32,9 +30,7 @@ export class SupabaseCompanyMembersRepository implements CompanyMembersRepositor
       .limit(1)
       .maybeSingle();
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return (data?.user_id as string | undefined) ?? null;
   }
@@ -46,9 +42,7 @@ export class SupabaseCompanyMembersRepository implements CompanyMembersRepositor
       .eq('id', entryId)
       .maybeSingle();
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return (data?.company_id as string | undefined) ?? null;
   }
@@ -60,17 +54,11 @@ export class SupabaseCompanyMembersRepository implements CompanyMembersRepositor
       .eq('id', lineId)
       .maybeSingle();
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     const parent = data?.journal_entries as { company_id?: string } | { company_id?: string }[] | null;
-    if (!parent) {
-      return null;
-    }
-    if (Array.isArray(parent)) {
-      return parent[0]?.company_id ?? null;
-    }
+    if (!parent) return null;
+    if (Array.isArray(parent)) return parent[0]?.company_id ?? null;
     return parent.company_id ?? null;
   }
 
@@ -81,9 +69,7 @@ export class SupabaseCompanyMembersRepository implements CompanyMembersRepositor
       .eq('id', accountId)
       .maybeSingle();
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return (data?.company_id as string | undefined) ?? null;
   }
@@ -95,9 +81,7 @@ export class SupabaseCompanyMembersRepository implements CompanyMembersRepositor
       .eq('id', periodId)
       .maybeSingle();
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return (data?.company_id as string | undefined) ?? null;
   }
@@ -109,9 +93,7 @@ export class SupabaseCompanyMembersRepository implements CompanyMembersRepositor
       .eq('id', templateId)
       .maybeSingle();
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return (data?.company_id as string | undefined) ?? null;
   }
@@ -123,20 +105,14 @@ export class SupabaseCompanyMembersRepository implements CompanyMembersRepositor
       .eq('id', lineId)
       .maybeSingle();
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     const parent = data?.recurring_journal_templates as
       | { company_id?: string }
       | { company_id?: string }[]
       | null;
-    if (!parent) {
-      return null;
-    }
-    if (Array.isArray(parent)) {
-      return parent[0]?.company_id ?? null;
-    }
+    if (!parent) return null;
+    if (Array.isArray(parent)) return parent[0]?.company_id ?? null;
     return parent.company_id ?? null;
   }
 
@@ -147,9 +123,7 @@ export class SupabaseCompanyMembersRepository implements CompanyMembersRepositor
       .eq('id', customerId)
       .maybeSingle();
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return (data?.company_id as string | undefined) ?? null;
   }
@@ -161,9 +135,7 @@ export class SupabaseCompanyMembersRepository implements CompanyMembersRepositor
       .eq('id', quotationId)
       .maybeSingle();
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return (data?.company_id as string | undefined) ?? null;
   }
@@ -175,17 +147,11 @@ export class SupabaseCompanyMembersRepository implements CompanyMembersRepositor
       .eq('id', lineId)
       .maybeSingle();
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     const parent = data?.quotations as { company_id?: string } | { company_id?: string }[] | null;
-    if (!parent) {
-      return null;
-    }
-    if (Array.isArray(parent)) {
-      return parent[0]?.company_id ?? null;
-    }
+    if (!parent) return null;
+    if (Array.isArray(parent)) return parent[0]?.company_id ?? null;
     return parent.company_id ?? null;
   }
 
@@ -196,9 +162,7 @@ export class SupabaseCompanyMembersRepository implements CompanyMembersRepositor
       .eq('id', invoiceId)
       .maybeSingle();
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return (data?.company_id as string | undefined) ?? null;
   }
@@ -210,17 +174,11 @@ export class SupabaseCompanyMembersRepository implements CompanyMembersRepositor
       .eq('id', lineId)
       .maybeSingle();
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     const parent = data?.invoices as { company_id?: string } | { company_id?: string }[] | null;
-    if (!parent) {
-      return null;
-    }
-    if (Array.isArray(parent)) {
-      return parent[0]?.company_id ?? null;
-    }
+    if (!parent) return null;
+    if (Array.isArray(parent)) return parent[0]?.company_id ?? null;
     return parent.company_id ?? null;
   }
 
@@ -231,9 +189,7 @@ export class SupabaseCompanyMembersRepository implements CompanyMembersRepositor
       .eq('id', creditNoteId)
       .maybeSingle();
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return (data?.company_id as string | undefined) ?? null;
   }
@@ -245,17 +201,11 @@ export class SupabaseCompanyMembersRepository implements CompanyMembersRepositor
       .eq('id', lineId)
       .maybeSingle();
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     const parent = data?.credit_notes as { company_id?: string } | { company_id?: string }[] | null;
-    if (!parent) {
-      return null;
-    }
-    if (Array.isArray(parent)) {
-      return parent[0]?.company_id ?? null;
-    }
+    if (!parent) return null;
+    if (Array.isArray(parent)) return parent[0]?.company_id ?? null;
     return parent.company_id ?? null;
   }
 
@@ -266,9 +216,7 @@ export class SupabaseCompanyMembersRepository implements CompanyMembersRepositor
       .eq('id', paymentId)
       .maybeSingle();
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return (data?.company_id as string | undefined) ?? null;
   }
@@ -280,17 +228,11 @@ export class SupabaseCompanyMembersRepository implements CompanyMembersRepositor
       .eq('id', applicationId)
       .maybeSingle();
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     const parent = data?.payments as { company_id?: string } | { company_id?: string }[] | null;
-    if (!parent) {
-      return null;
-    }
-    if (Array.isArray(parent)) {
-      return parent[0]?.company_id ?? null;
-    }
+    if (!parent) return null;
+    if (Array.isArray(parent)) return parent[0]?.company_id ?? null;
     return parent.company_id ?? null;
   }
 
@@ -301,9 +243,7 @@ export class SupabaseCompanyMembersRepository implements CompanyMembersRepositor
       .eq('id', holidayId)
       .maybeSingle();
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     // UAE-wide rows (company_id null) are not tenant-resolvable — treat as missing.
     return (data?.company_id as string | undefined) ?? null;
@@ -409,9 +349,7 @@ export class SupabaseCompanyMembersRepository implements CompanyMembersRepositor
       .eq('id', id)
       .maybeSingle();
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return (data?.company_id as string | undefined) ?? null;
   }
@@ -428,9 +366,7 @@ export class SupabaseCompanyMembersRepository implements CompanyMembersRepositor
       .eq('id', id)
       .maybeSingle();
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     const row = data as Record<string, unknown> | null;
     const parent = row?.[parentKey] as
@@ -438,12 +374,8 @@ export class SupabaseCompanyMembersRepository implements CompanyMembersRepositor
       | { company_id?: string }[]
       | null
       | undefined;
-    if (!parent) {
-      return null;
-    }
-    if (Array.isArray(parent)) {
-      return parent[0]?.company_id ?? null;
-    }
+    if (!parent) return null;
+    if (Array.isArray(parent)) return parent[0]?.company_id ?? null;
     return parent.company_id ?? null;
   }
 }

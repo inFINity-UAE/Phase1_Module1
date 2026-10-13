@@ -24,9 +24,7 @@ export class SupabaseCustomersRepository implements CustomersRepository {
       .select()
       .single();
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return data as Customer;
   }
@@ -38,9 +36,7 @@ export class SupabaseCustomersRepository implements CustomersRepository {
       .eq('company_id', companyId)
       .order('customer_name');
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return (data ?? []) as Customer[];
   }
@@ -52,9 +48,7 @@ export class SupabaseCustomersRepository implements CustomersRepository {
       .eq('id', id)
       .maybeSingle();
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return data as Customer | null;
   }
@@ -67,9 +61,7 @@ export class SupabaseCustomersRepository implements CustomersRepository {
       .select()
       .single();
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return data as Customer;
   }
@@ -82,9 +74,7 @@ export class SupabaseCustomersRepository implements CustomersRepository {
       .select()
       .single();
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return data as Customer;
   }

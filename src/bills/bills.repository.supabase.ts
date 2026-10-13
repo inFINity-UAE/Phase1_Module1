@@ -34,9 +34,7 @@ export class SupabaseBillsRepository implements BillsRepository {
       .select()
       .single();
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return data as Bill;
   }
@@ -53,9 +51,7 @@ export class SupabaseBillsRepository implements BillsRepository {
     }
 
     const { data, error } = await query;
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return (data ?? []) as Bill[];
   }
@@ -67,12 +63,8 @@ export class SupabaseBillsRepository implements BillsRepository {
       .eq('id', id)
       .maybeSingle();
 
-    if (billError) {
-      throw billError;
-    }
-    if (!bill) {
-      return null;
-    }
+    if (billError) throw billError;
+    if (!bill) return null;
 
     const { data: lines, error: linesError } = await this.supabase.client
       .from('bill_lines')
@@ -80,9 +72,7 @@ export class SupabaseBillsRepository implements BillsRepository {
       .eq('bill_id', id)
       .order('line_number');
 
-    if (linesError) {
-      throw linesError;
-    }
+    if (linesError) throw linesError;
 
     return {
       bill: bill as Bill,
@@ -98,18 +88,14 @@ export class SupabaseBillsRepository implements BillsRepository {
       .select()
       .single();
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return data as Bill;
   }
 
   async deleteHeader(id: string): Promise<void> {
     const { error } = await this.supabase.client.from('bills').delete().eq('id', id);
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
   }
 
   async insertLine(billId: string, dto: CreateBillLineDto): Promise<BillLine> {
@@ -133,9 +119,7 @@ export class SupabaseBillsRepository implements BillsRepository {
       .select()
       .single();
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return data as BillLine;
   }
@@ -148,18 +132,14 @@ export class SupabaseBillsRepository implements BillsRepository {
       .select()
       .single();
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return data as BillLine;
   }
 
   async deleteLine(id: string): Promise<void> {
     const { error } = await this.supabase.client.from('bill_lines').delete().eq('id', id);
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
   }
 
   async findLineById(lineId: string): Promise<BillLine | null> {
@@ -169,9 +149,7 @@ export class SupabaseBillsRepository implements BillsRepository {
       .eq('id', lineId)
       .maybeSingle();
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return data as BillLine | null;
   }
@@ -183,13 +161,9 @@ export class SupabaseBillsRepository implements BillsRepository {
       .eq('id', supplierId)
       .maybeSingle();
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
-    if (!data) {
-      return null;
-    }
+    if (!data) return null;
 
     return Boolean(data.is_active);
   }
@@ -201,9 +175,7 @@ export class SupabaseBillsRepository implements BillsRepository {
       .eq('id', supplierId)
       .maybeSingle();
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return (data?.company_id as string | undefined) ?? null;
   }
@@ -213,9 +185,7 @@ export class SupabaseBillsRepository implements BillsRepository {
       p_bill_id: billId,
     });
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
   }
 
   async issueBill(billId: string, createdBy: string, immediatePost: boolean): Promise<Bill> {
@@ -225,9 +195,7 @@ export class SupabaseBillsRepository implements BillsRepository {
       p_immediate_post: immediatePost,
     });
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return data as Bill;
   }
@@ -246,9 +214,7 @@ export class SupabaseBillsRepository implements BillsRepository {
       p_created_by: createdBy,
     });
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     const result = data as {
       bill: Bill;

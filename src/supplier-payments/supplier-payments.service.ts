@@ -75,14 +75,10 @@ export class SupplierPaymentsService {
   async findPayment(id: string): Promise<SupplierPaymentWithApplications> {
     try {
       const row = await this.repo.findPaymentByIdWithApplications(id);
-      if (!row) {
-        throw new NotFoundException(`Supplier payment ${id} not found`);
-      }
+      if (!row) throw new NotFoundException(`Supplier payment ${id} not found`);
       return row;
     } catch (error) {
-      if (error instanceof NotFoundException) {
-        throw error;
-      }
+      if (error instanceof NotFoundException) throw error;
       handleDatabaseError(error);
     }
   }
@@ -213,14 +209,10 @@ export class SupplierPaymentsService {
   async findRun(id: string): Promise<SupplierPaymentRunWithItems> {
     try {
       const row = await this.repo.findRunByIdWithItems(id);
-      if (!row) {
-        throw new NotFoundException(`Payment run ${id} not found`);
-      }
+      if (!row) throw new NotFoundException(`Payment run ${id} not found`);
       return row;
     } catch (error) {
-      if (error instanceof NotFoundException) {
-        throw error;
-      }
+      if (error instanceof NotFoundException) throw error;
       handleDatabaseError(error);
     }
   }
@@ -325,14 +317,10 @@ export class SupplierPaymentsService {
   async findStatementLine(id: string): Promise<SupplierStatementLine> {
     try {
       const row = await this.repo.findStatementLineById(id);
-      if (!row) {
-        throw new NotFoundException(`Supplier statement line ${id} not found`);
-      }
+      if (!row) throw new NotFoundException(`Supplier statement line ${id} not found`);
       return row;
     } catch (error) {
-      if (error instanceof NotFoundException) {
-        throw error;
-      }
+      if (error instanceof NotFoundException) throw error;
       handleDatabaseError(error);
     }
   }
@@ -349,9 +337,7 @@ export class SupplierPaymentsService {
       dto.reference !== undefined ||
       dto.amount !== undefined ||
       dto.source !== undefined;
-    if (!hasPatch) {
-      throw new BadRequestException('No updatable fields provided');
-    }
+    if (!hasPatch) throw new BadRequestException('No updatable fields provided');
     try {
       return await this.repo.updateStatementLine(id, dto);
     } catch (error) {
@@ -397,9 +383,7 @@ export class SupplierPaymentsService {
 
   private async assertSupplierUsable(supplierId: string, companyId: string): Promise<void> {
     const supplierCompanyId = await this.repo.findSupplierCompanyId(supplierId);
-    if (!supplierCompanyId) {
-      throw new NotFoundException(`Supplier ${supplierId} not found`);
-    }
+    if (!supplierCompanyId) throw new NotFoundException(`Supplier ${supplierId} not found`);
     if (supplierCompanyId !== companyId) {
       throw new BadRequestException('Supplier does not belong to this company');
     }

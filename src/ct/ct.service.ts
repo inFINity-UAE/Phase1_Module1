@@ -165,9 +165,7 @@ export class CtService {
     this.assertAccountantOrOwner(role, 'read CT registration status');
     try {
       const row = await this.ctRepository.getRegistrationStatus(companyId);
-      if (!row) {
-        throw new NotFoundException('Company not found');
-      }
+      if (!row) throw new NotFoundException('Company not found');
       return { trn: row.trn };
     } catch (error) {
       if (error instanceof NotFoundException) throw error;
@@ -189,9 +187,7 @@ export class CtService {
 
   /** [feature-spec-1_1_F.md F-8 analogue / feature-spec-1_1_G.md G-27] */
   private assertOwner(role: CompanyRole | undefined, action: string): void {
-    if (role !== CompanyRole.Owner) {
-      throw new ForbiddenException(`Only Owner can ${action}`);
-    }
+    if (role !== CompanyRole.Owner) throw new ForbiddenException(`Only Owner can ${action}`);
   }
 
   private assertAccountantOrOwner(role: CompanyRole | undefined, action: string): void {

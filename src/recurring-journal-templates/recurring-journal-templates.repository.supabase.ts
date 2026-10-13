@@ -27,18 +27,14 @@ export class SupabaseRecurringJournalTemplatesRepository
     accountIds: string[],
   ): Promise<void> {
     const uniqueIds = [...new Set(accountIds.filter(Boolean))];
-    if (uniqueIds.length === 0) {
-      return;
-    }
+    if (uniqueIds.length === 0) return;
 
     const { data, error } = await this.supabase.client
       .from('accounts')
       .select('id, company_id, is_active, account_number')
       .in('id', uniqueIds);
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     assertAccountsUsableForCompany(companyId, uniqueIds, data ?? []);
   }
@@ -67,9 +63,7 @@ export class SupabaseRecurringJournalTemplatesRepository
       .select()
       .single();
 
-    if (templateError) {
-      throw templateError;
-    }
+    if (templateError) throw templateError;
 
     const templateRow = template as RecurringJournalTemplate;
 
@@ -88,9 +82,7 @@ export class SupabaseRecurringJournalTemplatesRepository
         .insert(lineRows)
         .select();
 
-      if (linesError) {
-        throw linesError;
-      }
+      if (linesError) throw linesError;
 
       return {
         template: templateRow,
@@ -117,9 +109,7 @@ export class SupabaseRecurringJournalTemplatesRepository
 
     const { data: templates, error } = await query;
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     const results: RecurringJournalTemplateWithLines[] = [];
 
@@ -141,13 +131,9 @@ export class SupabaseRecurringJournalTemplatesRepository
       .eq('id', id)
       .maybeSingle();
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
-    if (!template) {
-      return null;
-    }
+    if (!template) return null;
 
     const lines = await this.findLinesByTemplateId(id);
 
@@ -185,9 +171,7 @@ export class SupabaseRecurringJournalTemplatesRepository
       .select()
       .single();
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return data as RecurringJournalTemplate;
   }
@@ -203,9 +187,7 @@ export class SupabaseRecurringJournalTemplatesRepository
       .delete()
       .eq('id', id);
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
   }
 
   async insertLine(
@@ -218,9 +200,7 @@ export class SupabaseRecurringJournalTemplatesRepository
       .eq('id', templateId)
       .maybeSingle();
 
-    if (templateLookupError) {
-      throw templateLookupError;
-    }
+    if (templateLookupError) throw templateLookupError;
     if (!template?.company_id) {
       throw new Error(`Recurring journal template ${templateId} not found`);
     }
@@ -240,9 +220,7 @@ export class SupabaseRecurringJournalTemplatesRepository
       .select()
       .single();
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return data as RecurringJournalTemplateLine;
   }
@@ -258,12 +236,8 @@ export class SupabaseRecurringJournalTemplatesRepository
         .eq('id', id)
         .maybeSingle();
 
-      if (lineLookupError) {
-        throw lineLookupError;
-      }
-      if (!line) {
-        throw new Error(`Recurring journal template line ${id} not found`);
-      }
+      if (lineLookupError) throw lineLookupError;
+      if (!line) throw new Error(`Recurring journal template line ${id} not found`);
 
       const parent = line.recurring_journal_templates as
         | { company_id?: string }
@@ -272,9 +246,7 @@ export class SupabaseRecurringJournalTemplatesRepository
       const companyId = Array.isArray(parent)
         ? parent[0]?.company_id
         : parent?.company_id;
-      if (!companyId) {
-        throw new Error(`Recurring journal template line ${id} has no company`);
-      }
+      if (!companyId) throw new Error(`Recurring journal template line ${id} has no company`);
 
       await this.assertAccountsUsableForCompany(companyId, [dto.account_id]);
     }
@@ -294,9 +266,7 @@ export class SupabaseRecurringJournalTemplatesRepository
       .select()
       .single();
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return data as RecurringJournalTemplateLine;
   }
@@ -307,9 +277,7 @@ export class SupabaseRecurringJournalTemplatesRepository
       .delete()
       .eq('id', id);
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
   }
 
   async findDueTemplates(
@@ -324,9 +292,7 @@ export class SupabaseRecurringJournalTemplatesRepository
       .lte('next_run_date', asOfDate)
       .order('next_run_date');
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     const due: RecurringJournalTemplateWithLines[] = [];
 
@@ -354,9 +320,7 @@ export class SupabaseRecurringJournalTemplatesRepository
       .select('company_id')
       .eq('is_active', true);
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return [
       ...new Set(
@@ -381,9 +345,7 @@ export class SupabaseRecurringJournalTemplatesRepository
       .limit(1)
       .maybeSingle();
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return data as AccountingPeriod | null;
   }
@@ -403,9 +365,7 @@ export class SupabaseRecurringJournalTemplatesRepository
       .select()
       .single();
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return data as RecurringJournalTemplate;
   }
@@ -417,9 +377,7 @@ export class SupabaseRecurringJournalTemplatesRepository
       .eq('template_id', templateId)
       .order('line_number');
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return (data ?? []) as RecurringJournalTemplateLine[];
   }

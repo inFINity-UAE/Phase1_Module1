@@ -35,9 +35,7 @@ export async function resolveCleanFiscalYear(
   for (let year = 2105; year <= 2200; year += 1) {
     const hasOpening = await repository.hasOpeningBalanceForFiscalYear(companyId, year);
     const hasYearEnd = await repository.hasYearEndClosingForFiscalYear(companyId, year);
-    if (!hasOpening && !hasYearEnd) {
-      return year;
-    }
+    if (!hasOpening && !hasYearEnd) return year;
   }
 
   throw new Error(`No unused fiscal year found for E2E company ${companyId}`);
@@ -62,9 +60,7 @@ export async function ensureCompanyWithCoa(
   });
 
   // 23505 = already exists (integration suites that still use a fixed id with finalized COA)
-  if (companyError && companyError.code !== '23505') {
-    throw companyError;
-  }
+  if (companyError && companyError.code !== '23505') throw companyError;
 
   const { error: settingsError } = await supabase.client.from('company_settings').upsert({
     company_id: companyId,
@@ -76,18 +72,14 @@ export async function ensureCompanyWithCoa(
     default_emirate: 'dubai',
   });
 
-  if (settingsError) {
-    throw settingsError;
-  }
+  if (settingsError) throw settingsError;
 
   const { count, error: countError } = await supabase.client
     .from('accounts')
     .select('id', { count: 'exact', head: true })
     .eq('company_id', companyId);
 
-  if (countError) {
-    throw countError;
-  }
+  if (countError) throw countError;
 
   const { data: hierarchyDemo, error: hierarchyError } = await supabase.client
     .from('accounts')
@@ -96,9 +88,7 @@ export async function ensureCompanyWithCoa(
     .eq('account_number', '1021')
     .maybeSingle();
 
-  if (hierarchyError) {
-    throw hierarchyError;
-  }
+  if (hierarchyError) throw hierarchyError;
 
   // Finalized UAE COA = 180 Excel rows + 4 hierarchy demos + F-41 1415/5641 = 186 (marker: 1021)
   if ((count ?? 0) >= 186 && hierarchyDemo) {
@@ -181,9 +171,7 @@ export async function ensureCompanyWithCoa(
   const cloneStartedAt = Date.now();
   const { error: insertError } = await supabase.client.from('accounts').insert(rows);
 
-  if (insertError) {
-    throw insertError;
-  }
+  if (insertError) throw insertError;
 
   // eslint-disable-next-line no-console
   console.log(
@@ -221,12 +209,8 @@ async function seedDefaultBankAccountId(
     .eq('account_number', '1020')
     .maybeSingle();
 
-  if (bankError) {
-    throw bankError;
-  }
-  if (!bank?.id) {
-    return;
-  }
+  if (bankError) throw bankError;
+  if (!bank?.id) return;
 
   const { error } = await supabase.client
     .from('company_settings')
@@ -234,9 +218,7 @@ async function seedDefaultBankAccountId(
     .eq('company_id', companyId)
     .is('default_bank_account_id', null);
 
-  if (error) {
-    throw error;
-  }
+  if (error) throw error;
 }
 
 /**
@@ -286,9 +268,7 @@ export async function ensureFiscalYearPeriods(
       .eq('period_start', periodStart)
       .maybeSingle();
 
-    if (existingError) {
-      throw existingError;
-    }
+    if (existingError) throw existingError;
 
     if (existing) {
       periodIds.set(periodStart, existing.id as string);

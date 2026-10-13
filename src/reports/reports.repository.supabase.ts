@@ -17,22 +17,14 @@ import { SalesByCustomerRow } from './entities/sales-by-customer-row.entity';
 
 
 function asMoney(value: unknown): number {
-  if (typeof value === 'number') {
-    return value;
-  }
-  if (typeof value === 'string') {
-    return Number(value);
-  }
+  if (typeof value === 'number') return value;
+  if (typeof value === 'string') return Number(value);
   return 0;
 }
 
 function asInt(value: unknown): number {
-  if (typeof value === 'number') {
-    return value;
-  }
-  if (typeof value === 'string') {
-    return Number(value);
-  }
+  if (typeof value === 'number') return value;
+  if (typeof value === 'string') return Number(value);
   return 0;
 }
 
@@ -54,9 +46,7 @@ export class SupabaseReportsRepository implements ReportsRepository {
       .eq('id', periodId)
       .maybeSingle();
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return data as {
       id: string;
@@ -75,9 +65,7 @@ export class SupabaseReportsRepository implements ReportsRepository {
       .eq('id', accountId)
       .maybeSingle();
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return data as {
       id: string;
@@ -104,9 +92,7 @@ export class SupabaseReportsRepository implements ReportsRepository {
       },
     );
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return ((data as Record<string, unknown>[]) ?? []).map((row) => ({
       account_id: String(row.account_id),
@@ -142,9 +128,7 @@ export class SupabaseReportsRepository implements ReportsRepository {
       },
     );
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return ((data as Record<string, unknown>[]) ?? []).map((row) => ({
       account_id: String(row.account_id),
@@ -176,9 +160,7 @@ export class SupabaseReportsRepository implements ReportsRepository {
       p_as_of_date: asOfDate,
     });
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return ((data as Record<string, unknown>[]) ?? []).map((row) => ({
       account_id: String(row.account_id),
@@ -207,9 +189,7 @@ export class SupabaseReportsRepository implements ReportsRepository {
       p_period_end: periodEnd,
     });
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return ((data as Record<string, unknown>[]) ?? []).map((row) => ({
       account_id: String(row.account_id),
@@ -242,9 +222,7 @@ export class SupabaseReportsRepository implements ReportsRepository {
       },
     );
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return ((data as Record<string, unknown>[]) ?? []).map((row) => ({
       account_id: String(row.account_id),
@@ -283,9 +261,7 @@ export class SupabaseReportsRepository implements ReportsRepository {
       p_offset: offset ?? 0,
     });
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return ((data as Record<string, unknown>[]) ?? []).map((row) => ({
       journal_line_id: String(row.journal_line_id),
@@ -316,9 +292,7 @@ export class SupabaseReportsRepository implements ReportsRepository {
       p_company_id: companyId,
       p_fiscal_year: fiscalYear,
     });
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
     return ((data as Record<string, unknown>[]) ?? []).map((row) => ({
       month_start: String(row.month_start),
       sub_category: String(row.sub_category),
@@ -338,9 +312,7 @@ export class SupabaseReportsRepository implements ReportsRepository {
       p_period_start: periodStart,
       p_period_end: periodEnd,
     });
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
     return ((data as Record<string, unknown>[]) ?? []).map((row) => ({
       customer_id: String(row.customer_id),
       total_revenue: asMoney(row.total_revenue),
@@ -364,9 +336,7 @@ export class SupabaseReportsRepository implements ReportsRepository {
       p_date_to: dateTo ?? null,
     });
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return ((data as Record<string, unknown>[]) ?? []).map((row) => ({
       entry_date: String(row.entry_date),
@@ -392,9 +362,7 @@ export class SupabaseReportsRepository implements ReportsRepository {
       p_as_of_date: asOfDate,
     });
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return ((data as Record<string, unknown>[]) ?? []).map((row) => ({
       customer_id: row.customer_id == null ? null : String(row.customer_id),
@@ -419,9 +387,7 @@ export class SupabaseReportsRepository implements ReportsRepository {
       p_customer_id: customerId,
     });
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     const row = data as Record<string, unknown>;
     return {
@@ -448,9 +414,7 @@ export class SupabaseReportsRepository implements ReportsRepository {
       },
     );
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     const row = data as Record<string, unknown>;
     const invoices = ((row.invoices as Record<string, unknown>[]) ?? []).map((inv) => ({
@@ -486,9 +450,7 @@ export class SupabaseReportsRepository implements ReportsRepository {
       .eq('id', customerId)
       .maybeSingle();
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return data as { id: string; company_id: string } | null;
   }
@@ -502,9 +464,7 @@ export class SupabaseReportsRepository implements ReportsRepository {
       .eq('id', supplierId)
       .maybeSingle();
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return data as { id: string; company_id: string } | null;
   }
@@ -523,9 +483,7 @@ export class SupabaseReportsRepository implements ReportsRepository {
       p_date_to: dateTo ?? null,
     });
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return ((data as Record<string, unknown>[]) ?? []).map((row) => ({
       entry_date: String(row.entry_date),
@@ -548,9 +506,7 @@ export class SupabaseReportsRepository implements ReportsRepository {
       p_as_of_date: asOfDate,
     });
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return ((data as Record<string, unknown>[]) ?? []).map((row) => ({
       supplier_id: row.supplier_id == null ? null : String(row.supplier_id),
@@ -572,9 +528,7 @@ export class SupabaseReportsRepository implements ReportsRepository {
       p_as_of_date: asOfDate,
     });
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return ((data as Record<string, unknown>[]) ?? []).map((row) => ({
       bill_id: String(row.bill_id),
@@ -601,9 +555,7 @@ export class SupabaseReportsRepository implements ReportsRepository {
       p_statement_date: statementDate,
     });
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return data;
   }

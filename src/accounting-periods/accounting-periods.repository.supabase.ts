@@ -20,9 +20,7 @@ export class SupabaseAccountingPeriodsRepository implements AccountingPeriodsRep
       .eq('id', id)
       .maybeSingle();
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return data as AccountingPeriod | null;
   }
@@ -34,9 +32,7 @@ export class SupabaseAccountingPeriodsRepository implements AccountingPeriodsRep
       .eq('company_id', companyId)
       .order('period_start', { ascending: true });
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return (data ?? []) as AccountingPeriod[];
   }
@@ -54,9 +50,7 @@ export class SupabaseAccountingPeriodsRepository implements AccountingPeriodsRep
       .select()
       .single();
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return data as AccountingPeriod;
   }
@@ -69,9 +63,7 @@ export class SupabaseAccountingPeriodsRepository implements AccountingPeriodsRep
       .select()
       .single();
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return data as AccountingPeriod;
   }
@@ -101,9 +93,7 @@ export class SupabaseAccountingPeriodsRepository implements AccountingPeriodsRep
 
     const { data, error } = await query;
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return (data?.length ?? 0) > 0;
   }
@@ -116,9 +106,7 @@ export class SupabaseAccountingPeriodsRepository implements AccountingPeriodsRep
       .eq('status', JournalEntryStatus.Posted)
       .limit(1);
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return (data?.length ?? 0) > 0;
   }
@@ -143,9 +131,7 @@ export class SupabaseAccountingPeriodsRepository implements AccountingPeriodsRep
       .select()
       .single();
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return data as AccountingPeriod;
   }
@@ -169,9 +155,7 @@ export class SupabaseAccountingPeriodsRepository implements AccountingPeriodsRep
       .select()
       .single();
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return data as AccountingPeriod;
   }
@@ -184,17 +168,13 @@ export class SupabaseAccountingPeriodsRepository implements AccountingPeriodsRep
       .select('company_id, period_end')
       .neq('status', PeriodStatus.Closed);
 
-    if (periodsError) {
-      throw periodsError;
-    }
+    if (periodsError) throw periodsError;
 
     const { data: runs, error: runsError } = await this.supabase.client
       .from('ecl_provision_runs')
       .select('company_id, period_end_date');
 
-    if (runsError) {
-      throw runsError;
-    }
+    if (runsError) throw runsError;
 
     const done = new Set(
       (runs ?? []).map(
@@ -224,9 +204,7 @@ export class SupabaseAccountingPeriodsRepository implements AccountingPeriodsRep
       p_n: n,
     });
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return data as string;
   }
@@ -242,9 +220,7 @@ export class SupabaseAccountingPeriodsRepository implements AccountingPeriodsRep
       p_created_by: createdBy,
     });
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     const result = data as { journal_entry_id?: string | null };
     return { journal_entry_id: result.journal_entry_id ?? null };

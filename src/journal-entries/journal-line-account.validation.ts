@@ -47,9 +47,7 @@ export function assertAccountsUsableForCompany(
   accounts: JournalLineAccountRow[],
 ): void {
   const uniqueIds = [...new Set(accountIds.filter(Boolean))];
-  if (uniqueIds.length === 0) {
-    return;
-  }
+  if (uniqueIds.length === 0) return;
 
   const byId = new Map(accounts.map((row) => [row.id, row]));
 

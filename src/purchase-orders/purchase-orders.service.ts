@@ -55,14 +55,10 @@ export class PurchaseOrdersService {
   async findOne(id: string): Promise<PurchaseOrderWithLines> {
     try {
       const result = await this.purchaseOrdersRepository.findByIdWithLines(id);
-      if (!result) {
-        throw new NotFoundException(`Purchase order ${id} not found`);
-      }
+      if (!result) throw new NotFoundException(`Purchase order ${id} not found`);
       return result;
     } catch (error) {
-      if (error instanceof NotFoundException) {
-        throw error;
-      }
+      if (error instanceof NotFoundException) throw error;
       handleDatabaseError(error);
     }
   }
@@ -77,9 +73,7 @@ export class PurchaseOrdersService {
 
     const hasPatch =
       dto.supplier_id !== undefined || dto.po_date !== undefined || dto.status !== undefined;
-    if (!hasPatch) {
-      throw new BadRequestException('No updatable fields provided');
-    }
+    if (!hasPatch) throw new BadRequestException('No updatable fields provided');
 
     try {
       await this.purchaseOrdersRepository.updateHeader(id, dto);
@@ -156,9 +150,7 @@ export class PurchaseOrdersService {
 
   private async assertSupplierUsable(supplierId: string, companyId: string): Promise<void> {
     const supplierCompanyId = await this.purchaseOrdersRepository.findSupplierCompanyId(supplierId);
-    if (!supplierCompanyId) {
-      throw new NotFoundException(`Supplier ${supplierId} not found`);
-    }
+    if (!supplierCompanyId) throw new NotFoundException(`Supplier ${supplierId} not found`);
     if (supplierCompanyId !== companyId) {
       throw new BadRequestException(`Supplier ${supplierId} does not belong to this company`);
     }

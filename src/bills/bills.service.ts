@@ -70,14 +70,10 @@ export class BillsService {
   async findOne(id: string): Promise<BillWithLines> {
     try {
       const result = await this.billsRepository.findByIdWithLines(id);
-      if (!result) {
-        throw new NotFoundException(`Bill ${id} not found`);
-      }
+      if (!result) throw new NotFoundException(`Bill ${id} not found`);
       return result;
     } catch (error) {
-      if (error instanceof NotFoundException) {
-        throw error;
-      }
+      if (error instanceof NotFoundException) throw error;
       handleDatabaseError(error);
     }
   }
@@ -101,9 +97,7 @@ export class BillsService {
       dto.bill_date !== undefined ||
       dto.payment_terms !== undefined ||
       dto.custom_days !== undefined;
-    if (!hasPatch) {
-      throw new BadRequestException('No updatable fields provided');
-    }
+    if (!hasPatch) throw new BadRequestException('No updatable fields provided');
 
     try {
       await this.billsRepository.updateHeader(id, dto);
@@ -378,9 +372,7 @@ export class BillsService {
 
   private async assertSupplierUsable(supplierId: string, companyId: string): Promise<void> {
     const supplierCompanyId = await this.billsRepository.findSupplierCompanyId(supplierId);
-    if (!supplierCompanyId) {
-      throw new NotFoundException(`Supplier ${supplierId} not found`);
-    }
+    if (!supplierCompanyId) throw new NotFoundException(`Supplier ${supplierId} not found`);
     if (supplierCompanyId !== companyId) {
       throw new BadRequestException(`Supplier ${supplierId} does not belong to this company`);
     }

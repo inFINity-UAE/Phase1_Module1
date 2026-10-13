@@ -20,9 +20,7 @@ export function computeAccountBalance(
   totalDebit: number,
   totalCredit: number,
 ): number {
-  if (normalBalance === NormalBalance.Debit) {
-    return roundMoney(totalDebit - totalCredit);
-  }
+  if (normalBalance === NormalBalance.Debit) return roundMoney(totalDebit - totalCredit);
 
   return roundMoney(totalCredit - totalDebit);
 }

@@ -49,9 +49,7 @@ export class CompanyMembershipGuard implements CanActivate {
 
     const request = context.switchToHttp().getRequest<HttpRequest>();
     const userId = request.user?.id;
-    if (!userId) {
-      throw new ForbiddenException('Authentication required');
-    }
+    if (!userId) throw new ForbiddenException('Authentication required');
 
     const companyId = await this.resolveCompanyId(source, request);
     const role = await this.companyMembersService.resolveRole(userId, companyId);
@@ -95,9 +93,7 @@ export class CompanyMembershipGuard implements CanActivate {
       case 'param': {
         const param = source.param ?? 'id';
         const resourceId = request.params?.[param];
-        if (!resourceId) {
-          throw new NotFoundException(`${source.resource} id is required`);
-        }
+        if (!resourceId) throw new NotFoundException(`${source.resource} id is required`);
         return this.companyMembersService.resolveCompanyIdForResource(
           source.resource,
           resourceId,

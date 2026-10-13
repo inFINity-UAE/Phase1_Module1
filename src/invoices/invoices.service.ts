@@ -77,14 +77,10 @@ export class InvoicesService {
   async findOne(id: string): Promise<InvoiceWithLines> {
     try {
       const result = await this.invoicesRepository.findByIdWithLines(id);
-      if (!result) {
-        throw new NotFoundException(`Invoice ${id} not found`);
-      }
+      if (!result) throw new NotFoundException(`Invoice ${id} not found`);
       return result;
     } catch (error) {
-      if (error instanceof NotFoundException) {
-        throw error;
-      }
+      if (error instanceof NotFoundException) throw error;
       handleDatabaseError(error);
     }
   }
@@ -107,9 +103,7 @@ export class InvoicesService {
       dto.invoice_date !== undefined ||
       dto.payment_terms !== undefined ||
       dto.custom_days !== undefined;
-    if (!hasPatch) {
-      throw new BadRequestException('No updatable fields provided');
-    }
+    if (!hasPatch) throw new BadRequestException('No updatable fields provided');
 
     try {
       await this.invoicesRepository.updateHeader(id, dto);
@@ -262,9 +256,7 @@ export class InvoicesService {
         id,
         dto.debtor_notified_at,
       );
-      if (!updated) {
-        throw new NotFoundException(`No write-off found for invoice ${id}`);
-      }
+      if (!updated) throw new NotFoundException(`No write-off found for invoice ${id}`);
       return { invoice_id: id, debtor_notified_at: dto.debtor_notified_at };
     } catch (error) {
       handleDatabaseError(error);
@@ -342,9 +334,7 @@ export class InvoicesService {
 
   private async assertCustomerUsable(customerId: string, companyId: string): Promise<void> {
     const customerCompanyId = await this.invoicesRepository.findCustomerCompanyId(customerId);
-    if (!customerCompanyId) {
-      throw new NotFoundException(`Customer ${customerId} not found`);
-    }
+    if (!customerCompanyId) throw new NotFoundException(`Customer ${customerId} not found`);
     if (customerCompanyId !== companyId) {
       throw new BadRequestException(`Customer ${customerId} does not belong to this company`);
     }
@@ -359,9 +349,7 @@ export class InvoicesService {
 
   private async requireInvoiceIdForLine(lineId: string): Promise<string> {
     const invoiceId = await this.invoicesRepository.findInvoiceIdByLineId(lineId);
-    if (!invoiceId) {
-      throw new NotFoundException(`Invoice line ${lineId} not found`);
-    }
+    if (!invoiceId) throw new NotFoundException(`Invoice line ${lineId} not found`);
     return invoiceId;
   }
 }

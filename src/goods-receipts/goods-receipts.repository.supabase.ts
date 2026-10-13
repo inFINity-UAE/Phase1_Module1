@@ -28,9 +28,7 @@ export class SupabaseGoodsReceiptsRepository implements GoodsReceiptsRepository 
       .select()
       .single();
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return data as GoodsReceipt;
   }
@@ -42,9 +40,7 @@ export class SupabaseGoodsReceiptsRepository implements GoodsReceiptsRepository 
       .eq('company_id', companyId)
       .order('receipt_date', { ascending: false });
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return (data ?? []) as GoodsReceipt[];
   }
@@ -56,21 +52,15 @@ export class SupabaseGoodsReceiptsRepository implements GoodsReceiptsRepository 
       .eq('id', id)
       .maybeSingle();
 
-    if (headerError) {
-      throw headerError;
-    }
-    if (!goodsReceipt) {
-      return null;
-    }
+    if (headerError) throw headerError;
+    if (!goodsReceipt) return null;
 
     const { data: lines, error: linesError } = await this.supabase.client
       .from('goods_receipt_lines')
       .select('*')
       .eq('goods_receipt_id', id);
 
-    if (linesError) {
-      throw linesError;
-    }
+    if (linesError) throw linesError;
 
     return {
       goods_receipt: goodsReceipt as GoodsReceipt,
@@ -86,18 +76,14 @@ export class SupabaseGoodsReceiptsRepository implements GoodsReceiptsRepository 
       .select()
       .single();
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return data as GoodsReceipt;
   }
 
   async deleteHeader(id: string): Promise<void> {
     const { error } = await this.supabase.client.from('goods_receipts').delete().eq('id', id);
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
   }
 
   async insertLine(
@@ -114,9 +100,7 @@ export class SupabaseGoodsReceiptsRepository implements GoodsReceiptsRepository 
       .select()
       .single();
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return data as GoodsReceiptLine;
   }
@@ -129,18 +113,14 @@ export class SupabaseGoodsReceiptsRepository implements GoodsReceiptsRepository 
       .select()
       .single();
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return data as GoodsReceiptLine;
   }
 
   async deleteLine(id: string): Promise<void> {
     const { error } = await this.supabase.client.from('goods_receipt_lines').delete().eq('id', id);
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
   }
 
   async findLineById(lineId: string): Promise<GoodsReceiptLine | null> {
@@ -150,9 +130,7 @@ export class SupabaseGoodsReceiptsRepository implements GoodsReceiptsRepository 
       .eq('id', lineId)
       .maybeSingle();
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return (data as GoodsReceiptLine | null) ?? null;
   }
@@ -164,9 +142,7 @@ export class SupabaseGoodsReceiptsRepository implements GoodsReceiptsRepository 
       .eq('id', poId)
       .maybeSingle();
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
     return (data?.company_id as string | undefined) ?? null;
   }
 }

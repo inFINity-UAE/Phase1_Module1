@@ -17,14 +17,10 @@ export class ReportsCsvInterceptor implements NestInterceptor {
     const res = context.switchToHttp().getResponse<{
       setHeader: (name: string, value: string) => void;
     }>();
-    if (req.query?.format !== 'csv') {
-      return next.handle();
-    }
+    if (req.query?.format !== 'csv') return next.handle();
     return next.handle().pipe(
       map((data) => {
-        if (data instanceof StreamableFile) {
-          return data;
-        }
+        if (data instanceof StreamableFile) return data;
         const csv = flattenReportToCsv(data);
         res.setHeader('Content-Type', 'text/csv; charset=utf-8');
         res.setHeader('Content-Disposition', 'attachment; filename="report.csv"');

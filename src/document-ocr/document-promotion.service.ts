@@ -68,8 +68,11 @@ export class DocumentPromotionService {
     }
 
     const supplierId = await this.resolveSupplier(row.company_id, snapshot, overrides);
-    const billDate = snapshot.invoice_date ?? '1970-01-01';
-    const standardRate = await this.extractions.standardRate(billDate);
+    const rateDate =
+      snapshot.invoice_date && /^\d{4}-\d{2}-\d{2}$/.test(snapshot.invoice_date)
+        ? snapshot.invoice_date
+        : new Date().toISOString().slice(0, 10);
+    const standardRate = await this.extractions.standardRate(rateDate);
     const existing = await this.extractions.billsForDuplicate(row.company_id);
     const duplicate = classifyDuplicate({
       supplierId,

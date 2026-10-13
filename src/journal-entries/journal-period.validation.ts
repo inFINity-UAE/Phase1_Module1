@@ -17,9 +17,7 @@ export function assertPeriodUsableForCompany(
   periodId: string,
   period: JournalEntryPeriodRow | null | undefined,
 ): void {
-  if (!periodId) {
-    return;
-  }
+  if (!periodId) return;
 
   if (!period) {
     throw new BadRequestException(
@@ -43,9 +41,7 @@ export function assertEntryDateWithinPeriod(
   entryDate: string,
   period: Pick<JournalEntryPeriodRow, 'period_start' | 'period_end'> | null | undefined,
 ): void {
-  if (!period?.period_start || !period?.period_end) {
-    return;
-  }
+  if (!period?.period_start || !period?.period_end) return;
 
   if (entryDate < period.period_start || entryDate > period.period_end) {
     throw new BadRequestException(
@@ -65,9 +61,7 @@ export function assertRecurringTemplateUsableForCompany(
   templateId: string,
   template: RecurringTemplateCompanyRow | null | undefined,
 ): void {
-  if (!templateId) {
-    return;
-  }
+  if (!templateId) return;
 
   if (!template) {
     throw new BadRequestException(

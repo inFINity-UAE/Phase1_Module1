@@ -18,19 +18,13 @@ export class SupabaseAuthGuard implements CanActivate {
     }>();
 
     const header = request.headers.authorization;
-    if (!header?.startsWith('Bearer ')) {
-      throw new UnauthorizedException('Missing bearer token');
-    }
+    if (!header?.startsWith('Bearer ')) throw new UnauthorizedException('Missing bearer token');
 
     const token = header.slice('Bearer '.length).trim();
-    if (!token) {
-      throw new UnauthorizedException('Missing bearer token');
-    }
+    if (!token) throw new UnauthorizedException('Missing bearer token');
 
     const { data, error } = await this.supabase.client.auth.getUser(token);
-    if (error || !data.user?.id) {
-      throw new UnauthorizedException('Invalid or expired session');
-    }
+    if (error || !data.user?.id) throw new UnauthorizedException('Invalid or expired session');
 
     // [feature-spec decision #10] Acting user id comes only from the verified
     // session — never from a client-supplied body field.

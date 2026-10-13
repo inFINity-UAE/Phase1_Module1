@@ -8,9 +8,7 @@ export class SupabaseCtRepository implements CtRepository {
 
   async rpc<T>(fn: string, args: Record<string, unknown>): Promise<T> {
     const { data, error } = await this.supabase.client.rpc(fn, args);
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
     return data as T;
   }
 

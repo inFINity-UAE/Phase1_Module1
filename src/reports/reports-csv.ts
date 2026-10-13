@@ -5,9 +5,7 @@
 
 function csvEscape(value: unknown): string {
   const s = value == null ? '' : String(value);
-  if (/[",\n\r]/.test(s)) {
-    return `"${s.replace(/"/g, '""')}"`;
-  }
+  if (/[",\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
   return s;
 }
 
@@ -16,18 +14,10 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 }
 
 function rowsFromPayload(payload: unknown): Record<string, unknown>[] {
-  if (Array.isArray(payload)) {
-    return payload.filter(isPlainObject);
-  }
-  if (!isPlainObject(payload)) {
-    return [];
-  }
-  if (Array.isArray(payload.accounts)) {
-    return payload.accounts.filter(isPlainObject);
-  }
-  if (Array.isArray(payload.rows)) {
-    return payload.rows.filter(isPlainObject);
-  }
+  if (Array.isArray(payload)) return payload.filter(isPlainObject);
+  if (!isPlainObject(payload)) return [];
+  if (Array.isArray(payload.accounts)) return payload.accounts.filter(isPlainObject);
+  if (Array.isArray(payload.rows)) return payload.rows.filter(isPlainObject);
   const scalar: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(payload)) {
     if (value == null || typeof value !== 'object') {
@@ -39,9 +29,7 @@ function rowsFromPayload(payload: unknown): Record<string, unknown>[] {
 
 export function flattenReportToCsv(payload: unknown): string {
   const rows = rowsFromPayload(payload);
-  if (rows.length === 0) {
-    return '';
-  }
+  if (rows.length === 0) return '';
   const headers: string[] = [];
   const seen = new Set<string>();
   for (const row of rows) {

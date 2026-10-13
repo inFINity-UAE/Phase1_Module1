@@ -71,9 +71,7 @@ export class PublicHolidaysService {
   ): Promise<PublicHoliday> {
     this.assertHolidayAdmin(role);
     const existing = await this.publicHolidaysRepository.findById(id);
-    if (!existing) {
-      throw new NotFoundException(`Public holiday ${id} not found`);
-    }
+    if (!existing) throw new NotFoundException(`Public holiday ${id} not found`);
     this.assertCompanyScoped(existing);
 
     try {
@@ -90,9 +88,7 @@ export class PublicHolidaysService {
   async remove(id: string, role?: CompanyRole): Promise<void> {
     this.assertHolidayAdmin(role);
     const existing = await this.publicHolidaysRepository.findById(id);
-    if (!existing) {
-      throw new NotFoundException(`Public holiday ${id} not found`);
-    }
+    if (!existing) throw new NotFoundException(`Public holiday ${id} not found`);
     this.assertCompanyScoped(existing);
 
     try {

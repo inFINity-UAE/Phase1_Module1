@@ -11,6 +11,7 @@ import { DocumentIngestionService } from './document-ingestion.service';
 import { DocumentPromotionService } from './document-promotion.service';
 import { DocumentSubmissionQueue } from './document-submission.queue';
 import { DocumentSubmissionWorker } from './document-submission.worker';
+import { OcrSpaceClient } from './ocr-space.client';
 import { VeryfiDocumentsClient } from './veryfi-documents.client';
 import { VeryfiWebhookController } from './veryfi-webhook.controller';
 
@@ -22,6 +23,7 @@ import { VeryfiWebhookController } from './veryfi-webhook.controller';
     DocumentSubmissionQueue,
     DocumentSubmissionWorker,
     VeryfiDocumentsClient,
+    OcrSpaceClient,
     BillExtractionRepository,
     DocumentIngestionService,
     DocumentPromotionService,

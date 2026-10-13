@@ -34,9 +34,7 @@ export class DocumentSubmissionQueue {
 
   private connection(): Redis {
     const url = process.env.REDIS_URL;
-    if (!url) {
-      throw new ServiceUnavailableException('REDIS_NOT_CONFIGURED');
-    }
+    if (!url) throw new ServiceUnavailableException('REDIS_NOT_CONFIGURED');
     return new Redis(url, { maxRetriesPerRequest: null });
   }
 

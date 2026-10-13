@@ -1,8 +1,10 @@
+import { randomUUID } from 'crypto';
 import { BadRequestException, Injectable, PayloadTooLargeException } from '@nestjs/common';
 import { SupabaseService } from '../database/supabase.service';
 import { BillExtractionRepository } from './bill-extraction.repository';
+import { DocumentPromotionService } from './document-promotion.service';
 import { emptySnapshot } from './extraction-rules';
-import { VeryfiDocumentsClient } from './veryfi-documents.client';
+import { OCR_SPACE_MAX_BYTES, OcrSpaceClient } from './ocr-space.client';
 
 const ALLOWED_MIME = new Set([
   'image/jpeg',
@@ -13,7 +15,6 @@ const ALLOWED_MIME = new Set([
   'image/webp',
 ]);
 const ALLOWED_EXT = /\.(jpe?g|png|pdf|heic|heif|webp)$/i;
-const MAX_BYTES = 20 * 1024 * 1024;
 
 export interface UploadedDocument {
   originalname: string;
@@ -22,17 +23,27 @@ export interface UploadedDocument {
   buffer: Buffer;
 }
 
-/** [feature-spec-1_1_B.md §1 / §2] Single-document ingest. Does not use BullMQ. */
+/**
+ * [feature-spec-1_1_B.md §1 / §2] Single-document ingest. Does not use BullMQ.
+ * OCR provider for now is OCR.space (synchronous). Veryfi stays in the repo unused.
+ */
 @Injectable()
 export class DocumentIngestionService {
   constructor(
     private readonly supabase: SupabaseService,
-    private readonly veryfi: VeryfiDocumentsClient,
+    private readonly ocrSpace: OcrSpaceClient,
     private readonly extractions: BillExtractionRepository,
+    private readonly promotion: DocumentPromotionService,
   ) {}
 
   async ingest(companyId: string, uploadedBy: string, file: UploadedDocument) {
     this.assertFile(file);
+    const parsed = await this.ocrSpace.parseFile({
+      bytes: file.buffer,
+      fileName: file.originalname,
+      mimeType: file.mimetype,
+    });
+
     const bucket = process.env.BILL_DOCUMENT_BUCKET ?? 'bill-documents';
     const safeName = file.originalname.replace(/[^\w.\-]+/g, '_');
     const path = `${companyId}/${Date.now()}-${safeName}`;
@@ -44,29 +55,25 @@ export class DocumentIngestionService {
       throw new BadRequestException(`STORAGE_UPLOAD_FAILED:${upload.error.message}`);
     }
 
-    const accepted = await this.veryfi.submitFile({
-      bytes: file.buffer,
-      fileName: file.originalname,
-      mimeType: file.mimetype,
-    });
-
     const snapshot = emptySnapshot();
     snapshot.uploaded_by = uploadedBy;
-    return this.extractions.insert({
+    snapshot.ocr_text = parsed.text;
+    const row = await this.extractions.insert({
       companyId,
       fileName: file.originalname,
       fileUrl: path,
       fileSize: file.size,
       mimeType: file.mimetype,
-      veryfiDocumentId: accepted.id,
+      veryfiDocumentId: `ocrspace:${randomUUID()}`,
       snapshot,
-      fieldOrigin: {},
+      fieldOrigin: parsed.text ? { ocr_text: 'extracted' } : {},
     });
+    return this.promotion.promote(row, { actorId: uploadedBy, confirm: false });
   }
 
   private assertFile(file: UploadedDocument | undefined): asserts file is UploadedDocument {
     if (!file?.buffer?.length) throw new BadRequestException('FILE_REQUIRED');
-    if (file.size > MAX_BYTES) throw new PayloadTooLargeException('FILE_TOO_LARGE');
+    if (file.size > OCR_SPACE_MAX_BYTES) throw new PayloadTooLargeException('OCR_SPACE_FILE_TOO_LARGE');
     const mime = file.mimetype.toLowerCase();
     if (mime === 'image/tiff' || /\.tiff?$/i.test(file.originalname)) {
       throw new BadRequestException('FILE_TYPE_NOT_ALLOWED');

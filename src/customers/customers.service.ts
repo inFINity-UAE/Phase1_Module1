@@ -37,14 +37,10 @@ export class CustomersService {
   async findOne(id: string): Promise<Customer> {
     try {
       const customer = await this.customersRepository.findById(id);
-      if (!customer) {
-        throw new NotFoundException(`Customer ${id} not found`);
-      }
+      if (!customer) throw new NotFoundException(`Customer ${id} not found`);
       return customer;
     } catch (error) {
-      if (error instanceof NotFoundException) {
-        throw error;
-      }
+      if (error instanceof NotFoundException) throw error;
       handleDatabaseError(error);
     }
   }
@@ -62,9 +58,7 @@ export class CustomersService {
       dto.phone !== undefined ||
       dto.billing_address !== undefined ||
       dto.default_payment_terms !== undefined;
-    if (!hasPatch) {
-      throw new BadRequestException('No updatable fields provided');
-    }
+    if (!hasPatch) throw new BadRequestException('No updatable fields provided');
 
     try {
       return await this.customersRepository.update(id, {

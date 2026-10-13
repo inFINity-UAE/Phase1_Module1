@@ -31,9 +31,7 @@ export class SupabaseQuotationsRepository implements QuotationsRepository {
       .select()
       .single();
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return data as Quotation;
   }
@@ -45,9 +43,7 @@ export class SupabaseQuotationsRepository implements QuotationsRepository {
       .eq('company_id', companyId)
       .order('quotation_date', { ascending: false });
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return (data ?? []) as Quotation[];
   }
@@ -59,12 +55,8 @@ export class SupabaseQuotationsRepository implements QuotationsRepository {
       .eq('id', id)
       .maybeSingle();
 
-    if (quotationError) {
-      throw quotationError;
-    }
-    if (!quotation) {
-      return null;
-    }
+    if (quotationError) throw quotationError;
+    if (!quotation) return null;
 
     const { data: lines, error: linesError } = await this.supabase.client
       .from('quotation_lines')
@@ -72,9 +64,7 @@ export class SupabaseQuotationsRepository implements QuotationsRepository {
       .eq('quotation_id', id)
       .order('line_number');
 
-    if (linesError) {
-      throw linesError;
-    }
+    if (linesError) throw linesError;
 
     return {
       quotation: quotation as Quotation,
@@ -90,9 +80,7 @@ export class SupabaseQuotationsRepository implements QuotationsRepository {
       .select()
       .single();
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return data as Quotation;
   }
@@ -105,18 +93,14 @@ export class SupabaseQuotationsRepository implements QuotationsRepository {
       .select()
       .single();
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return data as Quotation;
   }
 
   async deleteHeader(id: string): Promise<void> {
     const { error } = await this.supabase.client.from('quotations').delete().eq('id', id);
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
   }
 
   async insertLine(quotationId: string, dto: CreateQuotationLineDto): Promise<QuotationLine> {
@@ -138,9 +122,7 @@ export class SupabaseQuotationsRepository implements QuotationsRepository {
       .select()
       .single();
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return data as QuotationLine;
   }
@@ -153,18 +135,14 @@ export class SupabaseQuotationsRepository implements QuotationsRepository {
       .select()
       .single();
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return data as QuotationLine;
   }
 
   async deleteLine(id: string): Promise<void> {
     const { error } = await this.supabase.client.from('quotation_lines').delete().eq('id', id);
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
   }
 
   async findQuotationIdByLineId(lineId: string): Promise<string | null> {
@@ -174,9 +152,7 @@ export class SupabaseQuotationsRepository implements QuotationsRepository {
       .eq('id', lineId)
       .maybeSingle();
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return (data?.quotation_id as string | undefined) ?? null;
   }
@@ -188,12 +164,8 @@ export class SupabaseQuotationsRepository implements QuotationsRepository {
       .eq('id', customerId)
       .maybeSingle();
 
-    if (error) {
-      throw error;
-    }
-    if (!data) {
-      return null;
-    }
+    if (error) throw error;
+    if (!data) return null;
     return Boolean(data.is_active);
   }
 
@@ -204,9 +176,7 @@ export class SupabaseQuotationsRepository implements QuotationsRepository {
       .eq('id', customerId)
       .maybeSingle();
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
     return (data?.company_id as string | undefined) ?? null;
   }
 
@@ -216,9 +186,7 @@ export class SupabaseQuotationsRepository implements QuotationsRepository {
       p_created_by: createdBy,
     });
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return data as string;
   }
@@ -228,9 +196,7 @@ export class SupabaseQuotationsRepository implements QuotationsRepository {
       p_company_id: companyId,
     });
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     return data as number;
   }
@@ -241,9 +207,7 @@ export class SupabaseQuotationsRepository implements QuotationsRepository {
       .select('company_id')
       .in('status', ['draft', 'sent', 'viewed']);
 
-    if (error) {
-      throw error;
-    }
+    if (error) throw error;
 
     const ids = new Set<string>();
     for (const row of data ?? []) {

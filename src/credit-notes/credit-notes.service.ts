@@ -65,14 +65,10 @@ export class CreditNotesService {
   async findOne(id: string): Promise<CreditNoteWithLines> {
     try {
       const result = await this.creditNotesRepository.findByIdWithLines(id);
-      if (!result) {
-        throw new NotFoundException(`Credit note ${id} not found`);
-      }
+      if (!result) throw new NotFoundException(`Credit note ${id} not found`);
       return result;
     } catch (error) {
-      if (error instanceof NotFoundException) {
-        throw error;
-      }
+      if (error instanceof NotFoundException) throw error;
       handleDatabaseError(error);
     }
   }
@@ -81,9 +77,7 @@ export class CreditNotesService {
     const current = await this.findOne(id);
     this.assertDraft(current.credit_note, 'update');
 
-    if (!dto.credit_note_date) {
-      throw new BadRequestException('No updatable fields provided');
-    }
+    if (!dto.credit_note_date) throw new BadRequestException('No updatable fields provided');
 
     try {
       await this.creditNotesRepository.updateHeader(id, dto);
@@ -197,9 +191,7 @@ export class CreditNotesService {
   }
 
   private assertLineInput(line: CreateCreditNoteLineDto): void {
-    if (line.original_invoice_line_id) {
-      return;
-    }
+    if (line.original_invoice_line_id) return;
     if (line.vat_rate === undefined || line.vat_rate === null) {
       throw new BadRequestException('vat_rate is required for general adjustment lines');
     }
@@ -221,9 +213,7 @@ export class CreditNotesService {
     companyId: string,
   ): Promise<void> {
     const invoice = await this.creditNotesRepository.findInvoiceForCredit(originalInvoiceId);
-    if (!invoice) {
-      throw new NotFoundException(`Invoice ${originalInvoiceId} not found`);
-    }
+    if (!invoice) throw new NotFoundException(`Invoice ${originalInvoiceId} not found`);
     if (invoice.company_id !== companyId) {
       throw new BadRequestException('original_invoice_id does not belong to this company');
     }
@@ -237,9 +227,7 @@ export class CreditNotesService {
 
   private async requireCreditNoteIdForLine(lineId: string): Promise<string> {
     const creditNoteId = await this.creditNotesRepository.findCreditNoteIdByLineId(lineId);
-    if (!creditNoteId) {
-      throw new NotFoundException(`Credit note line ${lineId} not found`);
-    }
+    if (!creditNoteId) throw new NotFoundException(`Credit note line ${lineId} not found`);
     return creditNoteId;
   }
 }
