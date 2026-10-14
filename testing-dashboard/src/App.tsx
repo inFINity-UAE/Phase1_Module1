@@ -7,6 +7,7 @@ import { ACCOUNTS, COMPANIES, customer, vendor } from './data';
 import { useStore, type Store } from './store';
 import { BillModal, InvoiceModal, JournalModal, PaymentModal, WriteOffModal, type ModalState } from './modals';
 import { Menu, Toasts, cx, useClickOutside } from './ui';
+import { clearSession, loadSession, type OnboardingSession, Onboarding } from './onboarding';
 import { Dashboard } from './views/dashboard';
 import { Customers, Invoices, Quotations } from './views/sales';
 import { Bills, PurchaseOrders, Vendors } from './views/purchases';
@@ -37,8 +38,12 @@ const VIEWS: Record<View, ComponentType<ViewProps>> = {
   coa: ChartOfAccounts, journals: Journals, vat: Vat201, ct: CorporateTax, reports: Reports,
 };
 
-function CompanySelector() {
-  const [active, setActive] = useState(COMPANIES[0]);
+function CompanySelector({ session }: { session: OnboardingSession }) {
+  const entities = [
+    { id: 'session', name: session.legalName, trn: session.trn ?? '—', jurisdiction: session.emirate ?? 'UAE', fy: `FY starts month ${session.fiscalYearStartMonth}` },
+    ...COMPANIES,
+  ];
+  const [active, setActive] = useState(entities[0]);
   const [open, setOpen] = useState(false);
   const ref = useClickOutside<HTMLDivElement>(open, () => setOpen(false));
   return (
@@ -54,7 +59,7 @@ function CompanySelector() {
       {open ? (
         <div role="listbox" className="absolute left-0 z-40 mt-2 w-80 rounded-lg border border-slate-200 bg-white py-1.5 shadow-xl">
           <p className="px-3 pb-1.5 pt-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400">Entities</p>
-          {COMPANIES.map((c) => (
+          {entities.map((c) => (
             <button key={c.id} role="option" aria-selected={c.id === active.id} type="button" onClick={() => { setActive(c); setOpen(false); }} className="flex w-full items-start gap-3 px-3 py-2 text-left hover:bg-slate-50">
               <Building2 size={18} className="mt-0.5 text-slate-400" />
               <span className="flex-1">
@@ -167,6 +172,7 @@ function Sidebar({ view, go, collapsed, unreconciled }: { view: View; go: (v: Vi
 
 export function App() {
   const store = useStore();
+  const [session, setSession] = useState<OnboardingSession | null>(() => loadSession());
   const [view, setView] = useState<View>('dashboard');
   const [modal, setModal] = useState<ModalState>(null);
   const [collapsed, setCollapsed] = useState(false);
@@ -175,6 +181,7 @@ export function App() {
   const go = (v: View) => { setView(v); setMobileNav(false); main.current?.scrollTo({ top: 0 }); };
   const close = () => setModal(null);
   const Current = VIEWS[view];
+  if (!session) return <Onboarding onReady={setSession} />;
 
   const sidebar = (isCollapsed: boolean) => (
     <>
@@ -190,7 +197,7 @@ export function App() {
     <div className="flex h-full flex-col">
       <header className="z-30 flex h-14 shrink-0 items-center gap-3 bg-brand-900 px-3 shadow-sm sm:px-4">
         <button type="button" aria-label="Open navigation" onClick={() => setMobileNav(true)} className="rounded-md p-1.5 text-brand-100 hover:bg-white/10 lg:hidden"><MenuIcon size={20} /></button>
-        <CompanySelector />
+        <CompanySelector session={session} />
         <div className="flex flex-1 justify-center px-2"><Omnibox store={store} go={go} /></div>
         <Menu
           label="Quick action"
@@ -203,7 +210,14 @@ export function App() {
             { label: 'Manual Journal Entry', icon: NotebookPen, hint: 'Balanced debits and credits', onClick: () => setModal({ kind: 'journal' }) },
           ]}
         />
-        <span className="hidden h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white/15 text-xs font-semibold text-white sm:flex" title="Salah · Owner">SA</span>
+        <button
+          type="button"
+          title={`${session.fullName} · owner`}
+          onClick={() => { clearSession(); setSession(null); }}
+          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white/15 text-xs font-semibold text-white"
+        >
+          {session.fullName.slice(0, 2).toUpperCase()}
+        </button>
       </header>
 
       <div className="flex min-h-0 flex-1">
