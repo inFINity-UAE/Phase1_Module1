@@ -1,8 +1,9 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { BellRing, CheckCheck, CreditCard, FileX2, MoreHorizontal, Pencil, Plus, Repeat, Search, Send } from 'lucide-react';
 import { CUSTOMERS, QUOTATIONS, SALES_YTD, TODAY, addDays, customer, daysBetween, docTotals, fmtDate, invoiceBalance, type Invoice } from '../data';
 import { Badge, Button, Card, Empty, Menu, Money, PageHeader, Tabs, cx, inputCls, rowCls, tdCls, thCls, type Tone } from '../ui';
 import type { ViewProps } from '../App';
+import { apiFetch } from '../api';
 
 type Status = 'draft' | 'awaiting_approval' | 'awaiting_payment' | 'partially_paid' | 'overdue' | 'paid' | 'written_off';
 export const invoiceStatus = (i: Invoice): Status => {
@@ -119,15 +120,17 @@ export function Invoices({ store, open }: ViewProps) {
 
 const Q_TONE: Record<string, Tone> = { Sent: 'blue', Accepted: 'green', Expired: 'slate', Converted: 'violet' };
 
-export function Quotations({ open }: ViewProps) {
+export function Quotations({ open, store }: ViewProps) {
+  const rows = store.demo ? QUOTATIONS : [];
   return (
     <>
-      <PageHeader title="Quotations" subtitle="Accepted quotations convert to a draft tax invoice with the same lines." />
+      <PageHeader title="Quotations" subtitle={store.demo ? 'Accepted quotations convert to a draft tax invoice with the same lines.' : 'No quotations in this workspace.'} />
       <Card className="overflow-x-auto">
         <table className="w-full min-w-[800px]">
           <thead className="bg-slate-50/70"><tr><th className={thCls}>Quote</th><th className={thCls}>Customer</th><th className={thCls}>Date</th><th className={thCls}>Expiry</th><th className={cx(thCls, 'text-right')}>Ex-VAT</th><th className={thCls}>Status</th><th /></tr></thead>
           <tbody>
-            {QUOTATIONS.map((qt) => (
+            {rows.length === 0 ? <tr><td className={tdCls} colSpan={7}>No quotations yet.</td></tr> : null}
+            {rows.map((qt) => (
               <tr key={qt.number} className={rowCls}>
                 <td className={cx(tdCls, 'num font-medium text-slate-900')}>{qt.number}</td>
                 <td className={tdCls}>{customer(qt.customerId).name}</td>
@@ -151,7 +154,41 @@ export function Quotations({ open }: ViewProps) {
   );
 }
 
-export function Customers({ store, open }: ViewProps) {
+export function Customers({ store, open, live }: ViewProps) {
+  const [remote, setRemote] = useState<{ id: string; customer_name: string; trn: string | null; email: string | null; phone: string | null }[] | null>(null);
+  const [loadError, setLoadError] = useState('');
+  const companyId = live?.companyId;
+  useEffect(() => {
+    if (!companyId) return;
+    let cancelled = false;
+    apiFetch<{ id: string; customer_name: string; trn: string | null; email: string | null; phone: string | null }[]>(`/customers?company_id=${companyId}`)
+      .then((rows) => { if (!cancelled) setRemote(rows); })
+      .catch((err: unknown) => { if (!cancelled) setLoadError(err instanceof Error ? err.message : 'Could not load customers.'); });
+    return () => { cancelled = true; };
+  }, [companyId]);
+  if (live) {
+    return (
+      <>
+        <PageHeader title="Customers" subtitle="People you added while setting up this workspace." />
+        <Card className="overflow-x-auto">
+          <table className="w-full min-w-[640px]">
+            <thead className="bg-slate-50/70"><tr><th className={thCls}>Customer</th><th className={thCls}>TRN</th><th className={thCls}>Phone</th></tr></thead>
+            <tbody>
+              {loadError ? <tr><td className={tdCls} colSpan={3}>{loadError}</td></tr> : null}
+              {(remote ?? []).length === 0 && !loadError ? <tr><td className={tdCls} colSpan={3}>No customers yet.</td></tr> : null}
+              {(remote ?? []).map((c) => (
+                <tr key={c.id} className={rowCls}>
+                  <td className={tdCls}><span className="font-medium text-slate-900">{c.customer_name}</span><span className="block text-xs text-slate-500">{c.email || '—'}</span></td>
+                  <td className={cx(tdCls, 'num text-xs')}>{c.trn || '—'}</td>
+                  <td className={tdCls}>{c.phone || '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </Card>
+      </>
+    );
+  }
   return (
     <>
       <PageHeader title="Customers" subtitle="VAT-registered customers with place of supply by Emirate." actions={<Button variant="primary" onClick={() => open({ kind: 'invoice' })}><Plus size={16} /> New invoice</Button>} />

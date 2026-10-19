@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ScheduleModule } from '@nestjs/schedule';
+import { ThrottlerModule } from '@nestjs/throttler';
 import { DatabaseModule } from './database/database.module';
 import { AccountsModule } from './accounts/accounts.module';
 import { AccountingPeriodsModule } from './accounting-periods/accounting-periods.module';
@@ -21,10 +22,12 @@ import { SupplierPaymentsModule } from './supplier-payments/supplier-payments.mo
 import { VatModule } from './vat/vat.module';
 import { CtModule } from './ct/ct.module';
 import { DocumentOcrModule } from './document-ocr/document-ocr.module';
+import { OnboardingModule } from './onboarding/onboarding.module';
 
 @Module({
   imports: [
     ScheduleModule.forRoot(),
+    ThrottlerModule.forRoot({ throttlers: [{ name: 'default', ttl: 60_000, limit: 60 }] }),
     DatabaseModule,
     AccountsModule,
     AccountingPeriodsModule,
@@ -46,6 +49,7 @@ import { DocumentOcrModule } from './document-ocr/document-ocr.module';
     VatModule,
     CtModule,
     DocumentOcrModule,
+    OnboardingModule,
   ],
 })
 export class AppModule {}

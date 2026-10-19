@@ -66,9 +66,10 @@ function balanceSheet(s: Store, asOf: string): Report {
 
 function profitAndLoss(s: Store, to: string, compare: boolean): Report {
   const b = s.balances(to);
-  const all = [...new Set([...codes((c) => c[0] === '4' || c[0] === '5', b), ...(compare ? Object.keys(PRIOR_PL) : [])])].sort();
+  const priorOn = s.demo && compare;
+  const all = [...new Set([...codes((c) => c[0] === '4' || c[0] === '5', b), ...(priorOn ? Object.keys(PRIOR_PL) : [])])].sort();
   const cur = (c: string) => (accountType(c) === 'Income' ? -(b[c] ?? 0) : b[c] ?? 0);
-  const pri = (c: string) => (accountType(c) === 'Income' ? -(PRIOR_PL[c] ?? 0) : PRIOR_PL[c] ?? 0);
+  const pri = (c: string) => (priorOn ? (accountType(c) === 'Income' ? -(PRIOR_PL[c] ?? 0) : PRIOR_PL[c] ?? 0) : 0);
   const sum = (pred: (c: string) => boolean, f: (c: string) => number) => r2(all.filter(pred).reduce((a, c) => a + f(c), 0));
   const line = (label: string, a: number, p: number, strong = true): Row => ({ strong, cells: ['', label, a, ...(compare ? [p, r2(a - p), p ? `${(((a - p) / Math.abs(p)) * 100).toFixed(1)}%` : '—'] : [])] });
   const rowsFor = (pred: (c: string) => boolean): Row[] => all.filter(pred).map((c) => ({ indent: true, cells: [c, names(c), cur(c), ...(compare ? [pri(c), r2(cur(c) - pri(c)), pri(c) ? `${(((cur(c) - pri(c)) / Math.abs(pri(c))) * 100).toFixed(1)}%` : '—'] : [])] }));
@@ -91,11 +92,11 @@ function profitAndLoss(s: Store, to: string, compare: boolean): Report {
 /** ponytail: synthetic GL history (pre-cutoff detail isn't in the mock); it nets to the real balance. Upgrade: GET /reports/general-ledger. */
 function generalLedger(s: Store, account: string, pageSize: number, page: number): Report & { pages: number } {
   const base = s.balances(LEDGER_CUTOFF)[account] ?? 0;
-  const hist = Array.from({ length: 28 }, (_, i) => {
+  const hist = s.demo ? Array.from({ length: 28 }, (_, i) => {
     const amt = r2(Math.abs(base) / 9 * (0.35 + ((i * 37) % 11) / 10));
     const debit = (i % 3 !== 1) === base >= 0;
     return { date: addDays('2026-01-05', Math.floor(i * 9.4)), ref: `JE-${10020 + i * 10}`, memo: debit ? 'Posting — increase' : 'Posting — decrease', debit: debit ? amt : 0, credit: debit ? 0 : amt };
-  });
+  }) : [];
   const histNet = r2(hist.reduce((a, l) => a + l.debit - l.credit, 0));
   const session = s.journals.filter((j) => j.status === 'posted' && j.date > LEDGER_CUTOFF).flatMap((j) => j.lines.filter((l) => l.account === account).map((l) => ({ date: j.date, ref: j.number, memo: j.narration, debit: l.debit, credit: l.credit })));
   const lines = [...hist, ...session].sort((a, b) => a.date.localeCompare(b.date));
@@ -112,14 +113,15 @@ function generalLedger(s: Store, account: string, pageSize: number, page: number
   };
 }
 
-function expenseAnalysis(): Report {
+function expenseAnalysis(sample: boolean): Report {
+  const groups = sample ? EXPENSE_GROUPS : [];
   return {
     title: 'Expense analysis by sub-category', subtitle: 'Month-on-month, Q3 2026',
     endpoint: `/reports/expense-analysis?${COMPANY}&fiscal_year=2026&format=csv`,
     cols: ['Sub-category', 'Accounts', ...MOM_MONTHS, 'MoM Δ %'],
     rows: [
-      ...EXPENSE_GROUPS.map((g) => ({ cells: [g.name, g.codes.join(', '), ...g.mom, `${(((g.mom[2] - g.mom[1]) / g.mom[1]) * 100).toFixed(1)}%`] })),
-      { strong: true, cells: ['Total', '', ...[0, 1, 2].map((i) => r2(EXPENSE_GROUPS.reduce((a, g) => a + g.mom[i], 0))), ''] },
+      ...groups.map((g) => ({ cells: [g.name, g.codes.join(', '), ...g.mom, `${(((g.mom[2] - g.mom[1]) / g.mom[1]) * 100).toFixed(1)}%`] })),
+      { strong: true, cells: ['Total', '', ...[0, 1, 2].map((i) => r2(groups.reduce((a, g) => a + g.mom[i], 0))), ''] },
     ],
   };
 }
@@ -127,14 +129,14 @@ function expenseAnalysis(): Report {
 function salesByCustomer(s: Store): Report {
   const extra: Record<string, number> = {};
   for (const i of s.invoices) if (i.stage === 'issued' && i.issueDate > LEDGER_CUTOFF) extra[i.customerId] = r2((extra[i.customerId] ?? 0) + docTotals(i.lines).net);
-  const data = CUSTOMERS.map((c) => { const g = r2(SALES_YTD[c.id].gross + (extra[c.id] ?? 0)); return { c, g, cn: SALES_YTD[c.id].credit, net: r2(g - SALES_YTD[c.id].credit) }; }).sort((a, b) => b.net - a.net);
+  const data = s.demo ? CUSTOMERS.map((c) => { const g = r2(SALES_YTD[c.id].gross + (extra[c.id] ?? 0)); return { c, g, cn: SALES_YTD[c.id].credit, net: r2(g - SALES_YTD[c.id].credit) }; }).sort((a, b) => b.net - a.net) : [];
   const total = r2(data.reduce((a, d) => a + d.net, 0));
   return {
     title: 'Sales by customer', subtitle: 'Ex-VAT, net of credit notes · 1 Jan 2026 to date',
     endpoint: `/reports/sales-by-customer?${COMPANY}&period_start=2026-01-01&period_end=${TODAY}&format=csv`,
     cols: ['Customer', 'TRN', 'Sales ex-VAT', 'Credit notes', 'Net sales', 'Share'],
     rows: [
-      ...data.map((d) => ({ cells: [d.c.name, d.c.trn, d.g, -d.cn, d.net, `${((d.net / total) * 100).toFixed(1)}%`] })),
+      ...data.map((d) => ({ cells: [d.c.name, d.c.trn, d.g, -d.cn, d.net, total ? `${((d.net / total) * 100).toFixed(1)}%` : '—'] })),
       { strong: true, cells: ['Total', '', r2(data.reduce((a, d) => a + d.g, 0)), -r2(data.reduce((a, d) => a + d.cn, 0)), total, '100%'] },
     ],
   };
@@ -165,7 +167,7 @@ export function Reports({ store }: ViewProps) {
   const gl = kind === 'gl' ? generalLedger(store, account, pageSize, page) : null;
   const report: Report =
     kind === 'tb' ? trialBalance(store, from, to) : kind === 'bs' ? balanceSheet(store, asOf) : kind === 'pl' ? profitAndLoss(store, asOf, compare)
-      : kind === 'gl' ? gl! : kind === 'exp' ? expenseAnalysis() : salesByCustomer(store);
+      : kind === 'gl' ? gl! : kind === 'exp' ? expenseAnalysis(store.demo) : salesByCustomer(store);
   const slug = report.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/-$/, '');
 
   const auditPack = () => {

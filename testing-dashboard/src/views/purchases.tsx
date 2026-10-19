@@ -255,15 +255,17 @@ export function Bills({ store, open }: ViewProps) {
   );
 }
 
-export function PurchaseOrders() {
+export function PurchaseOrders({ store }: ViewProps) {
+  const rows = store.demo ? PURCHASE_ORDERS : [];
   return (
     <>
-      <PageHeader title="Purchase orders" subtitle="Goods receipts (GRN) and bills are matched against each PO before payment is released." />
+      <PageHeader title="Purchase orders" subtitle={store.demo ? 'Goods receipts (GRN) and bills are matched against each PO before payment is released.' : 'No purchase orders in this workspace.'} />
       <Card className="overflow-x-auto">
         <table className="w-full min-w-[760px]">
           <thead className="bg-slate-50/70"><tr><th className={thCls}>PO</th><th className={thCls}>Vendor</th><th className={thCls}>Date</th><th className={cx(thCls, 'text-right')}>Ex-VAT</th><th className={thCls}>Goods receipt</th><th className={thCls}>Billing</th></tr></thead>
           <tbody>
-            {PURCHASE_ORDERS.map((p) => (
+            {rows.length === 0 ? <tr><td className={tdCls} colSpan={6}>No purchase orders yet.</td></tr> : null}
+            {rows.map((p) => (
               <tr key={p.number} className={rowCls}>
                 <td className={cx(tdCls, 'num font-medium text-slate-900')}>{p.number}</td>
                 <td className={tdCls}>{vendor(p.vendorId).name}</td>
@@ -281,14 +283,16 @@ export function PurchaseOrders() {
 }
 
 export function Vendors({ store }: ViewProps) {
+  const rows = store.demo ? VENDORS : [];
   return (
     <>
-      <PageHeader title="Vendors" subtitle="Suppliers with TRN on file for input VAT recovery." />
+      <PageHeader title="Vendors" subtitle={store.demo ? 'Suppliers with TRN on file for input VAT recovery.' : 'No suppliers were added during setup.'} />
       <Card className="overflow-x-auto">
         <table className="w-full min-w-[760px]">
           <thead className="bg-slate-50/70"><tr><th className={thCls}>Vendor</th><th className={thCls}>TRN</th><th className={thCls}>Category</th><th className={thCls}>Terms</th><th className={cx(thCls, 'text-right')}>Open bills</th><th className={cx(thCls, 'text-right')}>Balance</th></tr></thead>
           <tbody>
-            {VENDORS.map((v) => {
+            {rows.length === 0 ? <tr><td className={tdCls} colSpan={6}>No suppliers yet.</td></tr> : null}
+            {rows.map((v) => {
               const mine = store.openAP().filter((b) => b.vendorId === v.id);
               return (
                 <tr key={v.id} className={rowCls}>

@@ -46,7 +46,7 @@ export function BankRec({ store }: ViewProps) {
     <>
       <PageHeader
         title="Bank reconciliation"
-        subtitle={`${acct('1021')} · Emirates NBD ••• 4471 · feed updated ${fmtDate('2026-10-13')} 07:00`}
+        subtitle={store.demo ? `${acct('1021')} · Emirates NBD ••• 4471 · feed updated ${fmtDate('2026-10-13')} 07:00` : 'Bank feed is not connected. Nothing here is posted to your books.'}
         actions={matched.length ? <Button variant="success" onClick={() => { matched.forEach((r) => store.reconcile(r)); store.notify(`${matched.length} matched items reconciled`); }}><CheckCheck size={16} /> OK all {matched.length} matches</Button> : null}
       />
 

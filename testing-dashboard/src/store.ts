@@ -78,11 +78,11 @@ const nextSeq = (values: (string | null)[], prefix: string, pad: number) => {
   return `${prefix}${String(max + 1).padStart(pad, '0')}`;
 };
 
-export function useStore() {
-  const [invoices, setInvoices] = useState<Invoice[]>(SEED_INVOICES);
-  const [bills, setBills] = useState<Bill[]>(SEED_BILLS);
-  const [feed, setFeed] = useState<FeedRow[]>(SEED_FEED);
-  const [journals, setJournals] = useState<Journal[]>(SEED_JOURNALS);
+export function useStore(demo = true) {
+  const [invoices, setInvoices] = useState<Invoice[]>(demo ? SEED_INVOICES : []);
+  const [bills, setBills] = useState<Bill[]>(demo ? SEED_BILLS : []);
+  const [feed, setFeed] = useState<FeedRow[]>(demo ? SEED_FEED : []);
+  const [journals, setJournals] = useState<Journal[]>(demo ? SEED_JOURNALS : []);
   const [toasts, setToasts] = useState<Toast[]>([]);
 
   const notify = (text: string, tone: Toast['tone'] = 'success') => {
@@ -109,7 +109,7 @@ export function useStore() {
   /** Seeded journals dated ≤ cutoff are already inside BASE_BALANCES. */
   const sessionPosted = journals.filter((j) => j.status === 'posted' && j.date > LEDGER_CUTOFF);
   const balances = (asOf = '9999-12-31', from?: string) => {
-    const b: Record<string, number> = from ? {} : { ...BASE_BALANCES };
+    const b: Record<string, number> = from || !demo ? {} : { ...BASE_BALANCES };
     for (const j of sessionPosted) {
       if (j.date > asOf || (from && j.date < from)) continue;
       for (const l of j.lines) b[l.account] = r2((b[l.account] ?? 0) + l.debit - l.credit);
@@ -175,7 +175,7 @@ export function useStore() {
   };
 
   return {
-    invoices, bills, feed, journals, toasts,
+    demo, invoices, bills, feed, journals, toasts,
     notify, post, postDraft, balances, saveInvoice, advanceInvoice, receive, pay, writeOff, remind, saveBill, reconcile,
     openAR: () => invoices.filter((i) => i.stage === 'issued' && invoiceBalance(i) > 0),
     openAP: () => bills.filter((b) => billBalance(b) > 0),

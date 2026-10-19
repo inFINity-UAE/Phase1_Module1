@@ -1,5 +1,6 @@
 {
   "installCommand": "npm ci --prefix testing-dashboard",
   "buildCommand": "npm run build --prefix testing-dashboard",
-  "outputDirectory": "testing-dashboard/dist"
+  "outputDirectory": "testing-dashboard/dist",
+  "rewrites": [{ "source": "/(.*)", "destination": "/index.html" }]
 }

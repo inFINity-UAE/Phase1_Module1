@@ -1,17 +1,33 @@
-import { Fragment, useState } from 'react';
+import { Fragment, useEffect, useState } from 'react';
 import { ChevronRight, NotebookPen, Search } from 'lucide-react';
 import { ACCOUNTS, accountType, acct, fmtDate, type AccountType } from '../data';
 import { isBalanced, jTotals } from '../store';
 import { Badge, Button, Card, Money, PageHeader, Tabs, cx, inputCls, rowCls, tdCls, thCls } from '../ui';
 import type { ViewProps } from '../App';
+import { apiFetch } from '../api';
 
 const TYPES: AccountType[] = ['Asset', 'Liability', 'Equity', 'Income', 'Expense'];
 
-export function ChartOfAccounts({ store }: ViewProps) {
+export function ChartOfAccounts({ store, live }: ViewProps) {
   const [type, setType] = useState<AccountType | 'All'>('All');
   const [q, setQ] = useState('');
+  const [remote, setRemote] = useState<{ code: string; name: string; system: boolean }[] | null>(null);
+  const [loadError, setLoadError] = useState('');
+  const companyId = live?.companyId;
+  useEffect(() => {
+    if (!companyId) return;
+    let cancelled = false;
+    apiFetch<{ account_number: string; account_name: string; is_system_account: boolean }[]>(`/accounts?company_id=${companyId}`)
+      .then((rows) => {
+        if (cancelled) return;
+        setRemote(rows.map((r) => ({ code: r.account_number.trim(), name: r.account_name, system: r.is_system_account })));
+      })
+      .catch((err: unknown) => { if (!cancelled) setLoadError(err instanceof Error ? err.message : 'Could not load accounts.'); });
+    return () => { cancelled = true; };
+  }, [companyId]);
   const b = store.balances();
-  const rows = Object.entries(ACCOUNTS).filter(([c, n]) => (type === 'All' || accountType(c) === type) && (!q || `${c} ${n}`.toLowerCase().includes(q.toLowerCase())));
+  const source = live ? (remote ?? []).map((r) => [r.code, r.name, r.system] as const) : Object.entries(ACCOUNTS).map(([c, n]) => [c, n, c === '3100'] as const);
+  const rows = source.filter(([c, n]) => (type === 'All' || accountType(c) === type) && (!q || `${c} ${n}`.toLowerCase().includes(q.toLowerCase())));
   const dr = Object.values(b).reduce((s, v) => s + Math.max(0, v), 0);
   const cr = Object.values(b).reduce((s, v) => s + Math.max(0, -v), 0);
   return (
@@ -19,7 +35,7 @@ export function ChartOfAccounts({ store }: ViewProps) {
       <PageHeader title="Chart of accounts" subtitle="UAE 4-digit COA: 1xxx assets · 2xxx liabilities · 3xxx equity · 4xxx income · 5xxx expenses." actions={<Badge tone={Math.abs(dr - cr) < 0.005 ? 'green' : 'red'}>Trial balance Dr <Money v={dr} /> = Cr <Money v={cr} /></Badge>} />
       <Card>
         <div className="flex flex-wrap items-end justify-between gap-3 px-5 pt-3">
-          <Tabs value={type} onChange={setType} tabs={[{ id: 'All', label: 'All' }, ...TYPES.map((t) => ({ id: t, label: `${t}s`, count: Object.keys(ACCOUNTS).filter((c) => accountType(c) === t).length }))]} />
+          <Tabs value={type} onChange={setType} tabs={[{ id: 'All', label: 'All' }, ...TYPES.map((t) => ({ id: t, label: `${t}s`, count: source.filter(([c]) => accountType(c) === t).length }))]} />
           <div className="relative mb-2 w-full sm:w-64">
             <Search size={15} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
             <input aria-label="Filter accounts" className={cx(inputCls, 'pl-8!')} placeholder="Code or name" value={q} onChange={(e) => setQ(e.target.value)} />
@@ -29,12 +45,13 @@ export function ChartOfAccounts({ store }: ViewProps) {
           <table className="w-full min-w-[720px]">
             <thead className="border-y border-slate-100 bg-slate-50/70"><tr><th className={cx(thCls, 'w-24')}>Code</th><th className={thCls}>Account name</th><th className={thCls}>Type</th><th className={cx(thCls, 'text-right')}>Debit</th><th className={cx(thCls, 'text-right')}>Credit</th></tr></thead>
             <tbody>
-              {rows.map(([c, n]) => {
+              {loadError ? <tr><td className={tdCls} colSpan={5}>{loadError}</td></tr> : null}
+              {rows.map(([c, n, system]) => {
                 const v = b[c] ?? 0;
                 return (
                   <tr key={c} className={rowCls}>
                     <td className={cx(tdCls, 'num font-semibold text-slate-900')}>{c}</td>
-                    <td className={tdCls}>{n}{c === '3100' ? <Badge tone="slate">System</Badge> : null}</td>
+                    <td className={tdCls}>{n}{system ? <Badge tone="slate">System</Badge> : null}</td>
                     <td className={tdCls}><span className="text-xs text-slate-500">{accountType(c)}</span></td>
                     <td className={cx(tdCls, 'text-right')}>{v > 0 ? <Money v={v} /> : <span className="text-slate-300">—</span>}</td>
                     <td className={cx(tdCls, 'text-right')}>{v < 0 ? <Money v={-v} /> : <span className="text-slate-300">—</span>}</td>

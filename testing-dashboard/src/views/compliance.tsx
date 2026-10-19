@@ -7,8 +7,12 @@ import type { ViewProps } from '../App';
 const pct = (a: number, rate = 5) => r2((a * rate) / 100);
 
 export function Vat201({ store }: ViewProps) {
-  const box1 = VAT_BOX1.map((r, i) => ({ code: `1${'abcdefg'[i]}`, label: `Standard rated supplies in ${r.emirate}`, amount: r.amount, vat: pct(r.amount), adj: r.adj }));
-  const o = VAT_OTHER;
+  const seeded = store.demo;
+  const box1 = VAT_BOX1.map((r, i) => ({ code: `1${'abcdefg'[i]}`, label: `Standard rated supplies in ${r.emirate}`, amount: seeded ? r.amount : 0, vat: pct(seeded ? r.amount : 0), adj: seeded ? r.adj : 0 }));
+  const o = seeded ? VAT_OTHER : {
+    box3: { ...VAT_OTHER.box3, amount: 0 }, box4: { ...VAT_OTHER.box4, amount: 0 }, box5: { ...VAT_OTHER.box5, amount: 0 },
+    box6: { ...VAT_OTHER.box6, amount: 0 }, box7: { ...VAT_OTHER.box7, amount: 0 }, box9: { ...VAT_OTHER.box9, amount: 0, adj: 0 }, box10: { ...VAT_OTHER.box10, amount: 0 },
+  };
   const outputs = [
     ...box1,
     { code: '2', label: null, amount: 0, vat: 0, adj: 0 },
@@ -26,7 +30,7 @@ export function Vat201({ store }: ViewProps) {
   const box12 = r2(sum(outputs, 'vat') + sum(outputs, 'adj'));
   const box13 = r2(sum(inputs, 'vat') + sum(inputs, 'adj'));
   const box14 = r2(box12 - box13);
-  const maxEmirate = Math.max(...box1.map((r) => r.amount));
+  const maxEmirate = Math.max(...box1.map((r) => r.amount), 1);
 
   const exportCsv = () => {
     const rows = [...outputs, { code: '8', label: 'Total output tax', amount: sum(outputs, 'amount'), vat: sum(outputs, 'vat'), adj: sum(outputs, 'adj') }, ...inputs, { code: '11', label: 'Total input tax', amount: sum(inputs, 'amount'), vat: sum(inputs, 'vat'), adj: sum(inputs, 'adj') }];
@@ -65,7 +69,7 @@ export function Vat201({ store }: ViewProps) {
     <>
       <PageHeader
         title="UAE VAT-201 return"
-        subtitle={`Tax period Q3 2026 · ${fmtDate('2026-07-01')} – ${fmtDate('2026-09-30')} · TRN ${COMPANIES[0].trn}`}
+        subtitle={seeded ? `Tax period Q3 2026 · ${fmtDate('2026-07-01')} – ${fmtDate('2026-09-30')} · TRN ${COMPANIES[0].trn}` : 'VAT return is not connected to this workspace yet. Every box is zero.'}
         actions={<><Badge tone="amber">Draft — not filed</Badge><Button onClick={exportCsv}><Download size={16} /> Working papers CSV</Button><Button variant="primary" disabled title="Blocked until Box 2 and the Capital Assets Scheme box are seeded (F-42)"><FileLock2 size={16} /> Export for EmaraTax</Button></>}
       />
       <div className="grid gap-6 xl:grid-cols-[1fr_340px]">
@@ -111,7 +115,8 @@ export function CorporateTax({ store }: ViewProps) {
   const projected = r2((pl.pbt / monthsElapsed) * 12);
   const projectedCt = r2((Math.max(0, projected - CT.zeroBand) * CT.rate) / 100);
   const sbrUse = (pl.grossSales / CT.sbrRevenueCap) * 100;
-  const rpTotal = RELATED_PARTIES.reduce((s, r) => s + r.amount, 0);
+  const parties = store.demo ? RELATED_PARTIES : [];
+  const rpTotal = parties.reduce((s, r) => s + r.amount, 0);
   return (
     <>
       <PageHeader title="Corporate tax tracker" subtitle="UAE CT: 0% on taxable income up to AED 375,000, 9% above. FY 2026 · Jan–Dec." />
@@ -167,7 +172,7 @@ export function CorporateTax({ store }: ViewProps) {
           <Card>
             <CardHeader title={<span className="flex items-center gap-2"><Users size={16} className="text-slate-400" /> Related-party transactions</span>} subtitle="Append-only log for transfer pricing documentation" />
             <ul className="divide-y divide-slate-100">
-              {RELATED_PARTIES.map((r) => (
+              {parties.map((r) => (
                 <li key={r.party + r.date} className="px-5 py-3 text-sm">
                   <div className="flex justify-between gap-3"><span className="font-medium text-slate-800">{r.party}</span><Money v={r.amount} className="font-medium" /></div>
                   <p className="text-xs text-slate-500">{r.relationship} · {r.nature} · {fmtDate(r.date)}</p>

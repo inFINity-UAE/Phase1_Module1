@@ -12454,6 +12454,310 @@ create policy company_isolation_companies on companies
   using (private.is_company_member(id));
 
 -- ============================================================================
+-- 11b. WORKSPACE ONBOARDING (service_role only)
+-- [feature-spec.md decision #23] The browser never inserts tenant rows.
+-- Nest calls onboard_company with the user id taken from the verified JWT.
+-- Chart rows live in coa_template (no company id). seed_company_coa copies
+-- them onto a new company. The demo company ...0002 is not stored here.
+-- Catalog lines from the setup wizard are not stored: there is no items table.
+-- ============================================================================
+
+-- No parent FK: a one-statement copy cannot order a self-reference.
+-- seed_company_coa checks that every parent number exists.
+create table coa_template (
+  account_number        char(4) primary key,
+  account_name          text not null,
+  category              account_category not null,
+  sub_category          text,
+  normal_balance        normal_balance_type not null,
+  parent_account_number char(4),
+  is_system_account     boolean not null default false,
+  is_active             boolean not null default true,
+  description           text
+);
+
+alter table coa_template enable row level security;
+
+-- Copies coa_template onto p_company_id. Idempotent per account number.
+-- Depth is left to trg_enforce_account_hierarchy_depth.
+-- Lock: none. Caller onboard_company holds the user lock.
+create or replace function seed_company_coa(p_company_id uuid)
+returns integer
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  inserted integer;
+  total integer;
+begin
+  if p_company_id is null then
+    raise exception 'company_id is required' using errcode = '22023';
+  end if;
+  if not exists (select 1 from companies where id = p_company_id) then
+    raise exception 'company not found' using errcode = '22023';
+  end if;
+
+  loop
+    insert into accounts (
+      company_id, account_number, account_name, category, sub_category,
+      normal_balance, parent_account_id, is_system_account, is_active, description
+    )
+    select
+      p_company_id,
+      t.account_number,
+      t.account_name,
+      t.category,
+      t.sub_category,
+      t.normal_balance,
+      parent.id,
+      t.is_system_account,
+      t.is_active,
+      t.description
+    from coa_template t
+    left join accounts parent
+      on parent.company_id = p_company_id
+     and btrim(parent.account_number) = btrim(t.parent_account_number)
+    where not exists (
+      select 1 from accounts existing
+       where existing.company_id = p_company_id
+         and btrim(existing.account_number) = btrim(t.account_number)
+    )
+      and (
+        t.parent_account_number is null
+        or parent.id is not null
+      )
+    on conflict (company_id, account_number) do nothing;
+
+    get diagnostics inserted = row_count;
+    exit when inserted = 0;
+  end loop;
+
+  select count(*) into total from accounts where company_id = p_company_id;
+  if total <> (select count(*) from coa_template) then
+    raise exception 'Chart of accounts did not match the template'
+      using errcode = '22023';
+  end if;
+  if not exists (
+    select 1 from accounts
+     where company_id = p_company_id and btrim(account_number) = '1020'
+  ) then
+    raise exception 'Account 1020 is missing from the chart template'
+      using errcode = '22023';
+  end if;
+  return total;
+end;
+$$;
+
+revoke all on function seed_company_coa(uuid) from public;
+revoke all on function seed_company_coa(uuid) from authenticated;
+revoke all on function seed_company_coa(uuid) from anon;
+grant execute on function seed_company_coa(uuid) to service_role;
+
+-- One transaction: company, settings, owner membership, chart, bank 1020,
+-- periods for the fiscal year that contains today in Asia/Dubai, customers.
+-- Periods use the first day through the last day of each month or quarter,
+-- the same inclusive dates existing period rows use. fiscal_year is the
+-- calendar year of period_start.
+-- Idempotent: an existing company_members row returns that company.
+-- Lock namespace hashtext('onboard_company'), then hashtext(user id).
+create or replace function onboard_company(p_user_id uuid, p_payload jsonb)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  existing_id uuid;
+  existing_role text;
+  new_id uuid;
+  v_legal text;
+  v_trn text;
+  v_currency char(3);
+  v_free_zone boolean;
+  v_fy_month int;
+  v_journal numeric(18,2);
+  v_period text;
+  v_reopen boolean;
+  v_write_off numeric(18,2);
+  v_weekend smallint[];
+  v_vat text;
+  v_emirate text;
+  v_today date;
+  v_year int;
+  v_cursor date;
+  v_end date;
+  v_step int;
+  v_count int;
+  i int;
+  v_customer jsonb;
+  v_name text;
+  v_ctrn text;
+begin
+  if p_user_id is null then
+    raise exception 'user is required' using errcode = '22023';
+  end if;
+
+  perform pg_advisory_xact_lock(hashtext('onboard_company'), hashtext(p_user_id::text));
+
+  select cm.company_id, cm.role::text
+    into existing_id, existing_role
+    from company_members cm
+   where cm.user_id = p_user_id
+   order by cm.created_at
+   limit 1;
+
+  if existing_id is not null then
+    return jsonb_build_object('company_id', existing_id, 'role', existing_role);
+  end if;
+
+  if (select count(*) from coa_template) = 0 then
+    raise exception 'Chart template is empty' using errcode = '22023';
+  end if;
+
+  v_legal := btrim(coalesce(p_payload->>'legal_name', ''));
+  v_trn := nullif(btrim(coalesce(p_payload->>'trn', '')), '');
+  v_currency := upper(btrim(coalesce(p_payload->>'base_currency', 'AED')));
+  v_free_zone := coalesce((p_payload->>'is_free_zone_entity')::boolean, false);
+  v_fy_month := coalesce((p_payload->>'fiscal_year_start_month')::int, 1);
+  if p_payload->>'journal_approval_threshold' is null
+     or btrim(p_payload->>'journal_approval_threshold') = '' then
+    v_journal := null;
+  else
+    v_journal := (p_payload->>'journal_approval_threshold')::numeric(18,2);
+  end if;
+  v_period := coalesce(p_payload->>'default_period_length', 'monthly');
+  v_reopen := coalesce((p_payload->>'allow_period_reopen')::boolean, true);
+  v_write_off := coalesce((p_payload->>'write_off_approval_threshold')::numeric(18,2), 5000);
+  v_vat := coalesce(p_payload->>'vat_return_frequency', 'quarterly');
+  v_emirate := nullif(btrim(coalesce(p_payload->>'default_emirate', '')), '');
+
+  if v_legal = ''
+     or v_currency !~ '^[A-Z]{3}$'
+     or v_fy_month < 1 or v_fy_month > 12
+     or v_period not in ('monthly', 'quarterly')
+     or v_vat not in ('monthly', 'quarterly')
+     or (v_trn is not null and v_trn !~ '^\d{15}$')
+     or (v_journal is not null and v_journal < 0)
+     or v_write_off < 0
+     or (v_emirate is not null and v_emirate not in (
+       'abu_dhabi', 'dubai', 'sharjah', 'ajman',
+       'umm_al_quwain', 'ras_al_khaimah', 'fujairah'
+     )) then
+    raise exception 'Invalid workspace details' using errcode = '22023';
+  end if;
+
+  select coalesce(array_agg(value::smallint), '{6,7}'::smallint[])
+    into v_weekend
+    from jsonb_array_elements_text(coalesce(p_payload->'weekend_days', '[6,7]'::jsonb));
+
+  if exists (select 1 from unnest(v_weekend) day where day < 1 or day > 7) then
+    raise exception 'Invalid workspace details' using errcode = '22023';
+  end if;
+
+  insert into companies (
+    legal_name, trn, base_currency, is_free_zone_entity, fiscal_year_start_month
+  ) values (
+    v_legal, v_trn, v_currency, v_free_zone, v_fy_month
+  ) returning id into new_id;
+
+  insert into company_settings (
+    company_id,
+    journal_approval_threshold,
+    default_period_length,
+    allow_period_reopen,
+    write_off_approval_threshold,
+    weekend_days,
+    vat_return_frequency,
+    default_emirate
+  ) values (
+    new_id,
+    v_journal,
+    v_period,
+    v_reopen,
+    v_write_off,
+    v_weekend,
+    v_vat,
+    v_emirate::uae_emirate
+  );
+
+  insert into company_members (company_id, user_id, role)
+  values (new_id, p_user_id, 'owner');
+
+  perform seed_company_coa(new_id);
+
+  update company_settings cs
+     set default_bank_account_id = a.id
+    from accounts a
+   where cs.company_id = new_id
+     and a.company_id = new_id
+     and btrim(a.account_number) = '1020';
+
+  -- Current fiscal year in Asia/Dubai, starting at fiscal_year_start_month.
+  v_today := (timezone('Asia/Dubai', now()))::date;
+  v_year := extract(year from v_today)::int;
+  if extract(month from v_today)::int < v_fy_month then
+    v_year := v_year - 1;
+  end if;
+  v_cursor := make_date(v_year, v_fy_month, 1);
+  if v_period = 'quarterly' then
+    v_step := 3;
+    v_count := 4;
+  else
+    v_step := 1;
+    v_count := 12;
+  end if;
+
+  for i in 1..v_count loop
+    v_end := (v_cursor + make_interval(months => v_step) - interval '1 day')::date;
+    insert into accounting_periods (
+      company_id, period_start, period_end, fiscal_year, status
+    ) values (
+      new_id, v_cursor, v_end, extract(year from v_cursor)::int, 'open'
+    );
+    v_cursor := v_end + 1;
+  end loop;
+
+  for v_customer in
+    select value from jsonb_array_elements(coalesce(p_payload->'customers', '[]'::jsonb))
+  loop
+    v_name := btrim(coalesce(v_customer->>'customer_name', ''));
+    v_ctrn := nullif(btrim(coalesce(v_customer->>'trn', '')), '');
+    if v_name = '' or (v_ctrn is not null and v_ctrn !~ '^\d{15}$') then
+      raise exception 'Invalid workspace details' using errcode = '22023';
+    end if;
+    if v_customer->>'credit_limit' is not null
+       and btrim(v_customer->>'credit_limit') <> ''
+       and (v_customer->>'credit_limit')::numeric < 0 then
+      raise exception 'Invalid workspace details' using errcode = '22023';
+    end if;
+    insert into customers (
+      company_id, customer_name, trn, email, phone, billing_address, credit_limit, is_active
+    ) values (
+      new_id,
+      v_name,
+      v_ctrn,
+      nullif(btrim(coalesce(v_customer->>'email', '')), ''),
+      nullif(btrim(coalesce(v_customer->>'phone', '')), ''),
+      nullif(btrim(coalesce(v_customer->>'billing_address', '')), ''),
+      case
+        when v_customer->>'credit_limit' is null or btrim(v_customer->>'credit_limit') = '' then null
+        else (v_customer->>'credit_limit')::numeric(18,2)
+      end,
+      true
+    );
+  end loop;
+
+  return jsonb_build_object('company_id', new_id, 'role', 'owner');
+end;
+$$;
+
+revoke all on function onboard_company(uuid, jsonb) from public;
+revoke all on function onboard_company(uuid, jsonb) from authenticated;
+revoke all on function onboard_company(uuid, jsonb) from anon;
+grant execute on function onboard_company(uuid, jsonb) to service_role;
+
+-- ============================================================================
 -- 12. DATA API GRANTS (service_role / sb_secret_*)
 -- ============================================================================
 -- [feature-spec.md decision #23] Backend-mediated access only (§5.1).

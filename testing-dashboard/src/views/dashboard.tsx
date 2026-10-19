@@ -24,19 +24,20 @@ function Metric({ icon: Icon, label, value, children, tone = 'text-brand-600' }:
 export function Dashboard({ store, go, open }: ViewProps) {
   const b = store.balances();
   const cash = cashTotal(b);
-  const trend = [...CASH_TREND.map((x) => x.v), cash];
-  const grossBurn = r2(CASH_OUTFLOWS.reduce((s, x) => s + x.out, 0) / CASH_OUTFLOWS.length);
-  const netFlow = r2((CASH_TREND.at(-1)!.v - CASH_TREND.at(-4)!.v) / 3);
-  const runway = cash / grossBurn;
+  const sample = store.demo;
+  const trend = [...(sample ? CASH_TREND.map((x) => x.v) : []), cash];
+  const grossBurn = sample ? r2(CASH_OUTFLOWS.reduce((s, x) => s + x.out, 0) / CASH_OUTFLOWS.length) : 0;
+  const netFlow = sample ? r2((CASH_TREND.at(-1)!.v - CASH_TREND.at(-4)!.v) / 3) : 0;
+  const runway = grossBurn > 0 ? cash / grossBurn : 0;
   const pl = plSummary(b);
-  const ebitdaMargin = (pl.ebitda / pl.revenue) * 100;
-  const netMargin = (pl.net / pl.revenue) * 100;
+  const ebitdaMargin = pl.revenue ? (pl.ebitda / pl.revenue) * 100 : 0;
+  const netMargin = pl.revenue ? (pl.net / pl.revenue) * 100 : 0;
 
   const overdue30 = store.openAR().filter((i) => daysBetween(i.dueDate, TODAY) > 30);
   const weekEnd = addDays(TODAY, 6);
   const billsDue = store.openAP().filter((x) => x.dueDate >= TODAY && x.dueDate <= weekEnd);
   const actions = [
-    { n: store.feed.length, text: 'un-reconciled bank feed items', sub: 'Operations ••• 4471', icon: Landmark, cta: 'Reconcile', view: 'bank' as const },
+    { n: store.feed.length, text: 'un-reconciled bank feed items', sub: sample ? 'Operations ••• 4471' : 'Bank feed not connected', icon: Landmark, cta: 'Reconcile', view: 'bank' as const },
     { n: overdue30.length, text: 'invoices past 30 days overdue', sub: `AED ${aed(overdue30.reduce((s, i) => s + invoiceBalance(i), 0))} at risk`, icon: Receipt, cta: 'Chase', view: 'invoices' as const },
     { n: billsDue.length, text: 'vendor bills due this week', sub: `AED ${aed(billsDue.reduce((s, x) => s + billBalance(x), 0))} by ${fmtDate(weekEnd)}`, icon: ShoppingCart, cta: 'Pay', view: 'bills' as const },
   ];
@@ -65,15 +66,15 @@ export function Dashboard({ store, go, open }: ViewProps) {
   return (
     <>
       <PageHeader
-        title="Good afternoon, Salah"
-        subtitle={`Here is where Horizon Facilities LLC stands today, ${fmtDate(TODAY)}.`}
+        title={sample ? 'Good afternoon, Salah' : 'Workspace'}
+        subtitle={sample ? `Here is where Horizon Facilities LLC stands today, ${fmtDate(TODAY)}.` : `No invoices, bills, or bank activity in this workspace yet. ${fmtDate(TODAY)}.`}
         actions={<><Button onClick={() => go('reports')}>Open reports</Button><Button variant="primary" onClick={() => open({ kind: 'invoice' })}>New invoice</Button></>}
       />
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <Metric icon={Wallet} label="Total liquidity" value={compact(cash)}>
           <div className="flex items-end justify-between gap-3">
-            <p className="text-xs text-slate-500">5 cash & bank accounts<br /><span className="font-medium text-emerald-600">+{aed(r2(cash - CASH_TREND[0].v))}</span> since April</p>
+            <p className="text-xs text-slate-500">{sample ? <>5 cash & bank accounts<br /><span className="font-medium text-emerald-600">+{aed(r2(cash - CASH_TREND[0].v))}</span> since April</> : 'Cash accounts have no posted activity yet.'}</p>
             <Sparkline values={trend} className="h-10 w-28 text-emerald-500" />
           </div>
         </Metric>
@@ -93,7 +94,7 @@ export function Dashboard({ store, go, open }: ViewProps) {
         <Metric icon={ArrowUpRight} label="Receivables vs payables" value={compact(b['1100'] ?? 0)} tone="text-violet-600">
           <p className="text-xs text-slate-500">Owed to you · <span className="font-medium text-slate-700">AED {compact(-(b['2000'] ?? 0))}</span> you owe</p>
           <div className="mt-2 flex h-2 overflow-hidden rounded-full bg-slate-100">
-            <div className="bg-violet-500" style={{ width: `${((b['1100'] ?? 0) / ((b['1100'] ?? 0) - (b['2000'] ?? 0))) * 100}%` }} />
+            <div className="bg-violet-500" style={{ width: `${(() => { const owed = (b['1100'] ?? 0) - (b['2000'] ?? 0); return owed ? ((b['1100'] ?? 0) / owed) * 100 : 0; })()}%` }} />
             <div className="flex-1 bg-amber-400" />
           </div>
         </Metric>
