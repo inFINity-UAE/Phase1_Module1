@@ -96,7 +96,7 @@ close Q1, Q3–Q6, Q8, or Q9.
 
 ## 1. Bank Accounts & Manual Statement Import (A, partial)
 
-**Status: Queued.** Spec: `feature-spec-1_2_A.md` Part I (A1) — not yet written.
+**Status: Queued.** Spec: `feature-spec-1_2_A.md` Part I (A1) — 🟡 draft written 2026-10-20 (not signed off).
 
 **Scope for this pass:**
 
@@ -143,7 +143,7 @@ seed. Q2 (one COA account per bank account, and whether A1 writes
 
 ## 2. Bank Reconciliation Engine — deterministic core (B, partial)
 
-**Status: Queued.** Spec: `feature-spec-1_2_B.md` Part I (B1) — not yet written.
+**Status: Queued.** Spec: `feature-spec-1_2_B.md` Part I (B1) — 🟡 draft written 2026-10-20 (not signed off).
 
 **Scope for this pass:**
 
@@ -201,7 +201,7 @@ payments = cheques/transfers side).
 
 ## 3. Lean Open Banking Live Feed (A, remainder)
 
-**Status: Queued.** Spec: `feature-spec-1_2_A.md` Part II (A2) — not yet written.
+**Status: Queued.** Spec: `feature-spec-1_2_A.md` Part II (A2) — 🟡 draft written 2026-10-20 (not signed off).
 
 **Scope for this pass:**
 
@@ -249,7 +249,7 @@ in a working reconciliation flow).
 
 ## 4. AI Matching Layer (B, remainder)
 
-**Status: Queued.** Spec: `feature-spec-1_2_B.md` Part II (B2) — not yet written.
+**Status: Queued.** Spec: `feature-spec-1_2_B.md` Part II (B2) — 🟡 draft written 2026-10-20 (not signed off).
 
 **Scope for this pass:**
 
@@ -286,7 +286,7 @@ model; it never bypasses it.
 
 ## 5. Historical Import — bank history, opening balances, AI categorisation (C, partial)
 
-**Status: Queued.** Spec: `feature-spec-1_2_C.md` Part I (C1) — not yet written.
+**Status: Queued.** Spec: `feature-spec-1_2_C.md` Part I (C1) — 🟡 draft written 2026-10-20 (not signed off).
 
 **Scope for this pass:**
 
@@ -333,7 +333,7 @@ journal), Module 4 for shared AI infrastructure (not a hard dependency).
 
 ## 6. Migration Wizards (C, remainder)
 
-**Status: Queued.** Spec: `feature-spec-1_2_C.md` Part II (C2) — not yet written.
+**Status: Queued.** Spec: `feature-spec-1_2_C.md` Part II (C2) — 🟡 draft written 2026-10-20 (not signed off).
 
 **Scope for this pass:**
 
@@ -374,7 +374,7 @@ pipeline, review queue, closed-period rules).
 
 ## 7. Petty Cash Management (D)
 
-**Status: Queued.** Spec: `feature-spec-1_2_D.md` — not yet written.
+**Status: Queued.** Spec: `feature-spec-1_2_D.md` — 🟡 draft written 2026-10-20 (not signed off).
 
 **Scope for this pass:**
 
