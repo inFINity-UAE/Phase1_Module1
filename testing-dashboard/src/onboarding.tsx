@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
-import { Lock } from 'lucide-react';
+import { Lock, Upload } from 'lucide-react';
 import { ACCOUNTS } from './data';
 import { Badge, Button, Card, CardHeader, cx, inputCls } from './ui';
 import { Link } from './router';
@@ -9,7 +9,8 @@ import { getSupabase } from './supabase';
 import { loadDraft, saveDraft, type LiveSession } from './session';
 
 const UAE_PHONE = /^\+971\d{8,9}$/;
-const E164 = /^\+[1-9]\d{7,14}$/;
+const DOC_EXT = ['pdf', 'png', 'jpg', 'jpeg'];
+const DOC_MAX = 10 * 1024 * 1024;
 
 const EMIRATES = [
   ['abu_dhabi', 'Abu Dhabi'],
@@ -33,8 +34,6 @@ const COA = Object.entries(ACCOUNTS)
   .map(([code, name]) => ({ code, name, category: categoryOf(code), system: code === '3100' }))
   .sort((a, b) => a.code.localeCompare(b.code));
 
-const INCOME_ACCOUNTS = COA.filter((a) => a.category === 'income');
-
 const BINDINGS = [
   ['Money customers owe you', '1100', 'Accounts Receivable - Trade', 'asset'],
   ['Money you owe suppliers', '2000', 'Accounts Payable - Trade', 'liability'],
@@ -44,18 +43,14 @@ const BINDINGS = [
   ['VAT you collect', '2200', 'VAT Payable (Output VAT)', 'liability'],
 ] as const;
 
-type CustomerDraft = {
-  customer_name: string;
-  trn: string;
-  email: string;
-  phone: string;
-  billing_address: string;
-  credit_limit: string;
+type Docs = {
+  tradeLicense: string;
+  vatCertificate: string;
+  ctCertificate: string;
+  ownerId: string;
 };
 
-const emptyCustomer = (): CustomerDraft => ({
-  customer_name: '', email: '', phone: '', trn: '', billing_address: '', credit_limit: '',
-});
+const emptyDocs = (): Docs => ({ tradeLicense: '', vatCertificate: '', ctCertificate: '', ownerId: '' });
 
 type Draft = {
   fullName: string;
@@ -74,10 +69,7 @@ type Draft = {
   weekend_days: number[];
   vat_return_frequency: 'monthly' | 'quarterly';
   default_emirate: '' | UaeEmirate;
-  customers: CustomerDraft[];
-  item_description: string;
-  item_is_service: boolean;
-  income_account_id: string;
+  docs: Docs;
 };
 
 const initialDraft = (): Draft => ({
@@ -85,8 +77,7 @@ const initialDraft = (): Draft => ({
   legal_name: '', trn: '', base_currency: 'AED', is_free_zone_entity: false, fiscal_year_start_month: 1,
   journal_approval_threshold: '', default_period_length: 'monthly', allow_period_reopen: true,
   write_off_approval_threshold: '5000.00', weekend_days: [6, 7], vat_return_frequency: 'quarterly', default_emirate: '',
-  customers: [emptyCustomer()],
-  item_description: '', item_is_service: true, income_account_id: '4000',
+  docs: emptyDocs(),
 });
 
 function trnError(value: string): string | null {
@@ -104,20 +95,6 @@ function moneyOrNull(value: string): { ok: true; value: number | null } | { ok: 
 
 function buildPayload(d: Draft) {
   const threshold = moneyOrNull(d.journal_approval_threshold);
-  const customers = d.customers
-    .filter((c) => c.customer_name.trim() || c.trn.trim() || c.email.trim() || c.phone.trim() || c.billing_address.trim() || c.credit_limit.trim())
-    .map((c) => {
-      const limit = moneyOrNull(c.credit_limit);
-      return {
-        customer_name: c.customer_name.trim(),
-        trn: c.trn.trim() || null,
-        email: c.email.trim() || null,
-        phone: c.phone.trim() || null,
-        billing_address: c.billing_address.trim() || null,
-        credit_limit: limit.ok ? limit.value : null,
-        is_active: true,
-      };
-    });
   return {
     auth_users: {
       email: d.email.trim(),
@@ -148,10 +125,6 @@ function buildPayload(d: Draft) {
       default_emirate: d.default_emirate || null,
     },
     accounts: 'clone of the finalized chart for this company_id',
-    customers,
-    invoice_line_default: d.item_description.trim()
-      ? { description: d.item_description.trim(), is_service: d.item_is_service, income_account_id: d.income_account_id }
-      : null,
     session: "set app.current_company_id to the new companies.id before tenant queries",
   };
 }
@@ -170,22 +143,6 @@ function problems(d: Draft): string[] {
   const writeOff = moneyOrNull(d.write_off_approval_threshold);
   if (!writeOff.ok || writeOff.value == null) out.push('Write-off approval threshold is required.');
   if (d.vat_return_frequency !== 'monthly' && d.vat_return_frequency !== 'quarterly') out.push('VAT return frequency must be monthly or quarterly.');
-  const seen = new Set<string>();
-  d.customers.forEach((c, i) => {
-    const used = c.customer_name.trim() || c.trn.trim() || c.email.trim() || c.phone.trim() || c.billing_address.trim() || c.credit_limit.trim();
-    if (!used) return;
-    if (!c.customer_name.trim()) out.push(`Customer ${i + 1} needs a name.`);
-    const ct = trnError(c.trn);
-    if (ct) out.push(`Customer ${i + 1}: ${ct}`);
-    const key = c.trn.trim();
-    if (key && seen.has(key)) out.push(`Customer ${i + 1}: TRN is already used in this company.`);
-    if (key) seen.add(key);
-    if (c.phone.trim() && !E164.test(c.phone.trim())) out.push(`Customer ${i + 1} phone must start with + and the country code.`);
-    if (!moneyOrNull(c.credit_limit).ok) out.push(`Customer ${i + 1}: credit limit must be blank or a non-negative amount.`);
-  });
-  if (d.item_description.trim() && !INCOME_ACCOUNTS.some((a) => a.code === d.income_account_id)) {
-    out.push('Choose an income account for the catalog line.');
-  }
   return out;
 }
 
@@ -195,7 +152,6 @@ const STEPS: { label: string; purpose: string }[] = [
   { label: 'Settings', purpose: 'Tax and periods' },
   { label: 'Chart', purpose: 'Accounts we load' },
   { label: 'Accounts', purpose: 'Where amounts go' },
-  { label: 'Customers', purpose: 'People you invoice' },
   { label: 'Review', purpose: 'Check and open' },
 ];
 
@@ -203,6 +159,40 @@ const focus = 'focus-visible:outline-none focus-visible:ring-2 focus-visible:rin
 
 function Err({ children }: { children: string }) {
   return <p className="mt-1 text-xs text-rose-600">{children}</p>;
+}
+
+// ponytail: file name only, held in this browser session. Upgrade: store the copy when a documents table exists.
+function DocUpload({ id, label, hint, fileName, onPick }: { id: string; label: string; hint: string; fileName: string; onPick: (name: string) => void }) {
+  const [error, setError] = useState('');
+  return (
+    <div>
+      <label htmlFor={id} className="text-xs font-medium text-slate-600">{label}
+        <span className={cx(inputCls, 'mt-1 flex cursor-pointer items-center gap-2 focus-within:border-brand-500 focus-within:ring-2 focus-within:ring-brand-500/20')}>
+          <Upload size={14} className="shrink-0 text-slate-400" />
+          <span className={cx('min-w-0 flex-1 truncate', fileName ? 'text-slate-900' : 'text-slate-400')}>{fileName || 'Upload PDF, PNG or JPG'}</span>
+          <input
+            id={id}
+            type="file"
+            accept=".pdf,.png,.jpg,.jpeg,application/pdf,image/png,image/jpeg"
+            className="sr-only"
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              e.target.value = '';
+              if (!f) return;
+              const ext = f.name.split('.').pop()?.toLowerCase() ?? '';
+              if (!DOC_EXT.includes(ext)) { setError('Only PDF, PNG or JPG files are accepted.'); return; }
+              if (f.size > DOC_MAX) { setError('File is larger than 10 MB.'); return; }
+              setError('');
+              onPick(f.name);
+            }}
+          />
+        </span>
+      </label>
+      <span className="mt-1 block text-xs font-normal text-slate-500">{hint}</span>
+      {error ? <Err>{error}</Err> : null}
+      {fileName ? <button type="button" className={cx('mt-1 text-xs text-slate-500 hover:text-slate-800', focus)} onClick={() => { setError(''); onPick(''); }}>Remove</button> : null}
+    </div>
+  );
 }
 
 function Toggle({ on, label, onChange }: { on: boolean; label: string; onChange: (v: boolean) => void }) {
@@ -220,7 +210,7 @@ export function Onboarding({ onReady }: { onReady: (s: LiveSession) => void }) {
   const [step, setStep] = useState(0);
   const [draft, setDraft] = useState<Draft>(() => {
     const saved = loadDraft<Partial<Draft>>();
-    return { ...initialDraft(), ...(saved ?? {}), password: '' };
+    return { ...initialDraft(), ...(saved ?? {}), docs: { ...emptyDocs(), ...saved?.docs }, password: '' };
   });
   const [showErrors, setShowErrors] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -231,7 +221,7 @@ export function Onboarding({ onReady }: { onReady: (s: LiveSession) => void }) {
   const set = <K extends keyof Draft>(key: K, value: Draft[K]) => setDraft((d) => ({ ...d, [key]: value }));
 
   useEffect(() => {
-    const { password: _password, ...rest } = draft;
+    const { password: _password, docs: _docs, ...rest } = draft;
     saveDraft(rest);
   }, [draft]);
 
@@ -273,7 +263,7 @@ export function Onboarding({ onReady }: { onReady: (s: LiveSession) => void }) {
 
   async function finish() {
     const found = problems(draft);
-    if (found.length) { setShowErrors(true); setFormError(found[0]); setStep(6); return; }
+    if (found.length) { setShowErrors(true); setFormError(found[0]); setStep(5); return; }
     const journal = moneyOrNull(draft.journal_approval_threshold);
     const writeOff = moneyOrNull(draft.write_off_approval_threshold);
     setBusy(true);
@@ -294,17 +284,7 @@ export function Onboarding({ onReady }: { onReady: (s: LiveSession) => void }) {
           weekend_days: draft.weekend_days,
           vat_return_frequency: draft.vat_return_frequency,
           default_emirate: draft.default_emirate || null,
-          customers: draft.customers.filter((c) => c.customer_name.trim()).map((c) => {
-            const limit = moneyOrNull(c.credit_limit);
-            return {
-              customer_name: c.customer_name.trim(),
-              trn: c.trn.trim() || null,
-              email: c.email.trim() || null,
-              phone: c.phone.trim() || null,
-              billing_address: c.billing_address.trim() || null,
-              credit_limit: limit.ok ? limit.value : null,
-            };
-          }),
+          customers: [],
         }),
       });
       const me = await fetchMe();
@@ -355,7 +335,7 @@ export function Onboarding({ onReady }: { onReady: (s: LiveSession) => void }) {
         </ol>
 
         <div className="min-w-0 space-y-6">
-          <p className="text-sm text-slate-500">Step {step + 1} of 7</p>
+          <p className="text-sm text-slate-500">Step {step + 1} of {STEPS.length}</p>
           {awaitingEmail ? (
             <Card>
               <CardHeader title="Check your email" subtitle="Confirm the address, then log in. Setup continues at the company step." />
@@ -372,6 +352,7 @@ export function Onboarding({ onReady }: { onReady: (s: LiveSession) => void }) {
                 <label htmlFor="acct-name" className="text-xs font-medium text-slate-600">Full name
                   <input id="acct-name" className={cx(inputCls, 'mt-1')} value={draft.fullName} onChange={(e) => set('fullName', e.target.value)} autoComplete="name" placeholder="Your name" />
                 </label>
+                <DocUpload id="doc-owner-id" label="Owner passport or Emirates ID" hint="PDF, PNG or JPG, up to 10 MB." fileName={draft.docs.ownerId} onPick={(ownerId) => set('docs', { ...draft.docs, ownerId })} />
                 <label htmlFor="acct-email" className="text-xs font-medium text-slate-600">Email
                   <input id="acct-email" type="email" className={cx(inputCls, 'mt-1')} value={draft.email} onChange={(e) => set('email', e.target.value)} autoComplete="email" placeholder="you@company.ae" />
                 </label>
@@ -379,7 +360,7 @@ export function Onboarding({ onReady }: { onReady: (s: LiveSession) => void }) {
                   <input id="acct-password" type="password" className={cx(inputCls, 'mt-1')} value={draft.password} onChange={(e) => set('password', e.target.value)} autoComplete="new-password" aria-describedby="acct-password-hint" />
                   <span id="acct-password-hint" className="mt-1 block font-normal text-slate-500">At least 6 characters.</span>
                 </label>
-                <label htmlFor="acct-phone" className="text-xs font-medium text-slate-600">Phone number
+                <label htmlFor="acct-phone" className="text-xs font-medium text-slate-600 sm:col-span-2">Phone number
                   <input id="acct-phone" type="tel" className={cx(inputCls, 'mt-1')} value={draft.phone} onChange={(e) => set('phone', e.target.value)} autoComplete="tel" placeholder="+971 50 000 0000" aria-describedby="acct-phone-hint" />
                   <span id="acct-phone-hint" className="mt-1 block font-normal text-slate-500">Use the UAE country code, +971.</span>
                 </label>
@@ -395,13 +376,15 @@ export function Onboarding({ onReady }: { onReady: (s: LiveSession) => void }) {
             <Card>
               <CardHeader title="Company" subtitle="The legal name on your invoices. A tax number is optional." />
               <div className="grid gap-4 p-5 sm:grid-cols-2">
-                <label htmlFor="co-name" className="text-xs font-medium text-slate-600 sm:col-span-2">Legal name
+                <label htmlFor="co-name" className="text-xs font-medium text-slate-600">Legal name
                   <input id="co-name" className={cx(inputCls, 'mt-1')} value={draft.legal_name} onChange={(e) => set('legal_name', e.target.value)} placeholder="Registered company name" />
                 </label>
+                <DocUpload id="doc-trade-license" label="Trade license" hint="The licence issued for this legal name." fileName={draft.docs.tradeLicense} onPick={(tradeLicense) => set('docs', { ...draft.docs, tradeLicense })} />
                 <label htmlFor="co-trn" className="text-xs font-medium text-slate-600">TRN
                   <input id="co-trn" inputMode="numeric" className={cx(inputCls, 'mt-1')} value={draft.trn} onChange={(e) => set('trn', e.target.value)} placeholder="15 digits, or leave blank" aria-describedby={companyTrn ? 'co-trn-err' : undefined} />
                   {companyTrn ? <span id="co-trn-err"><Err>{companyTrn}</Err></span> : null}
                 </label>
+                <DocUpload id="doc-vat" label="VAT certificate" hint="The FTA certificate for this TRN." fileName={draft.docs.vatCertificate} onPick={(vatCertificate) => set('docs', { ...draft.docs, vatCertificate })} />
                 <label htmlFor="co-ccy" className="text-xs font-medium text-slate-600">Base currency
                   <select id="co-ccy" className={cx(inputCls, 'mt-1')} value={draft.base_currency} onChange={(e) => set('base_currency', e.target.value as Draft['base_currency'])}>
                     {CURRENCIES.map((c) => <option key={c}>{c}</option>)}
@@ -415,6 +398,7 @@ export function Onboarding({ onReady }: { onReady: (s: LiveSession) => void }) {
                 <div className="flex items-end pb-1">
                   <Toggle on={draft.is_free_zone_entity} onChange={(v) => set('is_free_zone_entity', v)} label="Free zone entity" />
                 </div>
+                <DocUpload id="doc-ct" label="CT certificate" hint="The corporate tax registration certificate." fileName={draft.docs.ctCertificate} onPick={(ctCertificate) => set('docs', { ...draft.docs, ctCertificate })} />
               </div>
               <Footer>
                 <Button onClick={() => setStep(0)}>Back</Button>
@@ -508,60 +492,12 @@ export function Onboarding({ onReady }: { onReady: (s: LiveSession) => void }) {
               </ul>
               <Footer>
                 <Button onClick={() => setStep(3)}>Back</Button>
-                <Button variant="primary" onClick={() => setStep(5)}>Continue</Button>
+                <Button variant="primary" onClick={() => setStep(5)}>Review</Button>
               </Footer>
             </Card>
           ) : null}
 
           {step === 5 ? (
-            <Card>
-              <CardHeader title="Customers" subtitle="Add the people you invoice. A catalog line is optional and becomes the starting description on a new invoice." />
-              <div className="space-y-6 p-5">
-                {draft.customers.map((c, i) => (
-                  <div key={i} className="grid gap-4 rounded-lg border border-slate-100 p-4 sm:grid-cols-2">
-                    <label className="text-xs font-medium text-slate-600 sm:col-span-2">Customer name
-                      <input className={cx(inputCls, 'mt-1')} value={c.customer_name} onChange={(e) => set('customers', draft.customers.map((row, j) => j === i ? { ...row, customer_name: e.target.value } : row))} />
-                    </label>
-                    <label className="text-xs font-medium text-slate-600">TRN
-                      <input className={cx(inputCls, 'mt-1')} value={c.trn} onChange={(e) => set('customers', draft.customers.map((row, j) => j === i ? { ...row, trn: e.target.value } : row))} />
-                    </label>
-                    <label className="text-xs font-medium text-slate-600">Credit limit
-                      <input className={cx(inputCls, 'mt-1')} value={c.credit_limit} onChange={(e) => set('customers', draft.customers.map((row, j) => j === i ? { ...row, credit_limit: e.target.value } : row))} placeholder="Leave blank for no limit" />
-                    </label>
-                    <label className="text-xs font-medium text-slate-600">Email
-                      <input className={cx(inputCls, 'mt-1')} value={c.email} onChange={(e) => set('customers', draft.customers.map((row, j) => j === i ? { ...row, email: e.target.value } : row))} />
-                    </label>
-                    <label className="text-xs font-medium text-slate-600">Phone
-                      <input className={cx(inputCls, 'mt-1')} value={c.phone} onChange={(e) => set('customers', draft.customers.map((row, j) => j === i ? { ...row, phone: e.target.value } : row))} />
-                    </label>
-                    <label className="text-xs font-medium text-slate-600 sm:col-span-2">Billing address
-                      <input className={cx(inputCls, 'mt-1')} value={c.billing_address} onChange={(e) => set('customers', draft.customers.map((row, j) => j === i ? { ...row, billing_address: e.target.value } : row))} />
-                    </label>
-                  </div>
-                ))}
-                <Button onClick={() => set('customers', [...draft.customers, emptyCustomer()])}>Add another customer</Button>
-                <div className="grid gap-4 border-t border-slate-100 pt-4 sm:grid-cols-2">
-                  <label className="text-xs font-medium text-slate-600 sm:col-span-2">Catalog description
-                    <input className={cx(inputCls, 'mt-1')} value={draft.item_description} onChange={(e) => set('item_description', e.target.value)} placeholder="Optional service or goods line" />
-                  </label>
-                  <div className="flex items-end pb-1">
-                    <Toggle on={draft.item_is_service} onChange={(v) => set('item_is_service', v)} label="This line is a service" />
-                  </div>
-                  <label className="text-xs font-medium text-slate-600">Income account
-                    <select className={cx(inputCls, 'mt-1')} value={draft.income_account_id} onChange={(e) => set('income_account_id', e.target.value)}>
-                      {INCOME_ACCOUNTS.map((a) => <option key={a.code} value={a.code}>{a.code} {a.name}</option>)}
-                    </select>
-                  </label>
-                </div>
-              </div>
-              <Footer>
-                <Button onClick={() => setStep(4)}>Back</Button>
-                <Button variant="primary" onClick={() => setStep(6)}>Review</Button>
-              </Footer>
-            </Card>
-          ) : null}
-
-          {step === 6 ? (
             <Card>
               <CardHeader title="Review" subtitle="Check the details, then open your workspace. The chart of accounts is already loaded." />
               <div className="space-y-4 p-5 text-sm text-slate-700">
@@ -573,17 +509,19 @@ export function Onboarding({ onReady }: { onReady: (s: LiveSession) => void }) {
                 <dl className="grid gap-3 sm:grid-cols-2">
                   <div><dt className="text-xs text-slate-500">Name</dt><dd>{summary.auth_users.user_metadata.full_name || '—'}</dd></div>
                   <div><dt className="text-xs text-slate-500">Email</dt><dd>{summary.auth_users.email || '—'}</dd></div>
+                  <div><dt className="text-xs text-slate-500">Owner passport or Emirates ID</dt><dd>{draft.docs.ownerId || 'Not uploaded'}</dd></div>
                   <div><dt className="text-xs text-slate-500">Company</dt><dd>{summary.companies.legal_name || '—'}</dd></div>
+                  <div><dt className="text-xs text-slate-500">Trade license</dt><dd>{draft.docs.tradeLicense || 'Not uploaded'}</dd></div>
                   <div><dt className="text-xs text-slate-500">TRN</dt><dd>{summary.companies.trn || 'Not set'}</dd></div>
+                  <div><dt className="text-xs text-slate-500">VAT certificate</dt><dd>{draft.docs.vatCertificate || 'Not uploaded'}</dd></div>
+                  <div><dt className="text-xs text-slate-500">CT certificate</dt><dd>{draft.docs.ctCertificate || 'Not uploaded'}</dd></div>
                   <div><dt className="text-xs text-slate-500">Currency</dt><dd>{summary.companies.base_currency}</dd></div>
                   <div><dt className="text-xs text-slate-500">VAT period</dt><dd className="capitalize">{summary.company_settings.vat_return_frequency}</dd></div>
-                  <div><dt className="text-xs text-slate-500">Customers</dt><dd>{summary.customers.length}</dd></div>
-                  <div><dt className="text-xs text-slate-500">Catalog line</dt><dd>Not saved. There is no catalog in the books yet.</dd></div>
                 </dl>
-                <p className="text-xs text-slate-500">This demo keeps your login in this browser. Invoices, bills, and journals are not saved. A refresh clears that work.</p>
+                <p className="text-xs text-slate-500">Uploaded copies stay in this browser and are not saved with the workspace. Invoices, bills, and journals are not saved either. A refresh clears that work.</p>
               </div>
               <Footer>
-                <Button onClick={() => setStep(5)}>Back</Button>
+                <Button onClick={() => setStep(4)}>Back</Button>
                 <Button variant="success" disabled={busy} onClick={finish}>{busy ? 'Creating workspace…' : 'Create workspace'}</Button>
               </Footer>
             </Card>

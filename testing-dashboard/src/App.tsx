@@ -247,7 +247,7 @@ export function App({ session, onLogout, onSwitchCompany }: { session: Workspace
             <p className={cx('mb-4 rounded-lg px-4 py-2 text-sm', session.mode === 'demo' ? 'bg-amber-50 text-amber-900' : 'bg-slate-100 text-slate-600')}>
               {session.mode === 'demo'
                 ? 'Sample data. Horizon Facilities is a demo and is not saved to a database.'
-                : 'Demo data — not yet connected. Invoices, bills, bank, tax, and reports are empty. The chart of accounts and customers are loaded from your workspace.'}
+                : 'Demo data — not yet connected. Invoices, bills, bank, tax, and reports are empty. The chart of accounts is loaded from your workspace.'}
             </p>
             <Current store={store} open={setModal} go={go} live={live} />
           </div>

@@ -59,7 +59,7 @@ export const copy = {
   soon: ['AI document scanning', 'Six-week cash flow forecast', 'Payment reminders', 'AI weekly insights'],
   faqTitle: 'Questions',
   faq: [
-    { q: 'Is my data saved?', a: 'Creating a workspace saves your account, company, chart of accounts, and customers. Invoices, bills, the bank, and tax returns are not saved yet. Explore the sample company stays in this browser and is not written to the database.' },
+    { q: 'Is my data saved?', a: 'Creating a workspace saves your account, company, and chart of accounts. Trade license, tax certificates, and identity copies stay in this browser. Invoices, bills, the bank, and tax returns are not saved yet. Explore the sample company stays in this browser and is not written to the database.' },
     { q: 'Does it file VAT for me?', a: 'No. You can prepare the VAT 201 figures and download working papers. Filing with the FTA is not included.' },
     { q: 'Can I try it without signing up?', a: 'Yes. Explore the sample company opens Horizon Facilities with sample books. You can also create your own workspace.' },
     { q: 'Which currency and tax rates are supported?', a: 'Amounts are in AED. Standard VAT in the demo is 5%. Corporate tax is shown at 0% up to AED 375,000 and 9% after that. Setup also lets you pick USD, EUR, or GBP as a label on the company.' },
