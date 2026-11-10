@@ -92,7 +92,7 @@ export function Dashboard({ store, go, open }: ViewProps) {
           </div>
         </Metric>
         <Metric icon={ArrowUpRight} label="Receivables vs payables" value={compact(b['1100'] ?? 0)} tone="text-violet-600">
-          <p className="text-xs text-slate-500">Owed to you · <span className="font-medium text-slate-700">AED {compact(-(b['2000'] ?? 0))}</span> you owe</p>
+          <p className="text-xs text-slate-500">Owed to you · <span className="font-medium text-slate-700">AED {compact(0 - (b['2000'] ?? 0))}</span> you owe</p>
           <div className="mt-2 flex h-2 overflow-hidden rounded-full bg-slate-100">
             <div className="bg-violet-500" style={{ width: `${(() => { const owed = (b['1100'] ?? 0) - (b['2000'] ?? 0); return owed ? ((b['1100'] ?? 0) / owed) * 100 : 0; })()}%` }} />
             <div className="flex-1 bg-amber-400" />

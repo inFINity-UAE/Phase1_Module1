@@ -184,7 +184,7 @@ export function Reports({ store }: ViewProps) {
 
   return (
     <>
-      <PageHeader title="Reports" subtitle="Core financial statements and extended management reports, computed live from the ledger." />
+      <PageHeader title="Reports" subtitle={store.demo ? 'Core financial statements and extended management reports, computed live from the ledger.' : 'Calculated in this browser from the entries on this screen. Nothing is read from or saved to your workspace.'} />
 
       <div className="sticky top-0 z-20 -mx-1 mb-6 flex flex-wrap items-center gap-3 rounded-xl border border-slate-200 bg-white/95 px-4 py-3 shadow-sm backdrop-blur">
         <FileSpreadsheet size={18} className="text-slate-400" />

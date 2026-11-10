@@ -1,4 +1,4 @@
-import { BadRequestException, INestApplication, UnauthorizedException, ValidationPipe } from '@nestjs/common';
+import { BadRequestException, ConflictException, INestApplication, UnauthorizedException, ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { ThrottlerModule } from '@nestjs/throttler';
 import { SupabaseAuthGuard } from '../auth/guards/supabase-auth.guard';
@@ -30,19 +30,45 @@ function validBody(): OnboardWorkspaceDto {
 describe('OnboardingService', () => {
   const rpc = jest.fn();
   const getUserById = jest.fn();
+  const createUser = jest.fn();
   const eq = jest.fn();
   const select = jest.fn(() => ({ eq }));
   const from = jest.fn(() => ({ select }));
 
   const service = new OnboardingService({
-    client: { rpc, auth: { admin: { getUserById } }, from },
+    client: { rpc, auth: { admin: { getUserById, createUser } }, from },
   } as unknown as SupabaseService);
 
   beforeEach(() => {
     rpc.mockReset();
     getUserById.mockReset();
+    createUser.mockReset();
     eq.mockReset();
     from.mockClear();
+  });
+
+  const account = {
+    full_name: 'Amina Khan',
+    email: 'amina@example.com',
+    password: 'secret1',
+    phone: '+971501234567',
+  };
+
+  it('saves a confirmed login without a confirmation email', async () => {
+    createUser.mockResolvedValue({ data: { user: { id: USER } }, error: null });
+    await expect(service.createAccount(account)).resolves.toEqual({ id: USER });
+    expect(createUser).toHaveBeenCalledWith({
+      email: 'amina@example.com',
+      password: 'secret1',
+      email_confirm: true,
+      user_metadata: { full_name: 'Amina Khan', phone: '+971501234567' },
+    });
+  });
+
+  it('tells an existing address to log in', async () => {
+    createUser.mockResolvedValue({ data: { user: null }, error: { code: 'email_exists', message: 'already registered' } });
+    await expect(service.createAccount(account)).rejects.toBeInstanceOf(ConflictException);
+    await expect(service.createAccount(account)).rejects.toThrow('That email is already registered. Log in instead.');
   });
 
   it('sends the verified user id and not a body user id', async () => {

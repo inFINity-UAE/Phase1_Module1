@@ -169,13 +169,14 @@ export function Customers({ store, open, live }: ViewProps) {
   if (live) {
     return (
       <>
-        <PageHeader title="Customers" subtitle="People you added while setting up this workspace." />
+        <PageHeader title="Customers" subtitle="Customers saved in this workspace." />
         <Card className="overflow-x-auto">
           <table className="w-full min-w-[640px]">
             <thead className="bg-slate-50/70"><tr><th className={thCls}>Customer</th><th className={thCls}>TRN</th><th className={thCls}>Phone</th></tr></thead>
             <tbody>
               {loadError ? <tr><td className={tdCls} colSpan={3}>{loadError}</td></tr> : null}
-              {(remote ?? []).length === 0 && !loadError ? <tr><td className={tdCls} colSpan={3}>No customers yet.</td></tr> : null}
+              {remote === null && !loadError ? <tr><td className={tdCls} colSpan={3}>Loading customers…</td></tr> : null}
+              {remote?.length === 0 ? <tr><td className={tdCls} colSpan={3}>No customers yet.</td></tr> : null}
               {(remote ?? []).map((c) => (
                 <tr key={c.id} className={rowCls}>
                   <td className={tdCls}><span className="font-medium text-slate-900">{c.customer_name}</span><span className="block text-xs text-slate-500">{c.email || '—'}</span></td>

@@ -11,20 +11,7 @@ function apiBase() {
   return import.meta.env.VITE_API_URL || 'http://127.0.0.1:3000';
 }
 
-export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
-  const supabase = getSupabase();
-  if (!supabase) throw new Error('Sign-in is not configured on this desk.');
-  const { data } = await supabase.auth.getSession();
-  const token = data.session?.access_token;
-  if (!token) throw new Error('Sign in again to continue.');
-  const response = await fetch(`${apiBase()}${path}`, {
-    ...init,
-    headers: {
-      Authorization: `Bearer ${token}`,
-      'Content-Type': 'application/json',
-      ...(init?.headers ?? {}),
-    },
-  });
+async function readJson<T>(response: Response): Promise<T> {
   if (!response.ok) {
     let message = 'Something went wrong. Try again.';
     try {
@@ -37,6 +24,47 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
     throw new Error(message);
   }
   return response.json() as Promise<T>;
+}
+
+/** Signup has no session yet. */
+export async function apiFetchPublic<T>(path: string, init?: RequestInit): Promise<T> {
+  let response: Response;
+  try {
+    response = await fetch(`${apiBase()}${path}`, {
+      ...init,
+      headers: { 'Content-Type': 'application/json', ...(init?.headers ?? {}) },
+    });
+  } catch {
+    throw new Error('Could not reach the server. Check your connection and try again.');
+  }
+  return readJson(response);
+}
+
+export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
+  const supabase = getSupabase();
+  if (!supabase) throw new Error('Sign-in is not configured on this desk.');
+  const { data } = await supabase.auth.getSession();
+  const token = data.session?.access_token;
+  if (!token) throw new Error('Sign in again to continue.');
+  let response: Response;
+  try {
+    response = await fetch(`${apiBase()}${path}`, {
+      ...init,
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+        ...(init?.headers ?? {}),
+      },
+    });
+  } catch {
+    throw new Error('Could not reach the server. Check your connection and try again.');
+  }
+  if (response.status === 401) {
+    // Root's onAuthStateChange listener sees SIGNED_OUT and routes back to /login.
+    await supabase.auth.signOut();
+    throw new Error('Sign in again to continue.');
+  }
+  return readJson(response);
 }
 
 export function fetchMe() {

@@ -121,7 +121,7 @@ export function InvoiceModal({ store, invoice, onClose }: { store: Store; invoic
     <Modal
       size="xl"
       title={invoice && store.invoices.some((i) => i.id === invoice.id) ? 'Edit tax invoice' : 'New tax invoice'}
-      subtitle="Invoice number is assigned sequentially when the invoice is approved and issued."
+      subtitle={store.demo ? 'Invoice number is assigned sequentially when the invoice is approved and issued.' : 'Demo only: sample customers. This invoice stays in this browser and is not saved to your workspace.'}
       onClose={onClose}
       footer={
         <>
@@ -197,7 +197,7 @@ export function BillModal({ store, prefill, onClose }: { store: Store; prefill?:
     <Modal
       size="xl"
       title={prefill?.aiFields ? 'Verify AI-extracted bill' : 'Log supplier bill'}
-      subtitle={prefill?.aiFields ? 'Fields tagged AI were read from the uploaded document. Check each before posting.' : 'Posts Dr expense / Dr 1400 Input VAT / Cr 2000 Accounts Payable.'}
+      subtitle={!store.demo ? 'Demo only: sample suppliers. This bill stays in this browser and is not saved to your workspace.' : prefill?.aiFields ? 'Fields tagged AI were read from the uploaded document. Check each before posting.' : 'Posts Dr expense / Dr 1400 Input VAT / Cr 2000 Accounts Payable.'}
       onClose={onClose}
       footer={
         <>

@@ -96,7 +96,7 @@ const body = (legal: string, customers: OnboardWorkspaceDto['customers'] = []): 
 
     const { data: settings } = await supabase.client
       .from('company_settings')
-      .select('default_bank_account_id, default_period_length, fiscal_year_start_month')
+      .select('default_bank_account_id, default_period_length')
       .eq('company_id', created.company_id)
       .single();
     const { data: bank } = await supabase.client

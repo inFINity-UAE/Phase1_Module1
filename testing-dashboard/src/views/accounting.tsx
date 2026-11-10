@@ -46,6 +46,7 @@ export function ChartOfAccounts({ store, live }: ViewProps) {
             <thead className="border-y border-slate-100 bg-slate-50/70"><tr><th className={cx(thCls, 'w-24')}>Code</th><th className={thCls}>Account name</th><th className={thCls}>Type</th><th className={cx(thCls, 'text-right')}>Debit</th><th className={cx(thCls, 'text-right')}>Credit</th></tr></thead>
             <tbody>
               {loadError ? <tr><td className={tdCls} colSpan={5}>{loadError}</td></tr> : null}
+              {live && remote === null && !loadError ? <tr><td className={tdCls} colSpan={5}>Loading accounts…</td></tr> : null}
               {rows.map(([c, n, system]) => {
                 const v = b[c] ?? 0;
                 return (

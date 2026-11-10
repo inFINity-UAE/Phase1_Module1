@@ -94,7 +94,12 @@ export function Root() {
         if (!cancelled) setReady(true);
       }
     });
-    return () => { cancelled = true; };
+    const { data: sub } = supabase.auth.onAuthStateChange((event) => {
+      if (event !== 'SIGNED_OUT') return;
+      setSession((s) => (s?.mode === 'live' ? null : s));
+      setNeedsCompany(false);
+    });
+    return () => { cancelled = true; sub.subscription.unsubscribe(); };
   }, []);
 
   useEffect(() => {
@@ -137,6 +142,7 @@ export function Root() {
     if (!session) return null;
     return (
       <App
+        key={session.mode === 'live' ? session.companyId : 'demo'}
         session={session}
         onLogout={leave}
         onSwitchCompany={(companyId) => {

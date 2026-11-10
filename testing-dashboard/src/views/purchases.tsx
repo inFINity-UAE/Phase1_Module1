@@ -286,7 +286,7 @@ export function Vendors({ store }: ViewProps) {
   const rows = store.demo ? VENDORS : [];
   return (
     <>
-      <PageHeader title="Vendors" subtitle={store.demo ? 'Suppliers with TRN on file for input VAT recovery.' : 'No suppliers were added during setup.'} />
+      <PageHeader title="Vendors" subtitle={store.demo ? 'Suppliers with TRN on file for input VAT recovery.' : 'No suppliers in this workspace.'} />
       <Card className="overflow-x-auto">
         <table className="w-full min-w-[760px]">
           <thead className="bg-slate-50/70"><tr><th className={thCls}>Vendor</th><th className={thCls}>TRN</th><th className={thCls}>Category</th><th className={thCls}>Terms</th><th className={cx(thCls, 'text-right')}>Open bills</th><th className={cx(thCls, 'text-right')}>Balance</th></tr></thead>

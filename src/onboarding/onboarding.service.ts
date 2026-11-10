@@ -1,9 +1,11 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   Logger,
 } from '@nestjs/common';
 import { SupabaseService } from '../database/supabase.service';
+import { CreateAccountDto } from './dto/create-account.dto';
 import { OnboardWorkspaceDto } from './dto/onboard-workspace.dto';
 
 export type Membership = {
@@ -23,6 +25,35 @@ export class OnboardingService {
   private readonly logger = new Logger(OnboardingService.name);
 
   constructor(private readonly supabase: SupabaseService) {}
+
+  /**
+   * Saves the login immediately. Email confirmation is off for now, so the
+   * address can be used to sign in without a confirmation message.
+   */
+  async createAccount(dto: CreateAccountDto): Promise<{ id: string }> {
+    const { data, error } = await this.supabase.client.auth.admin.createUser({
+      email: dto.email.trim(),
+      password: dto.password,
+      email_confirm: true,
+      user_metadata: { full_name: dto.full_name.trim(), phone: dto.phone.trim() },
+    });
+    if (error || !data.user) {
+      const code = error?.code ?? '';
+      const message = error?.message ?? '';
+      if (code === 'email_exists' || code === 'user_already_exists' || /already|registered/i.test(message)) {
+        throw new ConflictException('That email is already registered. Log in instead.');
+      }
+      if (code === 'email_address_invalid') {
+        throw new BadRequestException('That email address was not accepted. Use a different address.');
+      }
+      if (code === 'weak_password') {
+        throw new BadRequestException('Choose a stronger password.');
+      }
+      this.logger.error(`createUser failed code=${code || 'empty'}`);
+      throw new BadRequestException('Could not create the login. Check the email and password.');
+    }
+    return { id: data.user.id };
+  }
 
   /**
    * User id is the verified JWT subject. A second call returns the company

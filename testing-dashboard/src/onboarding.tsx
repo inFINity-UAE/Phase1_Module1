@@ -4,7 +4,7 @@ import { ACCOUNTS } from './data';
 import { Badge, Button, Card, CardHeader, cx, inputCls } from './ui';
 import { Link } from './router';
 import { BrandMark } from './marketing/BrandMark';
-import { apiFetch, fetchMe } from './api';
+import { apiFetch, apiFetchPublic, fetchMe } from './api';
 import { getSupabase } from './supabase';
 import { loadDraft, saveDraft, type LiveSession } from './session';
 
@@ -151,11 +151,8 @@ function buildPayload(d: Draft) {
 }
 
 function problems(d: Draft): string[] {
+  // Account fields are checked by continueAccount; the login exists before these steps.
   const out: string[] = [];
-  if (!d.fullName.trim()) out.push('Full name is required.');
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(d.email.trim())) out.push('Email is required.');
-  if (d.password.length < 6) out.push('Password must be at least 6 characters.');
-  if (!UAE_PHONE.test(d.phone.trim())) out.push('Phone must start with +971, for example +971501234567.');
   if (!d.legal_name.trim()) out.push('Legal name is required.');
   const trn = trnError(d.trn);
   if (trn) out.push(`Company ${trn}`);
@@ -245,7 +242,6 @@ export function Onboarding({ onReady }: { onReady: (s: LiveSession) => void }) {
   const [showErrors, setShowErrors] = useState(false);
   const [busy, setBusy] = useState(false);
   const [formError, setFormError] = useState('');
-  const [awaitingEmail, setAwaitingEmail] = useState(false);
   const issues = useMemo(() => problems(draft), [draft]);
   const summary = useMemo(() => buildPayload(draft), [draft]);
   const set = <K extends keyof Draft>(key: K, value: Draft[K]) => setDraft((d) => ({ ...d, [key]: value }));
@@ -274,24 +270,32 @@ export function Onboarding({ onReady }: { onReady: (s: LiveSession) => void }) {
     if (!supabase) { setFormError('Sign-up is not configured on this desk.'); return; }
     setBusy(true);
     setFormError('');
-    const { data, error } = await supabase.auth.signUp({
-      email: draft.email.trim(),
-      password: draft.password,
-      options: { data: { full_name: draft.fullName.trim(), phone: draft.phone.trim() } },
-    });
-    setBusy(false);
-    setDraft((d) => ({ ...d, password: '' }));
-    if (error) {
-      setFormError(/already|registered/i.test(error.message)
-        ? 'That email is already registered. Log in instead.'
-        : 'Could not create the login. Check the email and password.');
-      return;
+    const email = draft.email.trim();
+    const password = draft.password;
+    try {
+      await apiFetchPublic('/onboarding/account', {
+        method: 'POST',
+        body: JSON.stringify({
+          full_name: draft.fullName.trim(),
+          email,
+          password,
+          phone: draft.phone.trim(),
+        }),
+      });
+      const { error } = await supabase.auth.signInWithPassword({ email, password });
+      if (error) { setFormError('Your login was saved. Log in to continue.'); return; }
+      setDraft((d) => ({ ...d, password: '' }));
+      setStep(1);
+    } catch (err) {
+      setFormError(err instanceof Error ? err.message : 'Could not create the login. Check the email and password.');
+    } finally {
+      setBusy(false);
     }
-    if (!data.session) { setAwaitingEmail(true); return; }
-    setStep(1);
   }
 
   async function finish() {
+    const { data: auth } = await getSupabase()?.auth.getSession() ?? { data: { session: null } };
+    if (!auth.session) { setFormError('Create your login first, or log in if you already have one.'); setStep(0); return; }
     const found = problems(draft);
     if (found.length) { setShowErrors(true); setFormError(found[0]); setStep(5); return; }
     const journal = moneyOrNull(draft.journal_approval_threshold);
@@ -317,23 +321,28 @@ export function Onboarding({ onReady }: { onReady: (s: LiveSession) => void }) {
           customers: [],
         }),
       });
+      // The server chart comes from coa_template, which is larger than the preview list, so check codes against it.
+      const chart = await apiFetch<{ account_number: string; account_name: string }[]>(`/accounts?company_id=${created.company_id}`);
+      const onChart = new Map(chart.map((r) => [r.account_number.trim(), r.account_name]));
+      const clashes = draft.extraAccounts.filter((a) => onChart.has(a.code) && onChart.get(a.code) !== a.name);
+      if (clashes.length) {
+        setFormError(`Your workspace is created, but these codes are already on the chart: ${clashes.map((a) => `${a.code} (${onChart.get(a.code)})`).join(', ')}. Change or remove them, then select Create workspace again.`);
+        setStep(3);
+        return;
+      }
       for (const a of draft.extraAccounts) {
-        try {
-          await apiFetch('/accounts', {
-            method: 'POST',
-            body: JSON.stringify({
-              company_id: created.company_id,
-              account_number: a.code,
-              account_name: a.name,
-              category: a.category,
-              normal_balance: a.normal_balance,
-            }),
-          });
-        } catch (err) {
-          const message = err instanceof Error ? err.message : '';
-          // A retry after the company already exists hits the unique (company_id, account_number) constraint.
-          if (!/duplicate|unique|already exists/i.test(message)) throw err;
-        }
+        // Same code and name already there means an earlier attempt added it.
+        if (onChart.has(a.code)) continue;
+        await apiFetch('/accounts', {
+          method: 'POST',
+          body: JSON.stringify({
+            company_id: created.company_id,
+            account_number: a.code,
+            account_name: a.name,
+            category: a.category,
+            normal_balance: a.normal_balance,
+          }),
+        });
       }
       const me = await fetchMe();
       const membership = me.memberships.find((m) => m.company_id === created.company_id) ?? me.memberships[0];
@@ -384,16 +393,8 @@ export function Onboarding({ onReady }: { onReady: (s: LiveSession) => void }) {
 
         <div className="min-w-0 space-y-6">
           <p className="text-sm text-slate-500">Step {step + 1} of {STEPS.length}</p>
-          {awaitingEmail ? (
-            <Card>
-              <CardHeader title="Check your email" subtitle="Confirm the address, then log in. Setup continues at the company step." />
-              <div className="px-5 pb-5">
-                <Link href="/login" className={cx('text-sm text-brand-700', focus)}>Go to log in</Link>
-              </div>
-            </Card>
-          ) : null}
           {formError ? <p role="alert" className="text-sm text-rose-700">{formError}</p> : null}
-          {step === 0 && !awaitingEmail ? (
+          {step === 0 ? (
             <Card>
               <CardHeader title="Account" subtitle="Create your login. You'll be the owner of this workspace." />
               <div className="grid gap-4 p-5 sm:grid-cols-2">
