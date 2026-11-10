@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
-import { Lock, Upload } from 'lucide-react';
+import { Lock, Plus, Upload } from 'lucide-react';
 import { ACCOUNTS } from './data';
 import { Badge, Button, Card, CardHeader, cx, inputCls } from './ui';
 import { Link } from './router';
@@ -29,6 +29,25 @@ const CATEGORY = ['asset', 'liability', 'equity', 'income', 'expense'] as const;
 type Category = (typeof CATEGORY)[number];
 
 const categoryOf = (code: string): Category => CATEGORY[Number(code[0]) - 1];
+
+// [feature-spec.md §1] [schema.sql enforce_account_number_category]
+const PREFIX: Record<Category, string> = { asset: '1', liability: '2', equity: '3', income: '4', expense: '5' };
+
+type ExtraAccount = {
+  code: string;
+  name: string;
+  category: Category;
+  normal_balance: 'debit' | 'credit';
+};
+
+function accountAddError(code: string, name: string, category: Category, taken: Set<string>): string | null {
+  if (!code) return 'Code is required.';
+  if (taken.has(code)) return 'That code is already on the chart.';
+  if (!/^\d{4}$/.test(code)) return 'Code must be 4 digits.';
+  if (code[0] !== PREFIX[category]) return `${'aeiou'.includes(category[0]) ? 'An' : 'A'} ${category} code starts with ${PREFIX[category]}.`;
+  if (!name) return 'Name is required.';
+  return null;
+}
 
 const COA = Object.entries(ACCOUNTS)
   .map(([code, name]) => ({ code, name, category: categoryOf(code), system: code === '3100' }))
@@ -70,6 +89,7 @@ type Draft = {
   vat_return_frequency: 'monthly' | 'quarterly';
   default_emirate: '' | UaeEmirate;
   docs: Docs;
+  extraAccounts: ExtraAccount[];
 };
 
 const initialDraft = (): Draft => ({
@@ -78,6 +98,7 @@ const initialDraft = (): Draft => ({
   journal_approval_threshold: '', default_period_length: 'monthly', allow_period_reopen: true,
   write_off_approval_threshold: '5000.00', weekend_days: [6, 7], vat_return_frequency: 'quarterly', default_emirate: '',
   docs: emptyDocs(),
+  extraAccounts: [],
 });
 
 function trnError(value: string): string | null {
@@ -143,6 +164,12 @@ function problems(d: Draft): string[] {
   const writeOff = moneyOrNull(d.write_off_approval_threshold);
   if (!writeOff.ok || writeOff.value == null) out.push('Write-off approval threshold is required.');
   if (d.vat_return_frequency !== 'monthly' && d.vat_return_frequency !== 'quarterly') out.push('VAT return frequency must be monthly or quarterly.');
+  const taken = new Set(COA.map((a) => a.code));
+  d.extraAccounts.forEach((a) => {
+    const err = accountAddError(a.code, a.name, a.category, taken);
+    if (err) out.push(`${a.code || 'Account'}: ${err}`);
+    taken.add(a.code);
+  });
   return out;
 }
 
@@ -210,7 +237,10 @@ export function Onboarding({ onReady }: { onReady: (s: LiveSession) => void }) {
   const [step, setStep] = useState(0);
   const [draft, setDraft] = useState<Draft>(() => {
     const saved = loadDraft<Partial<Draft>>();
-    return { ...initialDraft(), ...(saved ?? {}), docs: { ...emptyDocs(), ...saved?.docs }, password: '' };
+    const extra = Array.isArray(saved?.extraAccounts)
+      ? saved.extraAccounts.filter((a): a is ExtraAccount => !!a && typeof a.code === 'string' && typeof a.name === 'string' && (CATEGORY as readonly string[]).includes(a.category) && (a.normal_balance === 'debit' || a.normal_balance === 'credit'))
+      : [];
+    return { ...initialDraft(), ...(saved ?? {}), docs: { ...emptyDocs(), ...saved?.docs }, extraAccounts: extra, password: '' };
   });
   const [showErrors, setShowErrors] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -287,6 +317,24 @@ export function Onboarding({ onReady }: { onReady: (s: LiveSession) => void }) {
           customers: [],
         }),
       });
+      for (const a of draft.extraAccounts) {
+        try {
+          await apiFetch('/accounts', {
+            method: 'POST',
+            body: JSON.stringify({
+              company_id: created.company_id,
+              account_number: a.code,
+              account_name: a.name,
+              category: a.category,
+              normal_balance: a.normal_balance,
+            }),
+          });
+        } catch (err) {
+          const message = err instanceof Error ? err.message : '';
+          // A retry after the company already exists hits the unique (company_id, account_number) constraint.
+          if (!/duplicate|unique|already exists/i.test(message)) throw err;
+        }
+      }
       const me = await fetchMe();
       const membership = me.memberships.find((m) => m.company_id === created.company_id) ?? me.memberships[0];
       onReady({
@@ -447,37 +495,7 @@ export function Onboarding({ onReady }: { onReady: (s: LiveSession) => void }) {
             </Card>
           ) : null}
 
-          {step === 3 ? (
-            <Card>
-              <CardHeader title="Chart of accounts" subtitle="These accounts are loaded for you. The first digit shows the type. Retained earnings stays locked." />
-              <div className="max-h-[480px] overflow-auto">
-                <table className="w-full">
-                  <thead className="sticky top-0 bg-white">
-                    <tr className="text-left text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-                      <th className="px-5 py-2">Code</th>
-                      <th className="px-3 py-2">Name</th>
-                      <th className="px-3 py-2">Category</th>
-                      <th className="px-5 py-2"> </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {COA.map((a) => (
-                      <tr key={a.code} className="border-t border-slate-100">
-                        <td className="num px-5 py-2 text-sm text-slate-800">{a.code}</td>
-                        <td className="px-3 py-2 text-sm text-slate-700">{a.name}</td>
-                        <td className="px-3 py-2"><Badge tone={a.category === 'asset' ? 'blue' : a.category === 'liability' ? 'amber' : a.category === 'equity' ? 'violet' : a.category === 'income' ? 'green' : 'slate'}>{a.category}</Badge></td>
-                        <td className="px-5 py-2">{a.system ? <span className="inline-flex items-center gap-1 text-xs text-slate-500"><Lock size={12} /> System</span> : null}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              <Footer>
-                <Button onClick={() => setStep(2)}>Back</Button>
-                <Button variant="primary" onClick={() => setStep(4)}>Continue</Button>
-              </Footer>
-            </Card>
-          ) : null}
+          {step === 3 ? <ChartStep draft={draft} set={set} onBack={() => setStep(2)} onNext={() => setStep(4)} /> : null}
 
           {step === 4 ? (
             <Card>
@@ -515,6 +533,7 @@ export function Onboarding({ onReady }: { onReady: (s: LiveSession) => void }) {
                   <div><dt className="text-xs text-slate-500">TRN</dt><dd>{summary.companies.trn || 'Not set'}</dd></div>
                   <div><dt className="text-xs text-slate-500">VAT certificate</dt><dd>{draft.docs.vatCertificate || 'Not uploaded'}</dd></div>
                   <div><dt className="text-xs text-slate-500">CT certificate</dt><dd>{draft.docs.ctCertificate || 'Not uploaded'}</dd></div>
+                  <div className="sm:col-span-2"><dt className="text-xs text-slate-500">Accounts you added</dt><dd>{draft.extraAccounts.length ? draft.extraAccounts.map((a) => `${a.code} ${a.name}`).join(', ') : 'None'}</dd></div>
                   <div><dt className="text-xs text-slate-500">Currency</dt><dd>{summary.companies.base_currency}</dd></div>
                   <div><dt className="text-xs text-slate-500">VAT period</dt><dd className="capitalize">{summary.company_settings.vat_return_frequency}</dd></div>
                 </dl>
@@ -534,4 +553,86 @@ export function Onboarding({ onReady }: { onReady: (s: LiveSession) => void }) {
 
 function Footer({ children }: { children: ReactNode }) {
   return <div className="flex items-center justify-between border-t border-slate-100 px-5 py-4">{children}</div>;
+}
+
+const tone = (c: Category): 'blue' | 'amber' | 'violet' | 'green' | 'slate' =>
+  c === 'asset' ? 'blue' : c === 'liability' ? 'amber' : c === 'equity' ? 'violet' : c === 'income' ? 'green' : 'slate';
+// Starting side only. [feature-spec.md §1] does not derive normal_balance from the band — contra accounts use the other side.
+const usualBalance = (c: Category): ExtraAccount['normal_balance'] => (c === 'asset' || c === 'expense' ? 'debit' : 'credit');
+
+function ChartStep({ draft, set, onBack, onNext }: { draft: Draft; set: <K extends keyof Draft>(key: K, value: Draft[K]) => void; onBack: () => void; onNext: () => void }) {
+  const [form, setForm] = useState({ code: '', name: '', category: 'expense' as Category, normal_balance: 'debit' as ExtraAccount['normal_balance'] });
+  const [error, setError] = useState('');
+  const rows = [
+    ...COA.map((a) => ({ ...a, extra: false })),
+    ...draft.extraAccounts.map((a) => ({ code: a.code, name: a.name, category: a.category, system: false, extra: true })),
+  ].sort((a, b) => a.code.localeCompare(b.code));
+
+  function add() {
+    const code = form.code.trim();
+    const name = form.name.trim();
+    const taken = new Set([...COA.map((a) => a.code), ...draft.extraAccounts.map((a) => a.code)]);
+    const found = accountAddError(code, name, form.category, taken);
+    if (found) { setError(found); return; }
+    set('extraAccounts', [...draft.extraAccounts, { code, name, category: form.category, normal_balance: form.normal_balance }]);
+    setForm((f) => ({ ...f, code: '', name: '' }));
+    setError('');
+  }
+
+  return (
+    <Card>
+      <CardHeader title="Chart of accounts" subtitle="These accounts are loaded for you. Add your own with a 4-digit code, a name, and a category. Retained earnings stays locked." />
+      <div className="grid gap-3 border-b border-slate-100 p-5 sm:grid-cols-[6rem_1fr_9rem_8rem_auto] sm:items-end">
+        <label className="text-xs font-medium text-slate-600">Code
+          <input className={cx(inputCls, 'mt-1')} inputMode="numeric" maxLength={4} required aria-invalid={/code/i.test(error) || undefined} aria-describedby={error ? 'coa-add-error' : undefined} value={form.code} onChange={(e) => setForm((f) => ({ ...f, code: e.target.value }))} placeholder="5190" />
+        </label>
+        <label className="text-xs font-medium text-slate-600">Name
+          <input className={cx(inputCls, 'mt-1')} value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} placeholder="Account name" />
+        </label>
+        <label className="text-xs font-medium text-slate-600">Category
+          <select className={cx(inputCls, 'mt-1')} value={form.category} onChange={(e) => { const category = e.target.value as Category; setForm((f) => ({ ...f, category, normal_balance: usualBalance(category) })); }}>
+            {CATEGORY.map((c) => <option key={c} value={c}>{c}</option>)}
+          </select>
+        </label>
+        <label className="text-xs font-medium text-slate-600">Normal balance
+          <select className={cx(inputCls, 'mt-1')} value={form.normal_balance} onChange={(e) => setForm((f) => ({ ...f, normal_balance: e.target.value as ExtraAccount['normal_balance'] }))}>
+            <option value="debit">debit</option>
+            <option value="credit">credit</option>
+          </select>
+        </label>
+        <Button variant="primary" onClick={add}><Plus size={16} /> Add</Button>
+      </div>
+      <p className="px-5 pt-3 text-xs text-slate-500">The first digit follows the category: 1 assets, 2 liabilities, 3 equity, 4 income, 5 expenses. Normal balance is debit or credit — change it for a contra account.</p>
+      {error ? <p id="coa-add-error" role="alert" className="px-5 pt-2 text-xs text-rose-600">{error}</p> : null}
+      <div className="max-h-[480px] overflow-auto">
+        <table className="w-full">
+          <thead className="sticky top-0 bg-white">
+            <tr className="text-left text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+              <th className="px-5 py-2">Code</th>
+              <th className="px-3 py-2">Name</th>
+              <th className="px-3 py-2">Category</th>
+              <th className="px-5 py-2"> </th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((a) => (
+              <tr key={a.code} className="border-t border-slate-100">
+                <td className="num px-5 py-2 text-sm text-slate-800">{a.code}</td>
+                <td className="px-3 py-2 text-sm text-slate-700">{a.name}</td>
+                <td className="px-3 py-2"><Badge tone={tone(a.category)}>{a.category}</Badge></td>
+                <td className="px-5 py-2 text-right">
+                  {a.system ? <span className="inline-flex items-center gap-1 text-xs text-slate-500"><Lock size={12} /> System</span> : null}
+                  {a.extra ? <button type="button" className={cx('text-xs text-slate-500 hover:text-slate-800', focus)} onClick={() => set('extraAccounts', draft.extraAccounts.filter((row) => row.code !== a.code))}>Remove</button> : null}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <Footer>
+        <Button onClick={onBack}>Back</Button>
+        <Button variant="primary" onClick={onNext}>Continue</Button>
+      </Footer>
+    </Card>
+  );
 }
