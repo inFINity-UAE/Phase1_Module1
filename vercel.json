@@ -1,6 +1,23 @@
 {
-  "installCommand": "npm ci --prefix testing-dashboard",
-  "buildCommand": "npm run build --prefix testing-dashboard",
-  "outputDirectory": "testing-dashboard/dist",
-  "rewrites": [{ "source": "/(.*)", "destination": "/index.html" }]
+  "services": {
+    "web": {
+      "root": "testing-dashboard",
+      "framework": "vite",
+      "installCommand": "npm ci",
+      "buildCommand": "npm run build",
+      "outputDirectory": "dist",
+      "rewrites": [{ "source": "/(.*)", "destination": "/index.html" }]
+    },
+    "api": {
+      "root": ".",
+      "framework": "nestjs",
+      "installCommand": "npm ci",
+      "buildCommand": "npm run build",
+      "rewrites": [{ "source": "/api/:path(.*)", "destination": "/:path" }]
+    }
+  },
+  "rewrites": [
+    { "source": "/api/(.*)", "destination": { "service": "api" } },
+    { "source": "/(.*)", "destination": { "service": "web" } }
+  ]
 }

@@ -8,7 +8,11 @@ export type MeResponse = {
 };
 
 function apiBase() {
-  return import.meta.env.VITE_API_URL || 'http://127.0.0.1:3000';
+  const configured = import.meta.env.VITE_API_URL as string | undefined;
+  if (configured) return configured.replace(/\/$/, '');
+  // The deployed site calls its own /api. Local dev sets VITE_API_URL in .env.local.
+  if (import.meta.env.DEV) return 'http://127.0.0.1:3000';
+  return '/api';
 }
 
 async function readJson<T>(response: Response): Promise<T> {
