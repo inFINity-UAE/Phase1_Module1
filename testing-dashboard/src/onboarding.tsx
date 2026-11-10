@@ -170,6 +170,7 @@ function problems(d: Draft): string[] {
   return out;
 }
 
+// Index 0 is the login on /signup. Company setup on /setup uses steps 1–5.
 const STEPS: { label: string; purpose: string }[] = [
   { label: 'Account', purpose: 'Your login' },
   { label: 'Company', purpose: 'The business' },
@@ -230,8 +231,13 @@ function Toggle({ on, label, onChange }: { on: boolean; label: string; onChange:
   );
 }
 
-export function Onboarding({ onReady }: { onReady: (s: LiveSession) => void }) {
-  const [step, setStep] = useState(0);
+export function Onboarding({ part, onAccountCreated, onReady, onLogout }: {
+  part: 'account' | 'company';
+  onAccountCreated: () => void;
+  onReady: (s: LiveSession) => void;
+  onLogout: () => void;
+}) {
+  const [step, setStep] = useState(part === 'account' ? 0 : 1);
   const [draft, setDraft] = useState<Draft>(() => {
     const saved = loadDraft<Partial<Draft>>();
     const extra = Array.isArray(saved?.extraAccounts)
@@ -247,17 +253,9 @@ export function Onboarding({ onReady }: { onReady: (s: LiveSession) => void }) {
   const set = <K extends keyof Draft>(key: K, value: Draft[K]) => setDraft((d) => ({ ...d, [key]: value }));
 
   useEffect(() => {
-    const { password: _password, docs: _docs, ...rest } = draft;
+    const { password: _password, ...rest } = draft;
     saveDraft(rest);
   }, [draft]);
-
-  useEffect(() => {
-    const supabase = getSupabase();
-    if (!supabase) return;
-    supabase.auth.getSession().then(({ data }) => {
-      if (data.session) setStep((current) => (current === 0 ? 1 : current));
-    });
-  }, []);
 
   async function continueAccount() {
     const found: string[] = [];
@@ -285,7 +283,7 @@ export function Onboarding({ onReady }: { onReady: (s: LiveSession) => void }) {
       const { error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) { setFormError('Your login was saved. Log in to continue.'); return; }
       setDraft((d) => ({ ...d, password: '' }));
-      setStep(1);
+      onAccountCreated();
     } catch (err) {
       setFormError(err instanceof Error ? err.message : 'Could not create the login. Check the email and password.');
     } finally {
@@ -295,7 +293,7 @@ export function Onboarding({ onReady }: { onReady: (s: LiveSession) => void }) {
 
   async function finish() {
     const { data: auth } = await getSupabase()?.auth.getSession() ?? { data: { session: null } };
-    if (!auth.session) { setFormError('Create your login first, or log in if you already have one.'); setStep(0); return; }
+    if (!auth.session) { setFormError('Your session ended. Log in again to continue.'); return; }
     const found = problems(draft);
     if (found.length) { setShowErrors(true); setFormError(found[0]); setStep(5); return; }
     const journal = moneyOrNull(draft.journal_approval_threshold);
@@ -368,31 +366,35 @@ export function Onboarding({ onReady }: { onReady: (s: LiveSession) => void }) {
     <div className="min-h-full bg-[#f6f8fb]">
       <header className="flex h-14 items-center gap-3 bg-brand-900 px-4 sm:px-8">
         <Link href="/" aria-label="inFINity home" className={cx('rounded-lg', focus)}><BrandMark tone="dark" /></Link>
-        <span className="hidden text-sm text-brand-200 sm:inline">Workspace setup</span>
-        <Link href="/" className={cx('ml-auto rounded-md text-sm text-brand-100', focus)}>Back to home</Link>
+        <span className="hidden text-sm text-brand-200 sm:inline">{part === 'account' ? 'Create your login' : 'Set up your company'}</span>
+        {part === 'account'
+          ? <Link href="/" className={cx('ml-auto rounded-md text-sm text-brand-100', focus)}>Back to home</Link>
+          : <button type="button" onClick={onLogout} className={cx('ml-auto rounded-md text-sm text-brand-100', focus)}>Log out</button>}
       </header>
-      <div className="mx-auto grid max-w-6xl gap-8 px-4 py-8 sm:px-6 lg:grid-cols-[220px_1fr] lg:px-8 lg:py-12">
-        <ol aria-label="Setup steps" className="flex min-w-0 gap-2 overflow-x-auto lg:flex-col lg:gap-1">
-          {STEPS.map((item, i) => (
-            <li key={item.label} className="shrink-0 lg:shrink">
-              <button
-                type="button"
-                aria-current={step === i ? 'step' : undefined}
-                onClick={() => setStep(i)}
-                className={cx('flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm', focus, step === i ? 'bg-white font-medium text-brand-800 shadow-sm' : 'text-slate-500 hover:bg-white/70')}
-              >
-                <span className={cx('flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs', step === i ? 'bg-brand-700 text-white' : 'bg-slate-200 text-slate-600')}>{i + 1}</span>
-                <span>
-                  <span className="block">{item.label}</span>
-                  <span className="hidden text-xs font-normal text-slate-500 lg:block">{item.purpose}</span>
-                </span>
-              </button>
-            </li>
-          ))}
-        </ol>
+      <div className={cx('mx-auto grid gap-8 px-4 py-8 sm:px-6 lg:px-8 lg:py-12', part === 'account' ? 'max-w-2xl' : 'max-w-6xl lg:grid-cols-[220px_1fr]')}>
+        {part === 'company' ? (
+          <ol aria-label="Setup steps" className="flex min-w-0 gap-2 overflow-x-auto lg:flex-col lg:gap-1">
+            {STEPS.slice(1).map((item, i) => (
+              <li key={item.label} className="shrink-0 lg:shrink">
+                <button
+                  type="button"
+                  aria-current={step === i + 1 ? 'step' : undefined}
+                  onClick={() => setStep(i + 1)}
+                  className={cx('flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm', focus, step === i + 1 ? 'bg-white font-medium text-brand-800 shadow-sm' : 'text-slate-500 hover:bg-white/70')}
+                >
+                  <span className={cx('flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs', step === i + 1 ? 'bg-brand-700 text-white' : 'bg-slate-200 text-slate-600')}>{i + 1}</span>
+                  <span>
+                    <span className="block">{item.label}</span>
+                    <span className="hidden text-xs font-normal text-slate-500 lg:block">{item.purpose}</span>
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ol>
+        ) : null}
 
         <div className="min-w-0 space-y-6">
-          <p className="text-sm text-slate-500">Step {step + 1} of {STEPS.length}</p>
+          {part === 'company' ? <p className="text-sm text-slate-500">Step {step} of {STEPS.length - 1}</p> : null}
           {formError ? <p role="alert" className="text-sm text-rose-700">{formError}</p> : null}
           {step === 0 ? (
             <Card>
@@ -450,7 +452,7 @@ export function Onboarding({ onReady }: { onReady: (s: LiveSession) => void }) {
                 <DocUpload id="doc-ct" label="CT certificate" hint="The corporate tax registration certificate." fileName={draft.docs.ctCertificate} onPick={(ctCertificate) => set('docs', { ...draft.docs, ctCertificate })} />
               </div>
               <Footer>
-                <Button onClick={() => setStep(0)}>Back</Button>
+                <span />
                 <Button variant="primary" onClick={() => setStep(2)}>Continue</Button>
               </Footer>
             </Card>

@@ -22,7 +22,8 @@ import {
 
 function titleFor(path: string) {
   if (path === '/login') return 'Log in — inFINity';
-  if (path === '/signup') return 'Create your workspace — inFINity';
+  if (path === '/signup') return 'Create your login — inFINity';
+  if (path === '/setup') return 'Set up your company — inFINity';
   if (path.startsWith('/app')) return 'Workspace — inFINity';
   if (path === '/privacy') return 'Privacy — inFINity';
   if (path === '/terms') return 'Terms — inFINity';
@@ -105,9 +106,10 @@ export function Root() {
   useEffect(() => {
     if (!ready) return;
     const signedIn = !!session || needsCompany;
-    if (path.startsWith('/app') && !session) navigate(needsCompany ? '/signup' : '/login', true);
-    if (path === '/login' && session) navigate('/app', true);
-    if (path === '/login' && needsCompany) navigate('/signup', true);
+    if (path.startsWith('/app') && !session) navigate(needsCompany ? '/setup' : '/login', true);
+    if ((path === '/login' || path === '/signup' || path === '/setup') && session) navigate('/app', true);
+    if ((path === '/login' || path === '/signup') && needsCompany) navigate('/setup', true);
+    if (path === '/setup' && !signedIn) navigate('/login', true);
     if (!signedIn && path.startsWith('/app')) navigate('/login', true);
   }, [path, session, needsCompany, ready]);
 
@@ -126,7 +128,8 @@ export function Root() {
   const sample = () => openSample(enterDemo);
   const leave = async () => {
     clearDemo();
-    if (session?.mode === 'live') {
+    // A signed-in user on /setup has no workspace session yet, but still has a Supabase login.
+    if (session?.mode !== 'demo') {
       await getSupabase()?.auth.signOut();
     }
     setSession(null);
@@ -163,7 +166,7 @@ export function Root() {
         onSignedIn={(me) => {
           if (me.memberships.length === 0) {
             setNeedsCompany(true);
-            navigate('/signup');
+            navigate('/setup');
             return;
           }
           enterLive(liveFrom(me.memberships, me.full_name, me.phone));
@@ -171,15 +174,18 @@ export function Root() {
       />
     );
   }
-  if (path === '/signup') {
-    if (session?.mode === 'live' || session?.mode === 'demo') {
-      return (
-        <div className="flex min-h-full items-center justify-center bg-[#f6f8fb] px-4">
-          <button type="button" onClick={() => navigate('/app')} className="h-11 rounded-md bg-brand-700 px-5 text-sm font-medium text-white">{copy.openWorkspace}</button>
-        </div>
-      );
-    }
-    return <Onboarding onReady={enterLive} />;
+  if (path === '/signup' || path === '/setup') {
+    const part = path === '/signup' ? 'account' : 'company';
+    if (session || (part === 'account' && needsCompany) || (part === 'company' && !needsCompany)) return null;
+    return (
+      <Onboarding
+        key={part}
+        part={part}
+        onAccountCreated={() => { setNeedsCompany(true); navigate('/setup'); }}
+        onReady={enterLive}
+        onLogout={leave}
+      />
+    );
   }
   if (path === '/privacy') return <PlaceholderPage title={copy.legal.privacyTitle} authed={!!session} />;
   if (path === '/terms') return <PlaceholderPage title={copy.legal.termsTitle} authed={!!session} />;
